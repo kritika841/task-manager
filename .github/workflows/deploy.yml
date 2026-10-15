@@ -1,0 +1,66 @@
+name: Deploy Task Manager
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-task-manager
+  cancel-in-progress: true
+
+env:
+  APP_DIR: ${{ secrets.VPS_APP_DIR || '/var/www/task-manager' }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -p "${{ secrets.VPS_PORT || 22 }}" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Sync build to VPS
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy -p ${{ secrets.VPS_PORT || 22 }}"
+          TARGET="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
+          $SSH $TARGET "mkdir -p $APP_DIR"
+          # data/ , public/uploads and .env* live on the server and are never overwritten
+          rsync -az --delete -e "$SSH" \
+            --exclude 'data/' --exclude 'public/uploads/' \
+            --exclude '.env*' --exclude 'node_modules/' \
+            .next public package.json package-lock.json next.config.ts ecosystem.config.cjs \
+            $TARGET:$APP_DIR/
+
+      - name: Install deps and (re)start with PM2
+        run: |
+          ssh -i ~/.ssh/id_deploy -p ${{ secrets.VPS_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "APP_DIR=$APP_DIR bash -se" <<'REMOTE'
+          set -e
+          cd "${APP_DIR:-/var/www/task-manager}"
+          mkdir -p data public/uploads
+          npm ci --omit=dev
+          pm2 startOrReload ecosystem.config.cjs --update-env
+          pm2 save
+          sleep 3
+          curl -fsS -o /dev/null http://127.0.0.1:4000 && echo "App is up on :4000"
+          REMOTE
