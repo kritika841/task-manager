@@ -712,50 +712,7 @@ export function TaskBoard() {
                   onDrop={(e) => handleDrop(e, column.id)}
                   className="space-y-2.5 min-h-[160px] flex-1 flex flex-col"
                 >
-                  {(() => {
-                    const today = dateInTargetTimeZone();
-                    const isDoneCol = column.id === "completed";
-                    const activeTasks = isDoneCol
-                      ? columnTasks.filter((t) => t.dueDate >= today)
-                      : columnTasks;
-                    const pastTasks = isDoneCol
-                      ? columnTasks.filter((t) => t.dueDate < today)
-                      : [];
-                    const isPastOpen = Boolean(showPastCompleted[column.id]);
-
-                    return (
-                      <>
-                        {activeTasks.map((task) => renderCard(task))}
-
-                        {/* Past Completed Collapsible */}
-                        {isDoneCol && pastTasks.length > 0 && (
-                          <div className="pt-1">
-                            <button
-                              type="button"
-                              onClick={() => togglePast(column.id)}
-                              className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg border border-border/70 bg-muted/20 hover:bg-muted/40 text-[11px] text-muted-foreground transition cursor-pointer select-none"
-                            >
-                              <span className="flex items-center gap-1.5 font-medium">
-                                <RotateCcw className="size-3 text-muted-foreground/70" />
-                                <span>Past Completed ({pastTasks.length})</span>
-                              </span>
-                              <ChevronDown
-                                className={cn(
-                                  "size-3 transition-transform",
-                                  isPastOpen && "rotate-180"
-                                )}
-                              />
-                            </button>
-                            {isPastOpen && (
-                              <div className="space-y-2.5 pt-2">
-                                {pastTasks.map((task) => renderCard(task))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </>
-                    );
-                  })()}
+                  {columnTasks.map((task) => renderCard(task))}
 
                   {/* Notion + New task button */}
                   <button
@@ -932,49 +889,7 @@ export function TaskBoard() {
                             onDrop={(e) => handleDrop(e, column.id, member.id)}
                             className="space-y-2 flex-1 min-h-[50px] flex flex-col"
                           >
-                            {(() => {
-                              const today = dateInTargetTimeZone();
-                              const isDoneCol = column.id === "completed";
-                              const activeTasks = isDoneCol
-                                ? swimlaneTasks.filter((t) => t.dueDate >= today)
-                                : swimlaneTasks;
-                              const pastTasks = isDoneCol
-                                ? swimlaneTasks.filter((t) => t.dueDate < today)
-                                : [];
-                              const isPastOpen = Boolean(showPastCompleted[key]);
-
-                              return (
-                                <>
-                                  {activeTasks.map((task) => renderCard(task))}
-
-                                  {isDoneCol && pastTasks.length > 0 && (
-                                    <div className="pt-1">
-                                      <button
-                                        type="button"
-                                        onClick={() => togglePast(key)}
-                                        className="w-full flex items-center justify-between px-2 py-1 rounded border border-border/60 bg-muted/20 hover:bg-muted/40 text-[10px] text-muted-foreground transition cursor-pointer select-none"
-                                      >
-                                        <span className="flex items-center gap-1 font-medium">
-                                          <RotateCcw className="size-2.5 text-muted-foreground/70" />
-                                          <span>Past ({pastTasks.length})</span>
-                                        </span>
-                                        <ChevronDown
-                                          className={cn(
-                                            "size-2.5 transition-transform",
-                                            isPastOpen && "rotate-180"
-                                          )}
-                                        />
-                                      </button>
-                                      {isPastOpen && (
-                                        <div className="space-y-2 pt-1.5">
-                                          {pastTasks.map((task) => renderCard(task))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </>
-                              );
-                            })()}
+                            {swimlaneTasks.map((task) => renderCard(task))}
 
                             {swimlaneTasks.length === 0 && (
                               <div className="flex-1 min-h-[45px] border border-dashed border-border/50 rounded-lg flex items-center justify-center text-[10px] text-muted-foreground">

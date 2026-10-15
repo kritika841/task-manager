@@ -39,6 +39,8 @@ import { cn, getUserColor, getEmployeeCode } from "@/lib/utils";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const {
     tasks,
+    filteredTasks,
+    baseVisibleTasks,
     users,
     currentUser,
     currentUserId,
@@ -84,9 +86,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     };
   }, [userDropdownOpen]);
 
-  // Quick counts
-  const myTasksCount = tasks.filter((t) => t.assigneeId === currentUserId && !t.isArchived).length;
-  const inReviewCount = tasks.filter((t) => t.status === "in_review" && !t.isArchived).length;
+  // Quick counts accurately reflect visible/showing tasks
+  const myTasksCount = filter.onlyMyTasks
+    ? filteredTasks.length
+    : baseVisibleTasks.filter((t) => t.assigneeId === currentUserId).length;
+  const inReviewCount = filter.status === "in_review"
+    ? filteredTasks.length
+    : baseVisibleTasks.filter((t) => t.status === "in_review").length;
   const archivedCount = tasks.filter((t) => t.isArchived).length;
 
   return (
@@ -158,7 +164,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <span>Board</span>
                 </div>
                 <span className="text-[10px] font-mono opacity-70">
-                  {tasks.filter((t) => !t.isArchived).length}
+                  {filteredTasks.length}
                 </span>
               </button>
 

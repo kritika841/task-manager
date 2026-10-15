@@ -49,6 +49,7 @@ interface TaskContextType {
   setFilter: (updates: Partial<FilterState>) => void;
   resetFilter: () => void;
   filteredTasks: Task[];
+  baseVisibleTasks: Task[];
   selectedTaskId: string | null;
   setSelectedTaskId: (id: string | null) => void;
   isCreateModalOpen: boolean;
@@ -202,6 +203,19 @@ const STORAGE_KEY_ENFORCE_LOCK = "satmi-ads-enforce-lock-v1";
 const STORAGE_KEY_AUTO_RULES = "satmi-ads-auto-rules-v1";
 const STORAGE_KEY_OFFLINE_CHANGES = "satmi-ads-offline-changes-v1";
 
+export function isTaskAdflow(task: Task): boolean {
+  return Boolean(
+    task.adId ||
+    task.id.startsWith("ad-") ||
+    task.tags?.includes("AdFlow") ||
+    task.tags?.includes("Active Creative") ||
+    task.isCanonicalAdflowTask ||
+    isCanonicalAdflowTask(task.title) ||
+    (task.title && /^(Raw clip generation|Ad video edits|Social media edits|Script writing|Video shoots)/i.test(task.title)) ||
+    (task.tags && task.tags.includes("Video Ads"))
+  );
+}
+
 export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -238,6 +252,16 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     selectedTaskIdRef.current = selectedTaskId;
   }, [selectedTaskId]);
+
+  // Base visible tasks in current workspace mode (respects showArchived and showAdflowTasks)
+  const baseVisibleTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      if (!filter.showArchived && task.isArchived) return false;
+      if (filter.showArchived && !task.isArchived) return false;
+      if (!filter.showAdflowTasks && isTaskAdflow(task)) return false;
+      return true;
+    });
+  }, [tasks, filter.showArchived, filter.showAdflowTasks]);
 
   const openCreateModal = useCallback((preselectedUserId?: string, preselectedStatus?: TaskStatus) => {
     setCreateModalAssigneeId(preselectedUserId || null);
@@ -950,7 +974,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       const user = users.find((u) => u.id === userId);
       const max = user?.dailyCapacityUnits || 6;
       const today = dateInTargetTimeZone();
-      const current = tasks
+      const current = baseVisibleTasks
         .filter((t) => t.assigneeId === userId && t.dueDate === today)
         .reduce((sum, t) => sum + (t.targetQuantity || 1), 0);
       const percent = Math.round((current / max) * 100);
@@ -961,7 +985,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         percent,
       };
     },
-    [users, tasks]
+    [users, baseVisibleTasks]
   );
 
   // 1. Create Task
@@ -1881,29 +1905,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     const today = dateInTargetTimeZone();
     const todayDate = new Date(today);
 
-    return tasks.filter((task) => {
-      // 0. Soft-delete / Archival filtering: archived tasks only show when showArchived is true
-      if (!filter.showArchived && task.isArchived) {
-        return false;
-      }
-      if (filter.showArchived && !task.isArchived) {
-        return false;
-      }
-
-      // 0b. AdFlow tasks filtering: by default OFF (exclude tasks originating from AdFlow)
-      const isAdflowTask = Boolean(
-        task.adId ||
-        task.id.startsWith("ad-") ||
-        task.tags?.includes("AdFlow") ||
-        task.tags?.includes("Active Creative") ||
-        task.isCanonicalAdflowTask ||
-        isCanonicalAdflowTask(task.title) ||
-        (task.title && /^(Raw clip generation|Ad video edits|Social media edits|Script writing|Video shoots)/i.test(task.title)) ||
-        (task.tags && task.tags.includes("Video Ads"))
-      );
-      if (!filter.showAdflowTasks && isAdflowTask) {
-        return false;
-      }
+    return baseVisibleTasks.filter((task) => {
 
       // 1. Text Search
       if (filter.search.trim()) {
@@ -1994,7 +1996,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     });
-  }, [tasks, filter, currentUserId]);
+  }, [baseVisibleTasks, filter, currentUserId]);
 
   const selectAllFilteredTasks = useCallback(
     (select: boolean) => {
@@ -2016,6 +2018,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     <TaskContext.Provider
       value={{
         tasks,
+        baseVisibleTasks,
         users,
         currentUser,
         currentUserId,

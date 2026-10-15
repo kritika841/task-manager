@@ -47,6 +47,7 @@ function TaskDashboardContent() {
     users,
     filteredTasks,
     currentUser,
+    baseVisibleTasks,
     isAdmin,
     isManager,
     isManagerOrAdmin,
@@ -121,12 +122,19 @@ function TaskDashboardContent() {
     activeFiltersCount === 0 &&
     !filter.search;
 
-  const myTasksCount = tasks.filter((t) => t.assigneeId === currentUser?.id && !t.isArchived).length;
-  const inReviewCount = tasks.filter((t) => t.status === "in_review" && !t.isArchived).length;
-  const overdueCount = tasks.filter((t) => {
-    const today = new Date().toISOString().slice(0, 10);
-    return t.dueDate < today && t.status !== "completed" && !t.isArchived;
-  }).length;
+  // Counts accurately reflect the tasks showing / matching in current workspace visibility
+  const myTasksCount = isMyTasksActive
+    ? filteredTasks.length
+    : baseVisibleTasks.filter((t) => t.assigneeId === currentUser?.id).length;
+  const inReviewCount = isNeedsReviewActive
+    ? filteredTasks.length
+    : baseVisibleTasks.filter((t) => t.status === "in_review").length;
+  const overdueCount = isOverdueActive
+    ? filteredTasks.length
+    : baseVisibleTasks.filter((t) => {
+        const today = new Date().toISOString().slice(0, 10);
+        return t.dueDate < today && t.status !== "completed";
+      }).length;
 
   return (
     <div className="space-y-4">

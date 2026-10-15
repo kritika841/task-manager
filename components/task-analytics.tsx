@@ -36,6 +36,7 @@ type AnalyticsSubTab = "overview" | "allocations" | "work_done" | "permissions";
 export function TaskAnalytics() {
   const {
     tasks,
+    filteredTasks,
     users,
     currentUser,
     isAdmin,
@@ -96,22 +97,23 @@ export function TaskAnalytics() {
     );
   }
 
-  // --- Real Analytical Metrics ---
-  const totalTasks = tasks.length;
-  const completedTasks = tasks.filter((t) => t.status === "completed").length;
-  const inReviewTasks = tasks.filter((t) => t.status === "in_review").length;
-  const inProgressTasks = tasks.filter((t) => t.status === "in_progress").length;
-  const urgentTasks = tasks.filter(
+  // --- Real Analytical Metrics (Strictly reflects tasks showing on dashboard) ---
+  const tasksToAnalyze = filteredTasks;
+  const totalTasks = tasksToAnalyze.length;
+  const completedTasks = tasksToAnalyze.filter((t) => t.status === "completed").length;
+  const inReviewTasks = tasksToAnalyze.filter((t) => t.status === "in_review").length;
+  const inProgressTasks = tasksToAnalyze.filter((t) => t.status === "in_progress").length;
+  const urgentTasks = tasksToAnalyze.filter(
     (t) => (t.priority === "urgent" || t.priority === "high") && t.status !== "completed"
   ).length;
 
-  const totalTargetUnits = tasks.reduce((acc, t) => acc + (t.targetQuantity || 1), 0);
-  const completedTargetUnits = tasks.reduce((acc, t) => acc + (t.completedQuantity || 0), 0);
+  const totalTargetUnits = tasksToAnalyze.reduce((acc, t) => acc + (t.targetQuantity || 1), 0);
+  const completedTargetUnits = tasksToAnalyze.reduce((acc, t) => acc + (t.completedQuantity || 0), 0);
   const overallVelocity =
     totalTargetUnits > 0 ? Math.round((completedTargetUnits / totalTargetUnits) * 100) : 0;
 
   // On-time delivery rate for completed tasks
-  const onTimeCompleted = tasks.filter((t) => {
+  const onTimeCompleted = tasksToAnalyze.filter((t) => {
     if (t.status !== "completed") return false;
     const completedDate = t.updatedAt?.slice(0, 10) || t.dueDate;
     return completedDate <= t.dueDate;
@@ -120,7 +122,7 @@ export function TaskAnalytics() {
 
   // Workload by team member with capacity
   const memberWorkload = users.map((u) => {
-    const userTasks = tasks.filter((t) => t.assigneeId === u.id);
+    const userTasks = tasksToAnalyze.filter((t) => t.assigneeId === u.id);
     const userTargetUnits = userTasks.reduce((acc, t) => acc + (t.targetQuantity || 1), 0);
     const userCompletedUnits = userTasks.reduce((acc, t) => acc + (t.completedQuantity || 0), 0);
     const capacity = getMemberCapacity(u.id);
@@ -147,7 +149,7 @@ export function TaskAnalytics() {
 
   // Chronological Task Allocations ("What was allocated when")
   const allocationList = useMemo(() => {
-    let list = [...tasks];
+    let list = [...tasksToAnalyze];
 
     // Filter by member
     if (allocationMemberFilter !== "all") {
@@ -259,7 +261,7 @@ export function TaskAnalytics() {
           <Clock className="size-3.5" />
           <span>Allocation History ("What Allocated When")</span>
           <span className="text-[10px] font-mono px-1 rounded bg-muted/80">
-            {tasks.length}
+            {tasksToAnalyze.length}
           </span>
         </button>
 
