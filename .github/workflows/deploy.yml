@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  APP_DIR: ${{ secrets.VPS_APP_DIR || '/var/www/task-manager' }}
+  APP_DIR: ${{ secrets.VPS_APP_DIR || '/home/deployer/apps/task-manager' }}
 
 jobs:
   deploy:
@@ -56,7 +56,7 @@ jobs:
           ssh -i ~/.ssh/id_deploy -p ${{ secrets.VPS_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "APP_DIR=$APP_DIR bash -se" <<'REMOTE'
           set -e
-          cd "${APP_DIR:-/var/www/task-manager}"
+          cd "${APP_DIR:-/home/deployer/apps/task-manager}"
           mkdir -p data public/uploads
           npm ci --omit=dev
           pm2 startOrReload ecosystem.config.cjs --update-env
