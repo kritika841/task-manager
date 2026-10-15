@@ -1,0 +1,28 @@
+{
+  "6445364a-7871-4826-8794-589f284d15b9": [
+    {
+      "id": "cm_1791791174464_sd3kp",
+      "taskId": "6445364a-7871-4826-8794-589f284d15b9",
+      "userId": "360a1a7a-258a-4591-aee1-7bce60eaee4b",
+      "userName": "Himik",
+      "content": "Testing persistent comment with @Himik for industry audit.",
+      "mentions": [
+        "360a1a7a-258a-4591-aee1-7bce60eaee4b"
+      ],
+      "reactions": {},
+      "createdAt": "2026-10-12T07:46:14.464Z"
+    },
+    {
+      "id": "ab618281-e92a-4362-95e7-ced41479bdd1",
+      "taskId": "6445364a-7871-4826-8794-589f284d15b9",
+      "userId": "360a1a7a-258a-4591-aee1-7bce60eaee4b",
+      "userName": "Himik",
+      "content": "Testing persistent comment with @Himik for industry audit.",
+      "mentions": [
+        "360a1a7a-258a-4591-aee1-7bce60eaee4b"
+      ],
+      "reactions": {},
+      "createdAt": "2026-10-12T07:46:14.592853+00:00"
+    }
+  ]
+}
