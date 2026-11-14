@@ -67,12 +67,12 @@ export function LoginView({ onLogin }: LoginViewProps) {
 
         {/* Login Card */}
         <div className="rounded-2xl border border-border bg-card p-6 sm:p-8 shadow-float backdrop-blur-md animate-in fade-in zoom-in-95 duration-200">
-          <div className="mb-6">
+          <div className="mb-5">
             <h1 className="text-xl font-bold tracking-tight text-foreground">
-              Sign In to Your Workspace
+              Sign In
             </h1>
-            <p className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
-              Log in with your official AdFlow email and password to access your daily quotas and assigned tasks.
+            <p className="text-xs text-muted-foreground mt-1">
+              Sign in to your Satmi workspace
             </p>
           </div>
 
@@ -196,12 +196,6 @@ export function LoginView({ onLogin }: LoginViewProps) {
                 </button>
               ))}
             </div>
-          </div>
-
-          {/* Security footnote */}
-          <div className="mt-5 pt-4 border-t border-border flex items-center justify-center gap-1.5 text-[11px] text-muted-foreground">
-            <ShieldCheck className="size-3.5 text-primary" />
-            <span>AdFlow Unified Authentication Protected</span>
           </div>
         </div>
       </div>

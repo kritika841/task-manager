@@ -57,6 +57,11 @@ export function SettingsModal() {
     setAutoMaterializeRulesOnSync,
     testAdsConnection,
     pendingOfflineChangesCount,
+    clearPendingOfflineChanges,
+    syncPendingChangesToLive,
+    webhookConfig,
+    saveWebhookSettings,
+    testWebhookEndpoint,
     refreshAll,
     isSyncing,
     lastSyncedAt,
@@ -70,6 +75,7 @@ export function SettingsModal() {
     logout,
     updateUserCapacity,
     setIsShortcutsModalOpen,
+    isManagerOrAdmin,
     isAdmin,
     createUser,
     updateUserColor,
@@ -85,6 +91,27 @@ export function SettingsModal() {
     message: string;
     testedAt: Date;
   } | null>(null);
+
+  // Outbound Webhook configuration state
+  const [webhookUrlInput, setWebhookUrlInput] = useState(webhookConfig.url || "");
+  const [webhookSecretInput, setWebhookSecretInput] = useState(webhookConfig.secret || "");
+  const [webhookEnabledInput, setWebhookEnabledInput] = useState(Boolean(webhookConfig.enabled));
+  const [webhookEventsInput, setWebhookEventsInput] = useState<string[]>(
+    webhookConfig.events || []
+  );
+  const [isSavingWebhook, setIsSavingWebhook] = useState(false);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [webhookStatusMessage, setWebhookStatusMessage] = useState<{
+    ok: boolean;
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    setWebhookUrlInput(webhookConfig.url || "");
+    setWebhookSecretInput(webhookConfig.secret || "");
+    setWebhookEnabledInput(Boolean(webhookConfig.enabled));
+    setWebhookEventsInput(webhookConfig.events || []);
+  }, [webhookConfig]);
 
   // Team Management state (Admin)
   const [isAddingMember, setIsAddingMember] = useState(false);
@@ -212,7 +239,7 @@ export function SettingsModal() {
                 )}
               </h2>
               <p className="text-xs text-muted-foreground">
-                Manage external Ads Management pipeline sync, layout options, and team rules
+                Sync, display, and team settings
               </p>
             </div>
           </div>
@@ -324,10 +351,10 @@ export function SettingsModal() {
                           {isAdsManagementConnected ? "Connected" : "Disconnected"}
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1 max-w-lg leading-relaxed">
+                      <p className="text-xs text-muted-foreground mt-1">
                         {isAdsManagementConnected
-                          ? "Live two-way synchronization is active with the central Ads Management database (table: daily_team_targets). Daily targets, creator/editor units, and deliverables sync seamlessly."
-                          : "Dashboard is disconnected from Ads Management. Real-time background sync is paused, preventing external pipeline updates from altering your local workspace."}
+                          ? "Read-Only AdFlow Sync (Local Task Updates Enabled) — AdFlow source data is never modified."
+                          : "AdFlow sync paused. Working in local standalone mode."}
                       </p>
                     </div>
                   </div>
@@ -358,23 +385,38 @@ export function SettingsModal() {
                   </div>
                 </div>
 
-                {/* Local modifications warning when disconnected */}
-                {!isAdsManagementConnected && pendingOfflineChangesCount > 0 && (
-                  <div className="mt-4 pt-3 border-t border-amber-500/20 flex items-center justify-between text-xs text-amber-700 dark:text-amber-300">
+                {/* Local modifications warning when queued */}
+                {pendingOfflineChangesCount > 0 && (
+                  <div className="mt-4 pt-3 border-t border-amber-500/20 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-700 dark:text-amber-300">
                     <span className="flex items-center gap-1.5">
                       <AlertTriangle className="size-3.5 shrink-0" />
                       <span>
-                        <strong>{pendingOfflineChangesCount} local change(s)</strong> created while
-                        disconnected.
+                        <strong>{pendingOfflineChangesCount} queued mutation(s)</strong> waiting to
+                        be replayed to the live Supabase pipeline.
                       </span>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setIsAdsManagementConnected(true)}
-                      className="font-semibold underline hover:text-amber-800 dark:hover:text-amber-200 cursor-pointer"
-                    >
-                      Reconnect to sync
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!isAdsManagementConnected) {
+                            setIsAdsManagementConnected(true);
+                          } else {
+                            await syncPendingChangesToLive();
+                          }
+                        }}
+                        className="font-semibold underline hover:text-amber-800 dark:hover:text-amber-200 cursor-pointer"
+                      >
+                        {isAdsManagementConnected ? "Replay Queue Now" : "Reconnect & Replay Queue"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => clearPendingOfflineChanges()}
+                        className="text-muted-foreground hover:text-destructive underline cursor-pointer"
+                      >
+                        Discard
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -509,19 +551,16 @@ export function SettingsModal() {
                   <div className="pt-2 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
                       <div className="text-xs font-semibold text-foreground">
-                        Background Sync Strategy
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        Select how actively the dashboard monitors Ads Management database updates
+                        Sync Frequency
                       </div>
                     </div>
 
                     <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg border border-border">
                       {(
                         [
-                          { id: "realtime", label: "Realtime (Websocket)" },
-                          { id: "interval", label: "60s Polling" },
-                          { id: "manual", label: "Manual Only" },
+                          { id: "realtime", label: "Realtime" },
+                          { id: "interval", label: "60s Poll" },
+                          { id: "manual", label: "Manual" },
                         ] as const
                       ).map((m) => (
                         <button
@@ -546,11 +585,7 @@ export function SettingsModal() {
                     <div className="space-y-0.5">
                       <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                         <Lock className="size-3 text-primary" />
-                        <span>Lock Standard Adflow Pipeline Task Titles</span>
-                      </div>
-                      <div className="text-[11px] text-muted-foreground max-w-md">
-                        Protects canonical tasks (e.g. Ad video edits, Video shoots, Script writing)
-                        from being renamed, preventing pipeline desync with live Ads Management.
+                        <span>Lock Canonical AdFlow Task Titles</span>
                       </div>
                     </div>
 
@@ -578,11 +613,7 @@ export function SettingsModal() {
                     <div className="space-y-0.5">
                       <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                         <Sparkles className="size-3 text-primary" />
-                        <span>Auto-Materialize Delegator Rules on Daily Sync</span>
-                      </div>
-                      <div className="text-[11px] text-muted-foreground max-w-md">
-                        Automatically instantiate recurring creator/editor daily targets defined in
-                        Auto Delegator when launching the dashboard each day.
+                        <span>Auto-Run Delegator Rules Daily</span>
                       </div>
                     </div>
 
@@ -607,59 +638,230 @@ export function SettingsModal() {
                 </div>
               </div>
 
-              {/* Direct Pipeline Flow Impact Explainer */}
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <Activity className="size-4 text-primary" />
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                    Live Ads Management (AdFlow) Pipeline Impact
-                  </h4>
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-primary/20 text-primary">
-                    Shared Supabase Database
+              {/* Outbound Webhooks & Automation Events */}
+              <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Radio className="size-4 text-primary" />
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                        Outbound Webhooks
+                      </h4>
+                      <span
+                        className={cn(
+                          "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
+                          webhookEnabledInput
+                            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                            : "bg-muted text-muted-foreground"
+                        )}
+                      >
+                        {webhookEnabledInput ? "Active" : "Disabled"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={webhookEnabledInput}
+                    disabled={!isManagerOrAdmin}
+                    onClick={() => setWebhookEnabledInput((prev) => !prev)}
+                    className={cn(
+                      "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
+                      webhookEnabledInput ? "bg-primary" : "bg-muted-foreground/30",
+                      !isManagerOrAdmin && "opacity-50 cursor-not-allowed"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out",
+                        webhookEnabledInput ? "translate-x-5" : "translate-x-0"
+                      )}
+                    />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-muted-foreground block">
+                      Target Endpoint URL (POST)
+                    </label>
+                    <input
+                      type="url"
+                      value={webhookUrlInput}
+                      disabled={!isManagerOrAdmin}
+                      onChange={(e) => setWebhookUrlInput(e.target.value)}
+                      placeholder="https://hooks.zapier.com/... or https://your-api.com/webhook"
+                      className="w-full h-8.5 rounded-lg border border-border bg-background px-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-muted-foreground block">
+                      Signing Secret (Optional HMAC-SHA256)
+                    </label>
+                    <input
+                      type="password"
+                      value={webhookSecretInput}
+                      disabled={!isManagerOrAdmin}
+                      onChange={(e) => setWebhookSecretInput(e.target.value)}
+                      placeholder="whsec_..."
+                      className="w-full h-8.5 rounded-lg border border-border bg-background px-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-semibold text-muted-foreground block">
+                    Subscribed Pipeline Events
                   </span>
-                </div>
-                <p className="text-xs text-muted-foreground leading-relaxed">
-                  <strong>Does changing task status here affect the live Ads Management app?</strong>{" "}
-                  <span className="text-foreground font-semibold">Yes, immediately.</span> Because both dashboards operate on the same live database (<code className="font-mono text-[11px] bg-background/80 px-1 py-0.5 rounded border border-border">ads</code> &amp; <code className="font-mono text-[11px] bg-background/80 px-1 py-0.5 rounded border border-border">daily_team_targets</code>):
-                </p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  <div className="p-2.5 rounded-lg bg-background border border-border space-y-1">
-                    <span className="font-bold text-foreground flex items-center gap-1.5">
-                      <span className="size-2 rounded-full bg-blue-500" />
-                      In Progress (Editing)
-                    </span>
-                    <p className="text-[11px] text-muted-foreground">
-                      Sets <code className="font-mono text-[10px]">editing_started_at</code> and transitions creative to <code className="font-mono text-[10px]">editing</code> stage in AdFlow.
-                    </p>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-background border border-border space-y-1">
-                    <span className="font-bold text-foreground flex items-center gap-1.5">
-                      <span className="size-2 rounded-full bg-amber-500" />
-                      In Review (Creator Review)
-                    </span>
-                    <p className="text-[11px] text-muted-foreground">
-                      Submits creative for review in AdFlow and sets <code className="font-mono text-[10px]">status = pending_review</code>.
-                    </p>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-background border border-border space-y-1">
-                    <span className="font-bold text-foreground flex items-center gap-1.5">
-                      <span className="size-2 rounded-full bg-emerald-500" />
-                      Completed (Approved)
-                    </span>
-                    <p className="text-[11px] text-muted-foreground">
-                      Marks creative as <code className="font-mono text-[10px]">approved</code> in AdFlow and increments completed target quotas and incentive metrics.
-                    </p>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-background border border-border space-y-1">
-                    <span className="font-bold text-foreground flex items-center gap-1.5">
-                      <span className="size-2 rounded-full bg-slate-500" />
-                      To Do (Ready for Edit)
-                    </span>
-                    <p className="text-[11px] text-muted-foreground">
-                      Resets <code className="font-mono text-[10px]">editing_started_at</code> and returns creative to the unassigned editing queue in AdFlow.
-                    </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      { id: "task.created", label: "Task Created" },
+                      { id: "task.completed", label: "Task Completed" },
+                      { id: "task.review_submitted", label: "Submitted for Review" },
+                      { id: "task.revision_requested", label: "Revision Requested" },
+                      { id: "task.archived", label: "Task Archived" },
+                      { id: "comment.created", label: "Comment Posted" },
+                    ].map((evt) => {
+                      const active = webhookEventsInput.includes(evt.id);
+                      return (
+                        <button
+                          key={evt.id}
+                          type="button"
+                          disabled={!isManagerOrAdmin}
+                          onClick={() => {
+                            setWebhookEventsInput((prev) =>
+                              prev.includes(evt.id)
+                                ? prev.filter((x) => x !== evt.id)
+                                : [...prev, evt.id]
+                            );
+                          }}
+                          className={cn(
+                            "px-2.5 py-1 rounded-lg border text-[11px] font-medium transition cursor-pointer",
+                            active
+                              ? "border-primary bg-primary/10 text-primary font-semibold"
+                              : "border-border bg-muted/30 text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          {evt.label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/60">
+                  <div className="text-[11px] text-muted-foreground">
+                    {webhookConfig.lastTriggeredAt ? (
+                      <span>
+                        Last delivery:{" "}
+                        <strong>
+                          {webhookConfig.lastStatus
+                            ? `HTTP ${webhookConfig.lastStatus}`
+                            : webhookConfig.lastError || "Dispatched"}
+                        </strong>{" "}
+                        at {new Date(webhookConfig.lastTriggeredAt).toLocaleTimeString()}
+                      </span>
+                    ) : (
+                      <span>No webhook deliveries recorded yet</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={isTestingWebhook || !webhookUrlInput.trim()}
+                      onClick={async () => {
+                        setIsTestingWebhook(true);
+                        setWebhookStatusMessage(null);
+                        try {
+                          const res = await testWebhookEndpoint(webhookUrlInput.trim());
+                          setWebhookStatusMessage({
+                            ok: res.ok,
+                            message: res.ok
+                              ? `Webhook test ping delivered (HTTP ${res.status || 200} in ${res.latencyMs}ms)`
+                              : res.error || "Webhook test ping failed",
+                          });
+                        } finally {
+                          setIsTestingWebhook(false);
+                        }
+                      }}
+                      className="h-7 text-xs border border-border"
+                    >
+                      {isTestingWebhook ? "Sending Ping..." : "Send Test Ping"}
+                    </Button>
+
+                    {isManagerOrAdmin && (
+                      <Button
+                        type="button"
+                        variant="primary"
+                        size="sm"
+                        disabled={isSavingWebhook}
+                        onClick={async () => {
+                          setIsSavingWebhook(true);
+                          setWebhookStatusMessage(null);
+                          try {
+                            const ok = await saveWebhookSettings({
+                              url: webhookUrlInput.trim(),
+                              secret: webhookSecretInput.trim() || undefined,
+                              enabled: webhookEnabledInput,
+                              events: webhookEventsInput,
+                            });
+                            setWebhookStatusMessage({
+                              ok,
+                              message: ok
+                                ? "Webhook configuration saved."
+                                : "Failed to save webhook configuration.",
+                            });
+                          } finally {
+                            setIsSavingWebhook(false);
+                          }
+                        }}
+                        className="h-7 text-xs"
+                      >
+                        {isSavingWebhook ? "Saving..." : "Save Webhook"}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {webhookStatusMessage && (
+                  <div
+                    className={cn(
+                      "p-2.5 rounded-lg border text-xs flex items-center gap-2",
+                      webhookStatusMessage.ok
+                        ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300"
+                        : "bg-destructive/10 border-destructive/25 text-destructive"
+                    )}
+                  >
+                    {webhookStatusMessage.ok ? (
+                      <CheckCircle2 className="size-3.5 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="size-3.5 shrink-0" />
+                    )}
+                    <span>{webhookStatusMessage.message}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Read-Only AdFlow Sync Status Indicator */}
+              <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3.5 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <ShieldCheck className="size-4 text-emerald-500 shrink-0" />
+                  <div className="text-xs">
+                    <span className="font-bold text-foreground">
+                      Read-Only AdFlow Sync (Local Task Updates Enabled)
+                    </span>
+                    <span className="text-muted-foreground block text-[11px]">
+                      Upstream AdFlow data is strictly read-only and never modified. Status, stage, assignee, and checklist updates persist locally.
+                    </span>
+                  </div>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
+                  Protected
+                </span>
               </div>
             </div>
           )}
@@ -670,16 +872,16 @@ export function SettingsModal() {
               {/* Default View Mode */}
               <div className="rounded-xl border border-border bg-card p-4 space-y-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                  Default Board View
+                  Default View
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {[
-                    { id: "board", label: "Kanban Board", icon: Kanban },
-                    { id: "table", label: "Task Table", icon: Table2 },
-                    { id: "list", label: "Checklist Units", icon: ListTodo },
-                    { id: "analytics", label: "Stats & Overview", icon: BarChart3 },
+                    { id: "board", label: "Board", icon: Kanban },
+                    { id: "table", label: "Table", icon: Table2 },
+                    { id: "list", label: "Checklist", icon: ListTodo },
+                    { id: "analytics", label: "Analytics", icon: BarChart3 },
                     { id: "calendar", label: "Calendar", icon: Calendar },
-                    { id: "timeline", label: "Timeline (Gantt)", icon: Layers },
+                    { id: "timeline", label: "Timeline", icon: Layers },
                   ].map((v) => {
                     const Icon = v.icon;
                     const isSelected = viewMode === v.id;
@@ -706,71 +908,48 @@ export function SettingsModal() {
               {/* Layout Density */}
               <div className="rounded-xl border border-border bg-card p-4 space-y-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                  Board Density & Padding
+                  Density
                 </h4>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
                     onClick={() => setDensity("comfortable")}
                     className={cn(
-                      "flex items-center gap-3 p-3.5 rounded-lg border text-left text-xs transition cursor-pointer",
+                      "flex items-center gap-3 p-3 rounded-lg border text-left text-xs transition cursor-pointer",
                       density === "comfortable"
                         ? "border-primary bg-primary/10 text-primary font-semibold"
                         : "border-border bg-muted/20 text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
                   >
                     <Maximize2 className="size-4" />
-                    <div>
-                      <div className="font-semibold">Comfortable Mode</div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">
-                        Spacious cards, rich meta tags, and full unit details
-                      </div>
-                    </div>
+                    <span className="font-semibold">Comfortable</span>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setDensity("compact")}
                     className={cn(
-                      "flex items-center gap-3 p-3.5 rounded-lg border text-left text-xs transition cursor-pointer",
+                      "flex items-center gap-3 p-3 rounded-lg border text-left text-xs transition cursor-pointer",
                       density === "compact"
                         ? "border-primary bg-primary/10 text-primary font-semibold"
                         : "border-border bg-muted/20 text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
                   >
                     <Minimize2 className="size-4" />
-                    <div>
-                      <div className="font-semibold">Compact Mode</div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">
-                        High-density data grid for fast multi-task scanning
-                      </div>
-                    </div>
+                    <span className="font-semibold">Compact</span>
                   </button>
                 </div>
               </div>
 
               {/* Timezone & Cutoff Clock */}
-              <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                  Operations Timezone & Cutoff SLA
-                </h4>
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 rounded-lg bg-muted/30 border border-border">
-                  <div className="space-y-0.5">
-                    <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                      <Clock className="size-3.5 text-primary" />
-                      <span>Operating Timezone: Asia/Kolkata (IST - UTC+5:30)</span>
-                    </span>
-                    <span className="text-[11px] text-muted-foreground block">
-                      Daily target cut-off is configured at 8:00 PM IST daily. Tasks not completed by
-                      cutoff are eligible for rollover.
-                    </span>
-                  </div>
-
-                  <div className="text-right shrink-0">
-                    <div className="font-mono text-sm font-bold text-foreground">
-                      {currentTimeStr}
-                    </div>
-                    <span className="text-[10px] text-muted-foreground">Live Indian Standard Time</span>
+              <div className="rounded-xl border border-border bg-card p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Clock className="size-3.5 text-primary" />
+                    <span>Timezone: Asia/Kolkata (IST) · 8:00 PM Cutoff</span>
+                  </span>
+                  <div className="font-mono text-sm font-bold text-foreground">
+                    {currentTimeStr}
                   </div>
                 </div>
               </div>
@@ -874,15 +1053,10 @@ export function SettingsModal() {
               {isAdmin ? (
                 <div className="rounded-xl border border-border bg-card p-5 space-y-4">
                   <div className="flex items-center justify-between pb-3 border-b border-border">
-                    <div>
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
-                        <Shield className="size-3.5 text-primary" />
-                        <span>Team Management (Adflow Synchronized)</span>
-                      </h4>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        Color-code team members, customize employee codes, and provision accounts matching AdFlow profiles.
-                      </p>
-                    </div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
+                      <Shield className="size-3.5 text-primary" />
+                      <span>Team Members</span>
+                    </h4>
 
                     <Button
                       type="button"
@@ -1226,15 +1400,13 @@ export function SettingsModal() {
                 </div>
               ) : (
                 <div className="p-4 rounded-xl border border-border bg-muted/10 text-xs text-muted-foreground">
-                  Logged in as <strong className="text-foreground">{currentUser.name}</strong>. Team provisioning, member deactivation, and member color coding are managed by workspace Admins.
+                  Signed in as <strong className="text-foreground">{currentUser.name}</strong>. Team settings are managed by Admins.
                 </div>
               )}
 
               {/* Keyboard Shortcuts Hint */}
               <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/20 text-xs">
-                <span className="text-muted-foreground">
-                  Need faster navigation? View all keyboard shortcuts
-                </span>
+                <span className="text-muted-foreground">Keyboard shortcuts</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -1243,7 +1415,7 @@ export function SettingsModal() {
                   }}
                   className="font-semibold text-primary hover:underline cursor-pointer"
                 >
-                  Press ? to view
+                  Press ?
                 </button>
               </div>
             </div>

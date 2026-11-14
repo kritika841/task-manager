@@ -8,6 +8,8 @@ import { Input } from "./ui/field";
 import { Markdown } from "./ui/markdown";
 import { formatDate, cn } from "@/lib/utils";
 
+const QUICK_REACTIONS = ["👍", "❤️", "🔥", "✅", "👀", "🚀"];
+
 interface CommentThreadProps {
   taskId: string;
   comments?: TaskComment[];
@@ -16,6 +18,7 @@ interface CommentThreadProps {
   isAdmin: boolean;
   onAddComment: (content: string, mentions?: string[]) => Promise<void>;
   onDeleteComment: (commentId: string) => Promise<void>;
+  onToggleReaction?: (commentId: string, emoji: string) => Promise<void>;
 }
 
 export function CommentThread({
@@ -26,12 +29,14 @@ export function CommentThread({
   isAdmin,
   onAddComment,
   onDeleteComment,
+  onToggleReaction,
 }: CommentThreadProps) {
   const [commentText, setCommentText] = useState("");
   const [mentions, setMentions] = useState<string[]>([]);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionPosition, setMentionPosition] = useState<number>(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [openReactionPickerId, setOpenReactionPickerId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Filter users matching mention query
@@ -219,6 +224,69 @@ export function CommentThread({
               <div className="pt-0.5">
                 <Markdown content={c.content} />
               </div>
+
+              {/* Persistent Emoji Reactions */}
+              {onToggleReaction && (
+                <div className="pt-1.5 flex items-center flex-wrap gap-1.5 relative">
+                  {Object.entries(c.reactions || {}).map(([emoji, reactorIds]) => {
+                    if (!reactorIds || reactorIds.length === 0) return null;
+                    const hasReacted = reactorIds.includes(currentUserId);
+                    const reactorNames = reactorIds
+                      .map((uid) => users.find((u) => u.id === uid)?.name || "Team Member")
+                      .join(", ");
+
+                    return (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => onToggleReaction(c.id, emoji)}
+                        title={`Reacted by: ${reactorNames}`}
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] border transition cursor-pointer",
+                          hasReacted
+                            ? "border-primary/50 bg-primary/15 text-primary font-semibold"
+                            : "border-border bg-card/80 text-muted-foreground hover:text-foreground hover:bg-muted"
+                        )}
+                      >
+                        <span>{emoji}</span>
+                        <span className="font-mono text-[10px]">{reactorIds.length}</span>
+                      </button>
+                    );
+                  })}
+
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setOpenReactionPickerId((prev) => (prev === c.id ? null : c.id))
+                      }
+                      className="inline-flex items-center justify-center size-5 rounded-full border border-border/70 bg-card/60 text-muted-foreground hover:text-foreground hover:bg-muted transition cursor-pointer"
+                      title="Add emoji reaction"
+                    >
+                      <Smile className="size-3" />
+                    </button>
+
+                    {openReactionPickerId === c.id && (
+                      <div className="absolute left-0 bottom-full mb-1 z-30 flex items-center gap-1 rounded-full border border-border bg-card px-2 py-1 shadow-float">
+                        {QUICK_REACTIONS.map((emoji) => (
+                          <button
+                            key={emoji}
+                            type="button"
+                            onClick={() => {
+                              onToggleReaction(c.id, emoji);
+                              setOpenReactionPickerId(null);
+                            }}
+                            className="size-6 rounded-full hover:bg-muted flex items-center justify-center text-xs transition cursor-pointer"
+                            title={`React with ${emoji}`}
+                          >
+                            {emoji}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}

@@ -9,6 +9,8 @@ import {
   Table2,
   ListTodo,
   BarChart3,
+  Calendar,
+  Layers,
   UserCheck,
   Clock,
   RotateCcw,
@@ -162,6 +164,26 @@ export function CommandPalette() {
       icon: BarChart3,
       run: () => {
         setViewMode("analytics");
+        setIsCommandPaletteOpen(false);
+      },
+    },
+    {
+      id: "view-calendar",
+      title: "Switch to Calendar View",
+      category: "Navigation",
+      icon: Calendar,
+      run: () => {
+        setViewMode("calendar");
+        setIsCommandPaletteOpen(false);
+      },
+    },
+    {
+      id: "view-timeline",
+      title: "Switch to Timeline (Gantt) View",
+      category: "Navigation",
+      icon: Layers,
+      run: () => {
+        setViewMode("timeline");
         setIsCommandPaletteOpen(false);
       },
     },

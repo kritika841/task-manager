@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin, dateInTargetTimeZone, isCanonicalAdflowTask } from "@/lib/supabase";
+import { loadLocalDb, saveLocalDb } from "@/lib/local-supabase-fallback";
 import {
   Task,
   User,
@@ -13,6 +14,8 @@ import {
 } from "@/lib/types";
 import { getAllCommentsMap } from "@/lib/comments-store";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
+import { resolveRequestActor } from "@/lib/auth-server";
+import { dispatchWebhookEvent } from "@/lib/webhooks-store";
 
 function getDepartment(role: string): string {
   switch (role) {
@@ -52,6 +55,9 @@ function getDailyCapacity(role: string): number {
 
 interface ParsedNotes {
   description: string;
+  priority?: TaskPriority;
+  project?: string;
+  tags?: string[];
   deliverableUrl?: string;
   deliverableAsset?: DeliverableAsset;
   isRevisionRequested?: boolean;
@@ -80,6 +86,9 @@ function parseNotes(raw: string | null): ParsedNotes {
       const parsed = JSON.parse(raw);
       return {
         description: parsed.desc || "",
+        priority: parsed.priority,
+        project: parsed.project,
+        tags: Array.isArray(parsed.tags) ? parsed.tags : undefined,
         deliverableUrl: parsed.deliverableUrl,
         deliverableAsset: parsed.deliverableAsset,
         isRevisionRequested: parsed.isRevisionRequested,
@@ -107,6 +116,9 @@ function parseNotes(raw: string | null): ParsedNotes {
 
 function stringifyNotes(meta: ParsedNotes): string {
   const hasExtra =
+    meta.priority ||
+    meta.project ||
+    (meta.tags && meta.tags.length > 0) ||
     meta.deliverableUrl ||
     meta.deliverableAsset ||
     meta.isRevisionRequested ||
@@ -134,6 +146,9 @@ function stringifyNotes(meta: ParsedNotes): string {
   return JSON.stringify({
     __meta__: true,
     desc: meta.description || "",
+    priority: meta.priority,
+    project: meta.project,
+    tags: meta.tags,
     deliverableUrl: meta.deliverableUrl,
     deliverableAsset: meta.deliverableAsset,
     isRevisionRequested: meta.isRevisionRequested,
@@ -156,9 +171,10 @@ function stringifyNotes(meta: ParsedNotes): string {
   });
 }
 
-function parseUserMetadata(avatarUrl: string | null, name: string) {
+function parseUserMetadata(avatarUrl: string | null, name: string, role?: string) {
   let color: string | undefined;
   let employeeCode: string | undefined;
+  let dailyCapacityUnits: number | undefined;
 
   if (avatarUrl) {
     try {
@@ -166,6 +182,7 @@ function parseUserMetadata(avatarUrl: string | null, name: string) {
         const parsed = JSON.parse(avatarUrl);
         color = parsed.color;
         employeeCode = parsed.employeeCode;
+        dailyCapacityUnits = parsed.dailyCapacityUnits;
       } else if (avatarUrl.startsWith("#")) {
         color = avatarUrl;
       }
@@ -174,8 +191,16 @@ function parseUserMetadata(avatarUrl: string | null, name: string) {
 
   const code = getEmployeeCode(name, employeeCode);
   const resolvedColor = getUserColor(code, color);
+  const resolvedCapacity =
+    typeof dailyCapacityUnits === "number" && dailyCapacityUnits > 0
+      ? dailyCapacityUnits
+      : getDailyCapacity(role || "member");
 
-  return { employeeCode: code, color: resolvedColor };
+  return {
+    employeeCode: code,
+    color: resolvedColor,
+    dailyCapacityUnits: resolvedCapacity,
+  };
 }
 
 export async function GET(req: Request) {
@@ -184,7 +209,7 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const includeArchived = url.searchParams.get("includeArchived") === "true";
 
-    // 1. Ensure recurring delegator rules are materialized for today
+    // 1. Ensure recurring delegator rules are materialized locally for today
     try {
       await supabaseAdmin.rpc("materialize_daily_task_rules", {
         p_start: today,
@@ -194,7 +219,7 @@ export async function GET(req: Request) {
       console.warn("Could not auto-materialize delegator rules:", e);
     }
 
-    // 2. Fetch active profiles (Filter out soft-deleted profiles!)
+    // 2. Fetch active profiles (Filter out soft-deleted profiles)
     const { data: profileRows, error: profileErr } = await supabaseAdmin
       .from("profiles")
       .select("id, name, email, role, avatar_url, active, deleted_at")
@@ -208,7 +233,11 @@ export async function GET(req: Request) {
     }
 
     const users: User[] = (profileRows || []).map((p) => {
-      const { employeeCode, color } = parseUserMetadata(p.avatar_url, p.name || p.email);
+      const { employeeCode, color, dailyCapacityUnits } = parseUserMetadata(
+        p.avatar_url,
+        p.name || p.email,
+        p.role
+      );
       return {
         id: p.id,
         name: p.name || p.email.split("@")[0],
@@ -217,14 +246,14 @@ export async function GET(req: Request) {
         avatar: employeeCode.slice(0, 2),
         department: getDepartment(p.role),
         active: p.active !== false && !p.deleted_at,
-        dailyCapacityUnits: getDailyCapacity(p.role),
+        dailyCapacityUnits,
         employeeCode,
         color,
         deletedAt: p.deleted_at,
       };
     });
 
-    // 3. Fetch active ad creatives from Supabase Ads Management
+    // 3. Fetch active ad creatives from Supabase Ads Management (strictly read-only!)
     const { data: activeAds } = await supabaseAdmin
       .from("ads")
       .select(
@@ -233,6 +262,10 @@ export async function GET(req: Request) {
       .or("status.neq.approved,production_stage.neq.approved")
       .is("deleted_at", null)
       .order("updated_at", { ascending: false });
+
+    // Load local overrides for AdFlow creatives (never modifies upstream or local `ads` rows)
+    const localDb = loadLocalDb();
+    const adOverrides = localDb.ad_overrides || {};
 
     // 4. Fetch daily team targets
     const { data: targetRows, error: targetErr } = await supabaseAdmin
@@ -300,26 +333,33 @@ export async function GET(req: Request) {
         status = "todo";
       }
 
-      // Priority
-      let priority: TaskPriority = "medium";
-      if (isCarried || (row.target_date < today && completedQty < targetQty)) {
-        priority = "urgent";
-      } else if (row.target_date === today && targetQty > 4) {
-        priority = "high";
+      // Priority (preserve explicit user priority if set, otherwise derive smart default)
+      let priority: TaskPriority = parsedNotes.priority || "medium";
+      if (!parsedNotes.priority) {
+        if (isCarried || (row.target_date < today && completedQty < targetQty)) {
+          priority = "urgent";
+        } else if (row.target_date === today && targetQty > 4) {
+          priority = "high";
+        }
       }
 
       const assignee = users.find((u) => u.id === row.user_id);
-      const project = assignee?.department || "Operations";
+      const project = parsedNotes.project || assignee?.department || "Operations";
       const empCode = assignee?.employeeCode || getEmployeeCode(assignee?.name || "EMP");
 
       userTargetCounts[empCode] = (userTargetCounts[empCode] || 0) + 1;
       const taskNumber = `${empCode}-${String(userTargetCounts[empCode]).padStart(2, "0")}`;
 
-      const tags: string[] = ["Daily Target"];
-      if (isCarried) tags.push("Carried Forward");
-      if (row.task_name.toLowerCase().includes("edit")) tags.push("Video Ads");
-      if (row.task_name.toLowerCase().includes("script")) tags.push("Creative");
-      if (row.task_name.toLowerCase().includes("shoot")) tags.push("Production");
+      const tags: string[] =
+        parsedNotes.tags && parsedNotes.tags.length > 0
+          ? [...parsedNotes.tags]
+          : ["Daily Target"];
+      if (!parsedNotes.tags || parsedNotes.tags.length === 0) {
+        if (isCarried) tags.push("Carried Forward");
+        if (row.task_name.toLowerCase().includes("edit")) tags.push("Video Ads");
+        if (row.task_name.toLowerCase().includes("script")) tags.push("Creative");
+        if (row.task_name.toLowerCase().includes("shoot")) tags.push("Production");
+      }
 
       // Generate unit checklist subtasks
       const subtasks: Subtask[] = [];
@@ -387,114 +427,181 @@ export async function GET(req: Request) {
       };
     });
 
-    // 8. Convert active AdFlow creatives into Task models
-    // Accurately maps each creative stage to its corresponding role and workflow column:
-    // - ready_to_shoot -> Content Creator shoot queue (To Do)
-    // - shoot_complete -> Creator footage review (In Progress)
-    // - ready_for_edit -> Editor ingest/cut queue (To Do)
-    // - editing -> Editor active cutting (In Progress)
-    // - creator_review -> Review by creator (In Review)
-    // - final_review -> Manager / Admin sign-off (In Review)
-    // - approved -> Approved (Done)
+    // 8. Convert active AdFlow creatives into Task models (read-only from `ads` + merged with local `ad_overrides`)
     const adCreativeTasks: Task[] = (activeAds || []).map((ad) => {
-      const stage = (ad.production_stage || "").toLowerCase();
+      const override = adOverrides[ad.id] || adOverrides[`ad-${ad.id}`] || {};
+      const stage = (override.productionStage || ad.production_stage || "").toLowerCase();
       const statusRaw = (ad.status || "").toLowerCase();
 
-      // Determine role ownership and stage label:
-      const isShootStage = stage === "ready_to_shoot" || stage === "shoot_complete";
+      const isShootStage =
+        stage === "ready_to_shoot" ||
+        stage === "ready_for_shoot" ||
+        stage === "shoot_complete" ||
+        stage === "shooting";
       const isEditStage = stage === "ready_for_edit" || stage === "editing";
 
-      let assigneeId = "";
+      let defaultAssigneeId = "";
       if (isShootStage) {
-        assigneeId = ad.creator_id || ad.editor_id || (users[0]?.id || "");
-      } else if (isEditStage) {
-        assigneeId = ad.editor_id || ad.creator_id || (users[0]?.id || "");
+        defaultAssigneeId = ad.creator_id || ad.editor_id || (users[0]?.id || "");
       } else {
-        assigneeId = ad.editor_id || ad.creator_id || (users[0]?.id || "");
+        defaultAssigneeId = ad.editor_id || ad.creator_id || (users[0]?.id || "");
       }
 
-      // Determine task status, human-readable stage, and sub-column mapping:
-      let status: TaskStatus = "todo";
+      let defaultStatus: TaskStatus = "todo";
       let stageLabel = "Ad Creative";
-      let subColumnId = "";
-      let templateRole: Role = isShootStage ? "content_creator" : "editor";
+      let defaultSubColumnId = "";
+      let defaultTemplateRole: Role = isShootStage ? "content_creator" : "editor";
 
       if (stage === "approved" || statusRaw === "approved") {
-        status = "completed";
+        defaultStatus = "completed";
         stageLabel = "Approved";
-        subColumnId = "ed-final-export";
+        defaultSubColumnId = "ed-final-export";
       } else if (stage === "final_review") {
-        status = "in_review";
+        defaultStatus = "in_review";
         stageLabel = "Final Review";
-        subColumnId = "ed-final-review";
-      } else if (stage === "creator_review" || statusRaw === "pending_review") {
-        status = "in_review";
+        defaultSubColumnId = "ed-final-review";
+      } else if (
+        stage === "creator_review" ||
+        stage === "pending_review" ||
+        statusRaw === "pending_review"
+      ) {
+        defaultStatus = "in_review";
         stageLabel = "Creator Review";
-        subColumnId = "ed-creator-review";
+        defaultSubColumnId = "ed-creator-review";
       } else if (stage === "editing") {
-        status = "in_progress";
+        defaultStatus = "in_progress";
         stageLabel = "Video Editing";
-        subColumnId = "ed-primary-cut";
-      } else if (stage === "shoot_complete") {
-        status = "in_progress";
-        stageLabel = "Shoot Complete (Footage Review)";
-        subColumnId = "cc-broll-capture";
-        templateRole = "content_creator";
+        defaultSubColumnId = "ed-primary-cut";
+      } else if (stage === "shoot_complete" || stage === "shooting") {
+        defaultStatus = "in_progress";
+        stageLabel = stage === "shooting" ? "Shooting" : "Shoot Complete (Footage Review)";
+        defaultSubColumnId = "cc-broll-capture";
+        defaultTemplateRole = "content_creator";
       } else if (stage === "ready_for_edit") {
-        status = "todo";
+        defaultStatus = "todo";
         stageLabel = "Queued for Edit";
-        subColumnId = "ed-rough-cut";
-      } else if (stage === "ready_to_shoot") {
-        status = "todo";
+        defaultSubColumnId = "ed-rough-cut";
+      } else if (stage === "ready_to_shoot" || stage === "ready_for_shoot") {
+        defaultStatus = "todo";
         stageLabel = "Ready to Shoot";
-        subColumnId = "cc-video-shoots";
-        templateRole = "content_creator";
+        defaultSubColumnId = "cc-video-shoots";
+        defaultTemplateRole = "content_creator";
+      } else if (stage === "backlog") {
+        defaultStatus = "backlog";
+        stageLabel = "Backlog";
+        defaultSubColumnId = "ed-ingest-queue";
       } else {
-        status = ad.editing_started_at ? "in_progress" : "todo";
+        defaultStatus = ad.editing_started_at ? "in_progress" : "todo";
         stageLabel = ad.production_stage ? ad.production_stage.replace(/_/g, " ") : "Creative";
       }
 
+      const status: TaskStatus = override.status || defaultStatus;
+      if (override.status && !override.productionStage) {
+        if (override.status === "completed") stageLabel = "Approved";
+        else if (override.status === "in_review") stageLabel = "Creator Review";
+        else if (override.status === "in_progress") stageLabel = "Video Editing";
+        else if (override.status === "todo") stageLabel = "Queued for Edit";
+        else if (override.status === "backlog") stageLabel = "Backlog";
+      }
+
+      const assigneeId: string = override.assigneeId || defaultAssigneeId;
       const assignee = users.find((u) => u.id === assigneeId);
-      const priority: TaskPriority = (ad.deadline && ad.deadline < today) ? "urgent" : (status === "in_progress" ? "high" : "medium");
+      const dueDate: string = override.dueDate || ad.deadline || today;
+      const defaultPriority: TaskPriority =
+        dueDate < today ? "urgent" : status === "in_progress" ? "high" : "medium";
+      const priority: TaskPriority = override.priority || defaultPriority;
       const comments = allComments[`ad-${ad.id}`] || [];
+
+      const targetQty = Math.max(1, Number(override.targetQuantity) || 1);
+      const completedQty =
+        override.completedQuantity !== undefined
+          ? Math.max(0, Number(override.completedQuantity))
+          : status === "completed"
+          ? targetQty
+          : 0;
+
+      const customSubtasks: Subtask[] = Array.isArray(override.customSubtasks)
+        ? override.customSubtasks
+        : [];
+
+      let subtasks: Subtask[] = [];
+      if (customSubtasks.length > 0) {
+        subtasks = customSubtasks;
+      } else {
+        const totalUnits = Math.max(targetQty, completedQty, 1);
+        for (let i = 1; i <= totalUnits; i++) {
+          const isDone = i <= completedQty;
+          subtasks.push({
+            id: `sub-ad-${ad.id}-${i}`,
+            title:
+              totalUnits === 1
+                ? `Deliver creative: ${ad.name} (${stageLabel})`
+                : `Unit ${i} of ${ad.name}`,
+            completed: isDone,
+            completedAt: isDone ? override.updatedAt || ad.updated_at : undefined,
+            assignedTo: assigneeId,
+            sortOrder: i,
+            isCustom: false,
+          });
+        }
+      }
+
+      const defaultDesc = `AdFlow creative [${ad.name}]. Production Stage: ${stageLabel}.${
+        ad.notes ? `\n\nNotes: ${ad.notes}` : ""
+      }`;
 
       return {
         id: `ad-${ad.id}`,
-        taskNumber: ad.name, // Real AdFlow creative code e.g. HIM0223, TAM0225, ISH0058
-        title: `${ad.name} — ${stageLabel}`,
-        description: `AdFlow creative [${ad.name}]. Production Stage: ${stageLabel}.${ad.notes ? `\n\nNotes: ${ad.notes}` : ""}`,
+        taskNumber: ad.name,
+        title: override.title || `${ad.name} — ${stageLabel}`,
+        description: override.description !== undefined ? override.description : defaultDesc,
         status,
         priority,
         assigneeId,
         creatorId: ad.creator_id || (users[0]?.id || ""),
-        dueDate: ad.deadline || today,
-        subtasks: [
-          {
-            id: `sub-ad-${ad.id}-1`,
-            title: `Deliver creative: ${ad.name} (${stageLabel})`,
-            completed: status === "completed",
-            assignedTo: assigneeId,
-            sortOrder: 1,
-            isCustom: false,
-          },
-        ],
-        project: assignee?.department || (isEditStage ? "Video Editing" : "Content & Creative"),
-        tags: ["AdFlow", "Active Creative", stageLabel],
+        dueDate,
+        subtasks,
+        customSubtasks,
+        project:
+          override.project ||
+          assignee?.department ||
+          (isEditStage ? "Video Editing" : "Content & Creative"),
+        tags:
+          Array.isArray(override.tags) && override.tags.length > 0
+            ? override.tags
+            : ["AdFlow", "Active Creative", stageLabel],
         createdAt: ad.created_at || new Date().toISOString(),
-        updatedAt: ad.updated_at || new Date().toISOString(),
+        updatedAt: override.updatedAt || ad.updated_at || new Date().toISOString(),
         comments,
-        targetQuantity: 1,
-        completedQuantity: status === "completed" ? 1 : 0,
-        manualCompletedQuantity: 0,
-        autoCompletedQuantity: status === "completed" ? 1 : 0,
+        targetQuantity: targetQty,
+        completedQuantity: completedQty,
+        manualCompletedQuantity: completedQty,
+        autoCompletedQuantity: 0,
         isCarried: false,
-        deliverableUrl: ad.drive_url,
+        deliverableUrl:
+          override.deliverableUrl !== undefined
+            ? override.deliverableUrl
+            : override.deliverableAsset?.url || ad.drive_url,
+        deliverableAsset: override.deliverableAsset,
+        isRevisionRequested: override.isRevisionRequested,
+        revisionReason: override.revisionReason,
+        revisionNotes: override.revisionNotes,
+        blockedByTaskIds: override.blockedByTaskIds || [],
+        startDate: override.startDate,
+        dueTime: override.dueTime,
+        estimatedHours: override.estimatedHours,
+        actualHours: override.actualHours,
+        timeTracking: override.timeTracking,
+        isArchived: Boolean(override.isArchived),
+        archivedAt: override.archivedAt,
+        archivedBy: override.archivedBy,
         adId: ad.id,
         creativeName: ad.name,
-        productionStage: ad.production_stage,
-        subColumnId,
-        parentColumnId: status,
-        templateRole,
+        productionStage: override.productionStage || ad.production_stage,
+        subColumnId:
+          override.subColumnId !== undefined ? override.subColumnId : defaultSubColumnId,
+        parentColumnId: override.parentColumnId || status,
+        templateRole: override.templateRole || defaultTemplateRole,
       };
     });
 
@@ -544,11 +651,12 @@ export async function POST(req: Request) {
     const body = await req.json();
     const today = dateInTargetTimeZone();
 
+    const auth = await resolveRequestActor(req, body.creatorId);
     const userId = body.assigneeId;
     const taskName = (body.title || "Daily Task").trim();
     const targetDate = body.dueDate || today;
     const targetQuantity = Math.max(1, Number(body.targetQuantity) || 1);
-    const assignedBy = body.creatorId || null;
+    const assignedBy = auth.actor?.id || body.creatorId || userId || null;
 
     if (!userId) {
       return NextResponse.json({ error: "Assignee is required" }, { status: 400 });
@@ -556,6 +664,9 @@ export async function POST(req: Request) {
 
     const notesMeta: ParsedNotes = {
       description: body.description || "",
+      priority: body.priority || "medium",
+      project: body.project,
+      tags: Array.isArray(body.tags) ? body.tags : undefined,
       deliverableUrl: body.deliverableUrl,
       deliverableAsset: body.deliverableAsset,
       blockedByTaskIds: body.blockedByTaskIds,
@@ -571,7 +682,7 @@ export async function POST(req: Request) {
 
     const initialCompleted = body.status === "completed" ? targetQuantity : 0;
 
-    // Insert into daily_team_targets
+    // Insert into daily_team_targets (local DB via resilientSupabaseFetch)
     const { data: newRow, error } = await supabaseAdmin
       .from("daily_team_targets")
       .insert({
@@ -613,8 +724,18 @@ export async function POST(req: Request) {
         targetQuantity,
         targetDate,
         assigneeId: userId,
+        priority: body.priority || "medium",
       },
     });
+
+    dispatchWebhookEvent("task.created", {
+      taskId: newRow.id,
+      taskName,
+      targetQuantity,
+      targetDate,
+      assigneeId: userId,
+      createdBy: actorName,
+    }).catch(() => {});
 
     return NextResponse.json({ ok: true, target: newRow });
   } catch (error: any) {
@@ -629,6 +750,10 @@ export async function PATCH(req: Request) {
     const {
       id,
       status,
+      productionStage,
+      priority,
+      project,
+      tags,
       completedQuantity,
       targetQuantity,
       assigneeId,
@@ -657,55 +782,169 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: "Task ID is required" }, { status: 400 });
     }
 
-    // 1. Handle ad creative task updates (id starts with 'ad-')
+    const auth = await resolveRequestActor(req, actorId);
+    const verifiedActorId = auth.actor?.id || actorId || null;
+    const actorName = auth.actor?.name || (await getActorName(verifiedActorId));
+
+    // 1. Handle AdFlow creative task updates (`ad-*`) strictly via local `ad_overrides`
+    // CRITICAL RULE: NEVER modify `ads` table records!
     if (typeof id === "string" && id.startsWith("ad-")) {
-      const realAdId = id.replace("ad-", "");
-      const adUpdates: Record<string, any> = {
-        updated_at: new Date().toISOString(),
+      const realAdId = id.replace(/^ad-/, "");
+      const db = loadLocalDb();
+      if (!db.ad_overrides) db.ad_overrides = {};
+
+      const existingAd = db.ads.find((a) => a.id === realAdId);
+      const currentOverride: Record<string, any> = {
+        ...(db.ad_overrides[realAdId] || {}),
       };
 
-      if (assigneeId) {
-        adUpdates.editor_id = assigneeId;
+      const prevAssignee =
+        currentOverride.assigneeId || existingAd?.editor_id || existingAd?.creator_id;
+
+      if (assigneeId !== undefined) currentOverride.assigneeId = assigneeId;
+      if (dueDate !== undefined) currentOverride.dueDate = dueDate;
+      if (priority !== undefined) currentOverride.priority = priority;
+      if (project !== undefined) currentOverride.project = project;
+      if (tags !== undefined) currentOverride.tags = tags;
+      if (title !== undefined) currentOverride.title = title.trim();
+      if (description !== undefined) currentOverride.description = description;
+      if (deliverableUrl !== undefined) currentOverride.deliverableUrl = deliverableUrl;
+      if (deliverableAsset !== undefined) currentOverride.deliverableAsset = deliverableAsset;
+      if (isRevisionRequested !== undefined)
+        currentOverride.isRevisionRequested = isRevisionRequested;
+      if (revisionReason !== undefined) currentOverride.revisionReason = revisionReason;
+      if (revisionNotes !== undefined) currentOverride.revisionNotes = revisionNotes;
+      if (blockedByTaskIds !== undefined) currentOverride.blockedByTaskIds = blockedByTaskIds;
+      if (customSubtasks !== undefined) currentOverride.customSubtasks = customSubtasks;
+      if (startDate !== undefined) currentOverride.startDate = startDate;
+      if (dueTime !== undefined) currentOverride.dueTime = dueTime;
+      if (estimatedHours !== undefined) currentOverride.estimatedHours = estimatedHours;
+      if (actualHours !== undefined) currentOverride.actualHours = actualHours;
+      if (timeTracking !== undefined) currentOverride.timeTracking = timeTracking;
+      if (subColumnId !== undefined) currentOverride.subColumnId = subColumnId;
+      if (parentColumnId !== undefined) currentOverride.parentColumnId = parentColumnId;
+      if (templateRole !== undefined) currentOverride.templateRole = templateRole;
+
+      if (body.restore === true || body.isArchived === false) {
+        currentOverride.isArchived = false;
+        currentOverride.archivedAt = undefined;
+        currentOverride.archivedBy = null;
       }
 
-      if (dueDate) {
-        adUpdates.deadline = dueDate;
+      if (targetQuantity !== undefined) {
+        currentOverride.targetQuantity = Math.max(1, Number(targetQuantity));
+      }
+      const effectiveTargetQty = currentOverride.targetQuantity || 1;
+      const prevAdCompletedQty = Number(currentOverride.completedQuantity || 0);
+
+      if (productionStage !== undefined) {
+        currentOverride.productionStage = productionStage;
+        const stg = String(productionStage).toLowerCase();
+        if (!status) {
+          if (stg === "approved") {
+            currentOverride.status = "completed";
+            currentOverride.isRevisionRequested = false;
+            currentOverride.completedQuantity = effectiveTargetQty;
+          } else if (
+            stg === "creator_review" ||
+            stg === "pending_review" ||
+            stg === "final_review"
+          ) {
+            currentOverride.status = "in_review";
+          } else if (
+            stg === "editing" ||
+            stg === "shoot_complete" ||
+            stg === "shooting"
+          ) {
+            currentOverride.status = "in_progress";
+          } else if (
+            stg === "ready_for_edit" ||
+            stg === "ready_to_shoot" ||
+            stg === "ready_for_shoot"
+          ) {
+            currentOverride.status = "todo";
+            currentOverride.completedQuantity = 0;
+          } else if (stg === "backlog") {
+            currentOverride.status = "backlog";
+            currentOverride.completedQuantity = 0;
+          }
+        }
       }
 
-      if (deliverableUrl) {
-        adUpdates.drive_url = deliverableUrl;
+      if (status) {
+        currentOverride.status = status;
+        if (status === "in_progress") {
+          if (productionStage === undefined) currentOverride.productionStage = "editing";
+          if (!currentOverride.completedQuantity && effectiveTargetQty > 1) {
+            currentOverride.completedQuantity = 1;
+          }
+        } else if (status === "todo") {
+          if (productionStage === undefined) currentOverride.productionStage = "ready_for_edit";
+          currentOverride.completedQuantity = 0;
+        } else if (status === "backlog") {
+          if (productionStage === undefined) currentOverride.productionStage = "backlog";
+          currentOverride.completedQuantity = 0;
+        } else if (status === "in_review") {
+          if (productionStage === undefined) currentOverride.productionStage = "creator_review";
+        } else if (status === "completed") {
+          if (productionStage === undefined) currentOverride.productionStage = "approved";
+          currentOverride.isRevisionRequested = false;
+          currentOverride.completedQuantity = effectiveTargetQty;
+        }
       }
 
-      // Handle status mappings directly to Supabase ads table
-      if (status === "in_progress") {
-        adUpdates.production_stage = "editing";
-        adUpdates.editing_started_at = new Date().toISOString();
-      } else if (status === "todo") {
-        adUpdates.production_stage = "ready_for_edit";
-        adUpdates.editing_started_at = null;
-      } else if (status === "in_review") {
-        adUpdates.production_stage = "creator_review";
-        adUpdates.status = "pending_review";
-        adUpdates.submitted_at = new Date().toISOString();
-      } else if (status === "completed") {
-        adUpdates.production_stage = "approved";
-        adUpdates.status = "approved";
-        adUpdates.approved_at = new Date().toISOString();
+      if (completedQuantity !== undefined) {
+        const safeQty = Math.max(0, Number(completedQuantity));
+        currentOverride.completedQuantity = safeQty;
+        if (!status && productionStage === undefined) {
+          if (safeQty >= effectiveTargetQty) {
+            currentOverride.status = "completed";
+            currentOverride.productionStage = "approved";
+            currentOverride.isRevisionRequested = false;
+          } else if (safeQty > 0) {
+            currentOverride.status = "in_progress";
+            currentOverride.productionStage = "editing";
+          } else if (
+            currentOverride.status === "completed" ||
+            (currentOverride.status === "in_progress" && prevAdCompletedQty > 0)
+          ) {
+            currentOverride.status = "todo";
+            currentOverride.productionStage = "ready_for_edit";
+          }
+        }
       }
 
-      const { data: updatedAd, error: adErr } = await supabaseAdmin
-        .from("ads")
-        .update(adUpdates)
-        .eq("id", realAdId)
-        .select()
-        .single();
+      currentOverride.updatedAt = new Date().toISOString();
+      db.ad_overrides[realAdId] = currentOverride;
+      saveLocalDb(db);
 
-      if (adErr) {
-        console.error("Update ad error:", adErr);
-        return NextResponse.json({ error: adErr.message }, { status: 500 });
+      if (assigneeId && assigneeId !== prevAssignee) {
+        await sendTargetedNotification(
+          assigneeId,
+          `Task Reassigned to You: ${existingAd?.name || id}`,
+          `${actorName} reassigned "${existingAd?.name || id}" to you.`,
+          realAdId
+        );
       }
 
-      return NextResponse.json({ ok: true, target: updatedAd });
+      try {
+        await supabaseAdmin.from("audit_logs").insert({
+          actor_id: verifiedActorId,
+          action: status ? "status_changed" : "updated_task",
+          target_type: "daily_team_target",
+          target_id: id,
+          metadata: {
+            taskName: existingAd?.name || id,
+            status: currentOverride.status,
+            assigneeId: currentOverride.assigneeId,
+          },
+        });
+      } catch {}
+
+      return NextResponse.json({
+        ok: true,
+        target: { id, adId: realAdId, ...currentOverride },
+      });
     }
 
     // 2. Regular daily team target updates
@@ -721,9 +960,13 @@ export async function PATCH(req: Request) {
 
     const currentNotesMeta = parseNotes(existing.notes);
     if (description !== undefined) currentNotesMeta.description = description;
+    if (priority !== undefined) currentNotesMeta.priority = priority;
+    if (project !== undefined) currentNotesMeta.project = project;
+    if (tags !== undefined) currentNotesMeta.tags = tags;
     if (deliverableUrl !== undefined) currentNotesMeta.deliverableUrl = deliverableUrl;
     if (deliverableAsset !== undefined) currentNotesMeta.deliverableAsset = deliverableAsset;
-    if (isRevisionRequested !== undefined) currentNotesMeta.isRevisionRequested = isRevisionRequested;
+    if (isRevisionRequested !== undefined)
+      currentNotesMeta.isRevisionRequested = isRevisionRequested;
     if (revisionReason !== undefined) currentNotesMeta.revisionReason = revisionReason;
     if (revisionNotes !== undefined) currentNotesMeta.revisionNotes = revisionNotes;
     if (blockedByTaskIds !== undefined) currentNotesMeta.blockedByTaskIds = blockedByTaskIds;
@@ -743,7 +986,6 @@ export async function PATCH(req: Request) {
 
     let auditAction = "updated_task";
     const auditMeta: Record<string, any> = {};
-    const actorName = await getActorName(actorId || existing.assigned_by);
 
     if (assigneeId && assigneeId !== existing.user_id) {
       updates.user_id = assigneeId;
@@ -786,6 +1028,37 @@ export async function PATCH(req: Request) {
 
     const currentTargetQty = updates.target_quantity ?? existing.target_quantity ?? 1;
     const autoQty = Number(existing.auto_completed_quantity) || 0;
+    const prevCompletedQty = Number(existing.completed_quantity) || 0;
+
+    if (productionStage !== undefined && !status) {
+      const stg = String(productionStage).toLowerCase();
+      if (stg === "approved") {
+        currentNotesMeta.statusOverride = "completed";
+        currentNotesMeta.isRevisionRequested = false;
+        updates.completed_quantity = currentTargetQty;
+        updates.manual_completed_quantity = Math.max(0, currentTargetQty - autoQty);
+      } else if (
+        stg === "creator_review" ||
+        stg === "pending_review" ||
+        stg === "final_review"
+      ) {
+        currentNotesMeta.statusOverride = "in_review";
+      } else if (
+        stg === "editing" ||
+        stg === "shoot_complete" ||
+        stg === "shooting"
+      ) {
+        currentNotesMeta.statusOverride = "in_progress";
+      } else if (
+        stg === "ready_for_edit" ||
+        stg === "ready_to_shoot" ||
+        stg === "ready_for_shoot"
+      ) {
+        currentNotesMeta.statusOverride = "todo";
+      } else if (stg === "backlog") {
+        currentNotesMeta.statusOverride = "backlog";
+      }
+    }
 
     // Handle status changes
     if (status) {
@@ -818,6 +1091,31 @@ export async function PATCH(req: Request) {
       const safeQty = Math.max(autoQty, Number(completedQuantity));
       updates.completed_quantity = safeQty;
       updates.manual_completed_quantity = Math.max(0, safeQty - autoQty);
+
+      // Keep statusOverride synchronized when progress/subtasks update completedQuantity without explicit `status`
+      if (!status && productionStage === undefined) {
+        if (safeQty >= currentTargetQty) {
+          currentNotesMeta.statusOverride = "completed";
+          currentNotesMeta.isRevisionRequested = false;
+          auditAction = "completed_task";
+        } else if (safeQty > 0) {
+          if (
+            !currentNotesMeta.statusOverride ||
+            currentNotesMeta.statusOverride === "todo" ||
+            currentNotesMeta.statusOverride === "backlog" ||
+            currentNotesMeta.statusOverride === "completed"
+          ) {
+            currentNotesMeta.statusOverride = "in_progress";
+          }
+        } else {
+          if (
+            currentNotesMeta.statusOverride === "completed" ||
+            (currentNotesMeta.statusOverride === "in_progress" && prevCompletedQty > 0)
+          ) {
+            currentNotesMeta.statusOverride = "todo";
+          }
+        }
+      }
     }
 
     updates.notes = stringifyNotes(currentNotesMeta);
@@ -837,7 +1135,7 @@ export async function PATCH(req: Request) {
     // Insert audit log
     try {
       await supabaseAdmin.from("audit_logs").insert({
-        actor_id: actorId || existing.assigned_by || null,
+        actor_id: verifiedActorId || existing.assigned_by || null,
         action: auditAction,
         target_type: "daily_team_target",
         target_id: id,
@@ -847,6 +1145,32 @@ export async function PATCH(req: Request) {
         },
       });
     } catch {}
+
+    // Dispatch outbound webhooks for key lifecycle transitions
+    if (isRevisionRequested === true) {
+      dispatchWebhookEvent("task.revision_requested", {
+        taskId: id,
+        taskName: existing.task_name,
+        revisionReason,
+        revisionNotes,
+        actorName,
+      }).catch(() => {});
+    } else if (status === "in_review") {
+      dispatchWebhookEvent("task.review_submitted", {
+        taskId: id,
+        taskName: existing.task_name,
+        deliverableUrl: deliverableUrl || currentNotesMeta.deliverableUrl,
+        actorName,
+      }).catch(() => {});
+    } else if (status === "completed") {
+      dispatchWebhookEvent("task.completed", {
+        taskId: id,
+        taskName: existing.task_name,
+        completedQuantity: updates.completed_quantity ?? existing.completed_quantity,
+        targetQuantity: currentTargetQty,
+        actorName,
+      }).catch(() => {});
+    }
 
     return NextResponse.json({ ok: true, target: updatedRow });
   } catch (error: any) {
@@ -865,21 +1189,28 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Task ID is required" }, { status: 400 });
     }
 
-    // If ad creative task: soft-delete in ads table
-    if (id.startsWith("ad-")) {
-      const realAdId = id.replace("ad-", "");
-      const { error: adErr } = await supabaseAdmin
-        .from("ads")
-        .update({
-          deleted_at: new Date().toISOString(),
-          deleted_by: actorId || null,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", realAdId);
+    const auth = await resolveRequestActor(req, actorId);
+    const verifiedActorId = auth.actor?.id || actorId || null;
 
-      if (adErr) {
-        return NextResponse.json({ error: adErr.message }, { status: 500 });
-      }
+    // If AdFlow creative task: archive locally in `ad_overrides` (NEVER touch `ads` table!)
+    if (id.startsWith("ad-")) {
+      const realAdId = id.replace(/^ad-/, "");
+      const db = loadLocalDb();
+      if (!db.ad_overrides) db.ad_overrides = {};
+
+      db.ad_overrides[realAdId] = {
+        ...(db.ad_overrides[realAdId] || {}),
+        isArchived: true,
+        archivedAt: new Date().toISOString(),
+        archivedBy: verifiedActorId,
+        updatedAt: new Date().toISOString(),
+      };
+      saveLocalDb(db);
+
+      dispatchWebhookEvent("task.archived", {
+        taskId: id,
+        archivedBy: auth.actor?.name || verifiedActorId,
+      }).catch(() => {});
 
       return NextResponse.json({ ok: true, archived: true });
     }
@@ -898,7 +1229,7 @@ export async function DELETE(req: Request) {
     const currentNotesMeta = parseNotes(existing.notes || null);
     currentNotesMeta.isArchived = true;
     currentNotesMeta.archivedAt = new Date().toISOString();
-    currentNotesMeta.archivedBy = actorId || null;
+    currentNotesMeta.archivedBy = verifiedActorId;
 
     const { error: updateErr } = await supabaseAdmin
       .from("daily_team_targets")
@@ -912,6 +1243,12 @@ export async function DELETE(req: Request) {
       console.error("Soft-delete target error:", updateErr);
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
+
+    dispatchWebhookEvent("task.archived", {
+      taskId: id,
+      taskName: existing.task_name,
+      archivedBy: auth.actor?.name || verifiedActorId,
+    }).catch(() => {});
 
     return NextResponse.json({ ok: true, archived: true });
   } catch (error: any) {

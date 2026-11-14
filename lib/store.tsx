@@ -29,8 +29,16 @@ import {
   SavedFilterPreset,
   AdsSyncMode,
   RoleTemplate,
+  OfflineMutation,
+  WebhookConfig,
 } from "./types";
 import { supabase, dateInTargetTimeZone, isCanonicalAdflowTask } from "./supabase";
+import {
+  playNotificationSound,
+  isSoundMuted,
+  setSoundMuted as setSoundMutedStorage,
+  toggleSoundMuted,
+} from "./sound";
 
 interface TaskContextType {
   tasks: Task[];
@@ -39,7 +47,13 @@ interface TaskContextType {
   currentUserId: string;
   isAdmin: boolean;
   isManager: boolean;
+  isDeveloper: boolean;
   isManagerOrAdmin: boolean;
+  isAdminOrDeveloper: boolean;
+  soundMuted: boolean;
+  setSoundMuted: (muted: boolean) => void;
+  toggleSound: () => void;
+  playNotificationSound: (type?: "task" | "reminder") => void;
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
   boardLayout: BoardLayout;
@@ -99,6 +113,9 @@ interface TaskContextType {
     startDate?: string;
     dueTime?: string;
     estimatedHours?: number;
+    subColumnId?: string;
+    parentColumnId?: TaskStatus;
+    templateRole?: Role;
   }) => Promise<Task | null>;
   updateTask: (taskId: string, updates: Partial<Task>) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
@@ -110,6 +127,7 @@ interface TaskContextType {
   updateTaskProgress: (taskId: string, completedUnits: number) => Promise<void>;
   addComment: (taskId: string, content: string, mentions?: string[]) => Promise<void>;
   deleteComment: (taskId: string, commentId: string) => Promise<void>;
+  toggleReaction: (taskId: string, commentId: string, emoji: string) => Promise<void>;
   // Approval Workflow
   approveTask: (taskId: string) => Promise<void>;
   requestRevision: (taskId: string, reason: string, notes?: string) => Promise<void>;
@@ -176,6 +194,7 @@ interface TaskContextType {
   setAutoMaterializeRulesOnSync: (auto: boolean) => void;
   testAdsConnection: () => Promise<{ ok: boolean; latencyMs: number; message: string }>;
   pendingOfflineChangesCount: number;
+  offlineQueue: OfflineMutation[];
   clearPendingOfflineChanges: () => void;
   syncPendingChangesToLive: () => Promise<void>;
   // Role & User Templates
@@ -190,6 +209,12 @@ interface TaskContextType {
   deleteRoleTemplate: (id: string) => Promise<boolean>;
   applyTemplateToUser: (templateId: string, userId: string, targetDate?: string) => Promise<void>;
   reassignTask: (taskId: string, targetUserId: string, extraUpdates?: Partial<Task>) => Promise<void>;
+  // Webhooks
+  webhookConfig: WebhookConfig;
+  saveWebhookSettings: (updates: Partial<WebhookConfig>) => Promise<boolean>;
+  testWebhookEndpoint: (
+    overrideUrl?: string
+  ) => Promise<{ ok: boolean; status?: number; latencyMs: number; error?: string }>;
 }
 
 const defaultFilter: FilterState = {
@@ -216,6 +241,7 @@ const STORAGE_KEY_ENFORCE_LOCK = "satmi-ads-enforce-lock-v1";
 const STORAGE_KEY_AUTO_RULES = "satmi-ads-auto-rules-v1";
 const STORAGE_KEY_OFFLINE_CHANGES = "satmi-ads-offline-changes-v1";
 const STORAGE_KEY_ACTIVE_TEMPLATE = "satmi-active-template-id-v1";
+const STORAGE_KEY_OFFLINE_QUEUE = "satmi-ads-offline-queue-v1";
 
 export function isTaskAdflow(task: Task): boolean {
   // Only target actual AdFlow creative entities, NEVER filter out regular daily tasks
@@ -234,6 +260,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [currentUserId, setCurrentUserId] = useState<string>("");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
+  const [hasLoadedInitialTasks, setHasLoadedInitialTasks] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<ViewMode>("board");
   const [boardLayout, setBoardLayoutState] = useState<BoardLayout>("columns");
   const [density, setDensityState] = useState<DensityMode>("comfortable");
@@ -257,11 +284,65 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [enforceCanonicalLock, setEnforceCanonicalLockState] = useState<boolean>(true);
   const [autoMaterializeRulesOnSync, setAutoMaterializeRulesOnSyncState] = useState<boolean>(true);
   const [pendingOfflineChangesCount, setPendingOfflineChangesCount] = useState<number>(0);
+  const [offlineQueue, setOfflineQueue] = useState<OfflineMutation[]>([]);
+  const [webhookConfig, setWebhookConfig] = useState<WebhookConfig>({
+    enabled: false,
+    url: "",
+    events: [
+      "task.created",
+      "task.completed",
+      "task.review_submitted",
+      "task.revision_requested",
+      "task.archived",
+      "comment.created",
+    ],
+    secret: "",
+    lastTriggeredAt: null,
+    lastStatus: null,
+    lastError: null,
+  });
 
   // Role & User Templates State
   const [templates, setTemplates] = useState<RoleTemplate[]>([]);
   const [activeTemplateId, setActiveTemplateIdState] = useState<string | null>(null);
   const [isRoleTemplateModalOpen, setIsRoleTemplateModalOpen] = useState<boolean>(false);
+
+  // Notification Sound State
+  const [soundMuted, setSoundMutedState] = useState<boolean>(false);
+
+  useEffect(() => {
+    setSoundMutedState(isSoundMuted());
+  }, []);
+
+  const setSoundMuted = useCallback((muted: boolean) => {
+    setSoundMutedStorage(muted);
+    setSoundMutedState(muted);
+  }, []);
+
+  const toggleSound = useCallback(() => {
+    const next = toggleSoundMuted();
+    setSoundMutedState(next);
+  }, []);
+
+  // Track known allotted tasks and unread notifications for active user to play sound on new arrivals
+  const currentUserIdRef = useRef<string>("");
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
+
+  const knownUserTasksRef = useRef<{ userId: string; taskIds: Set<string>; initialized: boolean }>({
+    userId: "",
+    taskIds: new Set(),
+    initialized: false,
+  });
+
+  const knownUnreadNotifsRef = useRef<{ userId: string; ids: Set<string>; initialized: boolean }>({
+    userId: "",
+    ids: new Set(),
+    initialized: false,
+  });
+
+  const lastLocalAllotTimestampRef = useRef<number>(0);
 
   const setActiveTemplateId = useCallback((id: string | null) => {
     setActiveTemplateIdState(id);
@@ -304,6 +385,30 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data.notifications)) {
+        const unreadIds = new Set<string>(
+          data.notifications.filter((n: NotificationItem) => !n.readAt).map((n: NotificationItem) => n.id)
+        );
+        if (
+          knownUnreadNotifsRef.current.userId !== currentUserId ||
+          !knownUnreadNotifsRef.current.initialized
+        ) {
+          knownUnreadNotifsRef.current = {
+            userId: currentUserId,
+            ids: unreadIds,
+            initialized: true,
+          };
+        } else {
+          let hasNewUnread = false;
+          for (const id of unreadIds) {
+            if (!knownUnreadNotifsRef.current.ids.has(id)) {
+              hasNewUnread = true;
+              knownUnreadNotifsRef.current.ids.add(id);
+            }
+          }
+          if (hasNewUnread && Date.now() - lastLocalAllotTimestampRef.current > 2000) {
+            playNotificationSound("task");
+          }
+        }
         setNotifications(data.notifications);
         setUnreadNotificationsCount(data.unreadCount || 0);
       }
@@ -384,9 +489,18 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       if (savedAutoRules !== null) {
         setAutoMaterializeRulesOnSyncState(savedAutoRules === "true");
       }
-      const savedPending = localStorage.getItem(STORAGE_KEY_OFFLINE_CHANGES);
-      if (savedPending) {
-        setPendingOfflineChangesCount(Number(savedPending) || 0);
+      const savedQueueRaw = localStorage.getItem(STORAGE_KEY_OFFLINE_QUEUE);
+      if (savedQueueRaw) {
+        const parsedQueue = JSON.parse(savedQueueRaw);
+        if (Array.isArray(parsedQueue)) {
+          setOfflineQueue(parsedQueue);
+          setPendingOfflineChangesCount(parsedQueue.length);
+        }
+      } else {
+        const savedPending = localStorage.getItem(STORAGE_KEY_OFFLINE_CHANGES);
+        if (savedPending) {
+          setPendingOfflineChangesCount(Number(savedPending) || 0);
+        }
       }
       const savedTemplate = localStorage.getItem(STORAGE_KEY_ACTIVE_TEMPLATE);
       if (savedTemplate) {
@@ -395,22 +509,135 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
-  const recordOfflineChange = useCallback(() => {
-    setPendingOfflineChangesCount((prev) => {
-      const next = prev + 1;
-      try {
-        localStorage.setItem(STORAGE_KEY_OFFLINE_CHANGES, String(next));
-      } catch {}
-      return next;
-    });
-  }, []);
+  const enqueueOfflineMutation = useCallback(
+    (mutation: Omit<OfflineMutation, "id" | "createdAt">) => {
+      setOfflineQueue((prev) => {
+        let nextQueue = [...prev];
+
+        if (mutation.type === "create") {
+          nextQueue.push({
+            ...mutation,
+            id: `off_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            createdAt: new Date().toISOString(),
+          });
+        } else if (mutation.taskId.startsWith("temp-")) {
+          // If modifying or deleting a task that was created while offline
+          const createIdx = nextQueue.findIndex(
+            (m) => m.type === "create" && m.taskId === mutation.taskId
+          );
+          if (createIdx !== -1) {
+            if (mutation.type === "delete") {
+              nextQueue.splice(createIdx, 1);
+            } else {
+              nextQueue[createIdx] = {
+                ...nextQueue[createIdx],
+                payload: {
+                  ...nextQueue[createIdx].payload,
+                  ...mutation.payload,
+                },
+              };
+            }
+          }
+        } else {
+          // Existing DB task mutation: coalesce updates on same taskId if applicable
+          const existingUpdateIdx = nextQueue.findIndex(
+            (m) =>
+              m.taskId === mutation.taskId &&
+              m.type === mutation.type &&
+              (mutation.type === "update" ||
+                mutation.type === "progress" ||
+                mutation.type === "subtask")
+          );
+          if (existingUpdateIdx !== -1) {
+            nextQueue[existingUpdateIdx] = {
+              ...nextQueue[existingUpdateIdx],
+              payload: {
+                ...nextQueue[existingUpdateIdx].payload,
+                ...mutation.payload,
+              },
+              createdAt: new Date().toISOString(),
+            };
+          } else {
+            nextQueue.push({
+              ...mutation,
+              id: `off_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+              createdAt: new Date().toISOString(),
+            });
+          }
+        }
+
+        try {
+          localStorage.setItem(STORAGE_KEY_OFFLINE_QUEUE, JSON.stringify(nextQueue));
+          localStorage.setItem(STORAGE_KEY_OFFLINE_CHANGES, String(nextQueue.length));
+        } catch {}
+        setPendingOfflineChangesCount(nextQueue.length);
+        return nextQueue;
+      });
+    },
+    []
+  );
 
   const clearPendingOfflineChanges = useCallback(() => {
+    setOfflineQueue([]);
     setPendingOfflineChangesCount(0);
     try {
+      localStorage.removeItem(STORAGE_KEY_OFFLINE_QUEUE);
       localStorage.removeItem(STORAGE_KEY_OFFLINE_CHANGES);
     } catch {}
   }, []);
+
+  const replayOfflineQueue = useCallback(async () => {
+    let queueToReplay: OfflineMutation[] = [];
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_OFFLINE_QUEUE);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) queueToReplay = parsed;
+      }
+    } catch {}
+
+    if (queueToReplay.length === 0) {
+      clearPendingOfflineChanges();
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      for (const item of queueToReplay) {
+        try {
+          if (item.type === "create") {
+            await fetch("/api/tasks", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(item.payload),
+            });
+          } else if (item.type === "delete") {
+            const actorId = item.payload.actorId || currentUserId;
+            await fetch(
+              `/api/tasks?id=${encodeURIComponent(item.taskId)}&actorId=${encodeURIComponent(
+                actorId
+              )}`,
+              { method: "DELETE" }
+            );
+          } else {
+            await fetch("/api/tasks", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                id: item.taskId,
+                ...item.payload,
+              }),
+            });
+          }
+        } catch (replayErr) {
+          console.error("Failed to replay offline mutation:", item, replayErr);
+        }
+      }
+      clearPendingOfflineChanges();
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [clearPendingOfflineChanges, currentUserId]);
 
   const setBoardLayout = useCallback((layout: BoardLayout) => {
     setBoardLayoutState(layout);
@@ -439,6 +666,36 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (data.tasks && Array.isArray(data.tasks)) {
+        const activeUserId = currentUserIdRef.current;
+        if (activeUserId) {
+          const myTaskIds = new Set<string>(
+            data.tasks
+              .filter((t: Task) => t.assigneeId === activeUserId && !t.isArchived)
+              .map((t: Task) => t.id)
+          );
+          if (
+            knownUserTasksRef.current.userId !== activeUserId ||
+            !knownUserTasksRef.current.initialized
+          ) {
+            knownUserTasksRef.current = {
+              userId: activeUserId,
+              taskIds: myTaskIds,
+              initialized: true,
+            };
+          } else {
+            let hasNewlyAllotted = false;
+            for (const id of myTaskIds) {
+              if (!id.startsWith("temp-") && !knownUserTasksRef.current.taskIds.has(id)) {
+                hasNewlyAllotted = true;
+                knownUserTasksRef.current.taskIds.add(id);
+              }
+            }
+            if (hasNewlyAllotted && Date.now() - lastLocalAllotTimestampRef.current > 2500) {
+              playNotificationSound("task");
+            }
+          }
+        }
+
         setTasks((prev) => {
           // If drawer is currently open on a task, preserve any in-memory comments/subtasks
           const activeId = selectedTaskIdRef.current;
@@ -468,6 +725,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error("fetchTasks error:", err);
     } finally {
+      setHasLoadedInitialTasks(true);
       if (showIndicator) setIsSyncing(false);
     }
   }, []);
@@ -500,12 +758,27 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Fetch Webhook Configuration
+  const fetchWebhookConfig = useCallback(async () => {
+    try {
+      const res = await fetch("/api/webhooks", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.config) {
+        setWebhookConfig(data.config);
+      }
+    } catch (err) {
+      console.error("fetchWebhookConfig error:", err);
+    }
+  }, []);
+
   // Initial load
   useEffect(() => {
     fetchTasks(true);
     fetchDelegatorRules();
     fetchTemplates();
-  }, [fetchTasks, fetchDelegatorRules, fetchTemplates]);
+    fetchWebhookConfig();
+  }, [fetchTasks, fetchDelegatorRules, fetchTemplates, fetchWebhookConfig]);
 
   useEffect(() => {
     if (currentUserId) {
@@ -516,8 +789,33 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   // Authenticate user session with Supabase Auth & persistent session
   useEffect(() => {
     async function checkAuthSession() {
+      const syncServerCookie = (userId: string) => {
+        fetch("/api/auth", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ switchUserId: userId }),
+        }).catch(() => {});
+      };
+
       try {
         setIsAuthLoading(true);
+
+        // 0. Check server-side signed session cookie first
+        try {
+          const cookieRes = await fetch("/api/auth", { cache: "no-store" });
+          if (cookieRes.ok) {
+            const cookieData = await cookieRes.json();
+            if (cookieData.ok && cookieData.user?.id) {
+              const matched = users.find((u) => u.id === cookieData.user.id);
+              if (matched && matched.active !== false && !matched.deletedAt) {
+                setCurrentUserId(matched.id);
+                setIsAuthenticated(true);
+                setIsAuthLoading(false);
+                return;
+              }
+            }
+          }
+        } catch {}
 
         // 1. Check Supabase auth session
         const { data: { session } } = await supabase.auth.getSession();
@@ -527,6 +825,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
           if (matched && matched.active !== false && !matched.deletedAt) {
             setCurrentUserId(matched.id);
             setIsAuthenticated(true);
+            syncServerCookie(matched.id);
             setIsAuthLoading(false);
             return;
           }
@@ -542,6 +841,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
               if (matched && matched.active !== false && !matched.deletedAt) {
                 setCurrentUserId(matched.id);
                 setIsAuthenticated(true);
+                syncServerCookie(matched.id);
                 setIsAuthLoading(false);
                 return;
               }
@@ -566,6 +866,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
           if (defaultAdmin) {
             setCurrentUserId(defaultAdmin.id);
             setIsAuthenticated(true);
+            syncServerCookie(defaultAdmin.id);
             try {
               localStorage.setItem("satmi-auth-user", JSON.stringify(defaultAdmin));
               localStorage.setItem(STORAGE_KEY_USER, defaultAdmin.id);
@@ -587,8 +888,10 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
     if (users.length > 0) {
       checkAuthSession();
+    } else if (hasLoadedInitialTasks) {
+      setIsAuthLoading(false);
     }
-  }, [users]);
+  }, [users, hasLoadedInitialTasks]);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -632,7 +935,10 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await supabase.auth.signOut();
+      await Promise.allSettled([
+        supabase.auth.signOut(),
+        fetch("/api/auth", { method: "DELETE" }),
+      ]);
     } catch (err) {
       console.warn("Sign out error:", err);
     }
@@ -650,6 +956,11 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     try {
       localStorage.setItem(STORAGE_KEY_USER, userId);
     } catch {}
+    fetch("/api/auth", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ switchUserId: userId }),
+    }).catch(() => {});
   }, []);
 
   const createUser = useCallback(
@@ -740,16 +1051,21 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const setIsAdsManagementConnected = useCallback((connected: boolean) => {
-    setIsAdsManagementConnectedState(connected);
-    try {
-      localStorage.setItem(STORAGE_KEY_ADS_CONNECTED, String(connected));
-    } catch {}
-    if (connected) {
-      fetchTasks(true);
-      fetchDelegatorRules();
-    }
-  }, [fetchTasks, fetchDelegatorRules]);
+  const setIsAdsManagementConnected = useCallback(
+    (connected: boolean) => {
+      setIsAdsManagementConnectedState(connected);
+      try {
+        localStorage.setItem(STORAGE_KEY_ADS_CONNECTED, String(connected));
+      } catch {}
+      if (connected) {
+        replayOfflineQueue().then(() => {
+          fetchTasks(true);
+          fetchDelegatorRules();
+        });
+      }
+    },
+    [replayOfflineQueue, fetchTasks, fetchDelegatorRules]
+  );
 
   const toggleAdsManagementConnection = useCallback(() => {
     setIsAdsManagementConnectedState((prev) => {
@@ -758,12 +1074,14 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(STORAGE_KEY_ADS_CONNECTED, String(next));
       } catch {}
       if (next) {
-        fetchTasks(true);
-        fetchDelegatorRules();
+        replayOfflineQueue().then(() => {
+          fetchTasks(true);
+          fetchDelegatorRules();
+        });
       }
       return next;
     });
-  }, [fetchTasks, fetchDelegatorRules]);
+  }, [replayOfflineQueue, fetchTasks, fetchDelegatorRules]);
 
   const setAdsSyncMode = useCallback((mode: AdsSyncMode) => {
     setAdsSyncModeState(mode);
@@ -890,6 +1208,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
           setViewMode("list");
         } else if (e.key === "d" || e.key === "D") {
           setViewMode("calendar");
+        } else if (e.key === "g" || e.key === "G") {
+          setViewMode("timeline");
         } else if ((e.key === "o" || e.key === "O") && isAdmin) {
           setViewMode("analytics");
         }
@@ -987,7 +1307,9 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   const isAdmin = currentUser.role === "admin";
   const isManager = currentUser.role === "manager";
+  const isDeveloper = currentUser.role === "developer";
   const isManagerOrAdmin = isAdmin || isManager;
+  const isAdminOrDeveloper = isAdmin || isDeveloper;
 
   const setFilter = useCallback((updates: Partial<FilterState>) => {
     setFilterState((prev) => ({ ...prev, ...updates }));
@@ -1101,9 +1423,42 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
       setTasks((prev) => [optimisticTask, ...prev]);
 
-      // If disconnected from Ads Management, keep change locally and do not push to remote database
+      const effectiveAssigneeId = data.assigneeId || currentUserId;
+      if (effectiveAssigneeId && effectiveAssigneeId === currentUserId) {
+        lastLocalAllotTimestampRef.current = Date.now();
+        playNotificationSound("task");
+      }
+
+      const createPayload = {
+        title: data.title,
+        description: data.description,
+        priority: data.priority,
+        status: data.status,
+        assigneeId: effectiveAssigneeId,
+        creatorId: currentUserId,
+        dueDate: data.dueDate,
+        targetQuantity: targetQty,
+        deliverableUrl: data.deliverableUrl || data.deliverableAsset?.url,
+        deliverableAsset: data.deliverableAsset,
+        blockedByTaskIds: data.blockedByTaskIds,
+        project: data.project,
+        tags: data.tags,
+        customSubtasks: data.customSubtasks,
+        startDate: data.startDate,
+        dueTime: data.dueTime,
+        estimatedHours: data.estimatedHours,
+        subColumnId: data.subColumnId,
+        parentColumnId: data.parentColumnId || data.status,
+        templateRole: data.templateRole,
+      };
+
+      // If disconnected from Ads Management, queue mutation locally for replay on reconnect
       if (!isAdsManagementConnected) {
-        recordOfflineChange();
+        enqueueOfflineMutation({
+          type: "create",
+          taskId: tempId,
+          payload: createPayload,
+        });
         return optimisticTask;
       }
 
@@ -1111,26 +1466,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch("/api/tasks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title: data.title,
-            description: data.description,
-            priority: data.priority,
-            status: data.status,
-            assigneeId: data.assigneeId,
-            creatorId: currentUserId,
-            dueDate: data.dueDate,
-            targetQuantity: targetQty,
-            deliverableUrl: data.deliverableUrl || data.deliverableAsset?.url,
-            deliverableAsset: data.deliverableAsset,
-            blockedByTaskIds: data.blockedByTaskIds,
-            customSubtasks: data.customSubtasks,
-            startDate: data.startDate,
-            dueTime: data.dueTime,
-            estimatedHours: data.estimatedHours,
-            subColumnId: data.subColumnId,
-            parentColumnId: data.parentColumnId || data.status,
-            templateRole: data.templateRole,
-          }),
+          body: JSON.stringify(createPayload),
         });
 
         if (!res.ok) throw new Error("Failed to create task");
@@ -1145,7 +1481,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
     },
-    [currentUserId, users, fetchTasks]
+    [currentUserId, users, fetchTasks, isAdsManagementConnected, enqueueOfflineMutation]
   );
 
   // 2. Update Task
@@ -1172,16 +1508,23 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
             nextCompleted = autoQty;
           }
 
-          finalCompletedQuantity = nextCompleted;
+          const shouldRecalcCompleted =
+            updates.completedQuantity !== undefined || updates.status !== undefined;
+
+          if (shouldRecalcCompleted) {
+            finalCompletedQuantity = nextCompleted;
+          }
 
           const targetQty = updates.targetQuantity ?? t.targetQuantity;
           const updatedSubtasks =
             updates.subtasks ??
-            t.subtasks.map((st, i) => ({
-              ...st,
-              completed: i < nextCompleted,
-              completedAt: i < nextCompleted ? new Date().toISOString() : undefined,
-            }));
+            (shouldRecalcCompleted
+              ? t.subtasks.map((st, i) => ({
+                  ...st,
+                  completed: i < nextCompleted,
+                  completedAt: i < nextCompleted ? new Date().toISOString() : undefined,
+                }))
+              : t.subtasks);
 
           const updatedAssignee = updates.assigneeId
             ? users.find((u) => u.id === updates.assigneeId)
@@ -1204,48 +1547,77 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         })
       );
 
-      // Async backend call
+      const target = tasks.find((t) => t.id === taskId);
+      const isStandard = target ? isCanonicalAdflowTask(target.title) : false;
+
+      if (
+        updates.assigneeId &&
+        updates.assigneeId === currentUserId &&
+        target &&
+        target.assigneeId !== currentUserId
+      ) {
+        lastLocalAllotTimestampRef.current = Date.now();
+        playNotificationSound("task");
+      }
+
+      const patchPayload = {
+        actorId: currentUserId,
+        status: updates.status,
+        productionStage: updates.productionStage,
+        priority: updates.priority,
+        completedQuantity:
+          updates.completedQuantity !== undefined || updates.status !== undefined
+            ? finalCompletedQuantity
+            : undefined,
+        targetQuantity: updates.targetQuantity,
+        assigneeId: updates.assigneeId,
+        dueDate: updates.dueDate,
+        title: isStandard ? undefined : updates.title,
+        description: updates.description,
+        project: updates.project,
+        tags: updates.tags,
+        deliverableUrl: updates.deliverableUrl,
+        deliverableAsset: updates.deliverableAsset,
+        isRevisionRequested: updates.isRevisionRequested,
+        revisionReason: updates.revisionReason,
+        revisionNotes: updates.revisionNotes,
+        blockedByTaskIds: updates.blockedByTaskIds,
+        subtasks: updates.subtasks,
+        customSubtasks: updates.customSubtasks,
+        startDate: updates.startDate,
+        dueTime: updates.dueTime,
+        estimatedHours: updates.estimatedHours,
+        actualHours: updates.actualHours,
+        timeTracking: updates.timeTracking,
+        subColumnId: updates.subColumnId,
+        parentColumnId: updates.parentColumnId || updates.status,
+        templateRole: updates.templateRole,
+      };
+
+      // Async backend call or offline queue
       if (!isAdsManagementConnected) {
-        recordOfflineChange();
+        enqueueOfflineMutation({
+          type: "update",
+          taskId,
+          payload: patchPayload,
+        });
         return;
       }
 
       try {
-        const target = tasks.find((t) => t.id === taskId);
-        const isStandard = target ? isCanonicalAdflowTask(target.title) : false;
-
         await fetch("/api/tasks", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: taskId,
-            actorId: currentUserId,
-            status: updates.status,
-            completedQuantity: finalCompletedQuantity,
-            targetQuantity: updates.targetQuantity,
-            assigneeId: updates.assigneeId,
-            dueDate: updates.dueDate,
-            title: isStandard ? undefined : updates.title,
-            description: updates.description,
-            deliverableUrl: updates.deliverableUrl,
-            deliverableAsset: updates.deliverableAsset,
-            isRevisionRequested: updates.isRevisionRequested,
-            revisionReason: updates.revisionReason,
-            revisionNotes: updates.revisionNotes,
-            blockedByTaskIds: updates.blockedByTaskIds,
-            customSubtasks: updates.customSubtasks,
-            startDate: updates.startDate,
-            dueTime: updates.dueTime,
-            estimatedHours: updates.estimatedHours,
-            actualHours: updates.actualHours,
-            timeTracking: updates.timeTracking,
+            ...patchPayload,
           }),
         });
       } catch (err) {
         console.error("updateTask sync error:", err);
       }
     },
-    [currentUserId, users, tasks]
+    [currentUserId, users, tasks, isAdsManagementConnected, enqueueOfflineMutation]
   );
 
   // 3. Delete Task (Soft-delete / Archive: ensures pipeline targets are never permanently dropped)
@@ -1265,7 +1637,11 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!isAdsManagementConnected) {
-        recordOfflineChange();
+        enqueueOfflineMutation({
+          type: "delete",
+          taskId,
+          payload: { actorId: currentUserId },
+        });
         return;
       }
 
@@ -1280,7 +1656,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         console.error("deleteTask sync error:", err);
       }
     },
-    [selectedTaskId, currentUserId]
+    [selectedTaskId, currentUserId, isAdsManagementConnected, enqueueOfflineMutation]
   );
 
   // Restore Task from Archive
@@ -1295,7 +1671,15 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (!isAdsManagementConnected) {
-        recordOfflineChange();
+        enqueueOfflineMutation({
+          type: "restore",
+          taskId,
+          payload: {
+            restore: true,
+            isArchived: false,
+            actorId: currentUserId,
+          },
+        });
         return;
       }
 
@@ -1314,7 +1698,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         console.error("restoreTask sync error:", err);
       }
     },
-    [currentUserId]
+    [currentUserId, isAdsManagementConnected, enqueueOfflineMutation]
   );
 
   // 4. Toggle Subtask (Supports both custom functional steps and unit checklist)
@@ -1376,6 +1760,19 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         })
       );
 
+      if (!isAdsManagementConnected) {
+        enqueueOfflineMutation({
+          type: "subtask",
+          taskId,
+          payload: {
+            completedQuantity: nextCompletedCount,
+            customSubtasks: nextCustomSubtasks,
+            actorId: currentUserId,
+          },
+        });
+        return;
+      }
+
       try {
         await fetch("/api/tasks", {
           method: "PATCH",
@@ -1391,7 +1788,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         console.error("toggleSubtask sync error:", err);
       }
     },
-    [currentUserId]
+    [currentUserId, isAdsManagementConnected, enqueueOfflineMutation]
   );
 
   // Add custom subtask checklist item
@@ -1489,7 +1886,14 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       );
 
       if (!isAdsManagementConnected) {
-        recordOfflineChange();
+        enqueueOfflineMutation({
+          type: "progress",
+          taskId,
+          payload: {
+            completedQuantity: finalCount,
+            actorId: currentUserId,
+          },
+        });
         return;
       }
 
@@ -1507,7 +1911,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         console.error("updateTaskProgress sync error:", err);
       }
     },
-    [currentUserId]
+    [currentUserId, isAdsManagementConnected, enqueueOfflineMutation]
   );
 
   // 6. Approval Actions
@@ -1776,6 +2180,128 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       }
     },
     []
+  );
+
+  const toggleReaction = useCallback(
+    async (taskId: string, commentId: string, emoji: string) => {
+      if (!currentUserId || !emoji) return;
+
+      // Optimistic toggle
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (t.id !== taskId) return t;
+          return {
+            ...t,
+            comments: (t.comments || []).map((c) => {
+              if (c.id !== commentId) return c;
+              const nextReactions: Record<string, string[]> = { ...(c.reactions || {}) };
+              const usersForEmoji = Array.isArray(nextReactions[emoji])
+                ? [...nextReactions[emoji]]
+                : [];
+              if (usersForEmoji.includes(currentUserId)) {
+                const filtered = usersForEmoji.filter((id) => id !== currentUserId);
+                if (filtered.length === 0) {
+                  delete nextReactions[emoji];
+                } else {
+                  nextReactions[emoji] = filtered;
+                }
+              } else {
+                nextReactions[emoji] = [...usersForEmoji, currentUserId];
+              }
+              return { ...c, reactions: nextReactions };
+            }),
+          };
+        })
+      );
+
+      try {
+        const res = await fetch(`/api/tasks/${taskId}/comments`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            commentId,
+            userId: currentUserId,
+            emoji,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.comment) {
+            setTasks((prev) =>
+              prev.map((t) => {
+                if (t.id !== taskId) return t;
+                return {
+                  ...t,
+                  comments: (t.comments || []).map((c) =>
+                    c.id === commentId ? data.comment : c
+                  ),
+                };
+              })
+            );
+          }
+        }
+      } catch (err) {
+        console.error("toggleReaction error:", err);
+      }
+    },
+    [currentUserId]
+  );
+
+  const saveWebhookSettings = useCallback(
+    async (updates: Partial<WebhookConfig>): Promise<boolean> => {
+      try {
+        const res = await fetch("/api/webhooks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...updates,
+            actorId: currentUserId,
+          }),
+        });
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data.config) {
+          setWebhookConfig(data.config);
+        }
+        return true;
+      } catch (err) {
+        console.error("saveWebhookSettings error:", err);
+        return false;
+      }
+    },
+    [currentUserId]
+  );
+
+  const testWebhookEndpoint = useCallback(
+    async (overrideUrl?: string) => {
+      try {
+        const res = await fetch("/api/webhooks", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: overrideUrl,
+            actorName: currentUser.name,
+          }),
+        });
+        const data = await res.json();
+        if (data.config) {
+          setWebhookConfig(data.config);
+        }
+        return {
+          ok: Boolean(data.ok),
+          status: data.status,
+          latencyMs: data.latencyMs || 0,
+          error: data.error,
+        };
+      } catch (err: any) {
+        return {
+          ok: false,
+          latencyMs: 0,
+          error: err?.message || "Failed to test webhook",
+        };
+      }
+    },
+    [currentUser]
   );
 
   const getTaskAuditLogs = useCallback(
@@ -2172,9 +2698,9 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   );
 
   const syncPendingChangesToLive = useCallback(async () => {
+    await replayOfflineQueue();
     await refreshAll();
-    clearPendingOfflineChanges();
-  }, [refreshAll, clearPendingOfflineChanges]);
+  }, [replayOfflineQueue, refreshAll]);
 
   return (
     <TaskContext.Provider
@@ -2186,7 +2712,13 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         currentUserId,
         isAdmin,
         isManager,
+        isDeveloper,
         isManagerOrAdmin,
+        isAdminOrDeveloper,
+        soundMuted,
+        setSoundMuted,
+        toggleSound,
+        playNotificationSound,
         viewMode,
         setViewMode,
         boardLayout,
@@ -2223,8 +2755,12 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         setAutoMaterializeRulesOnSync,
         testAdsConnection,
         pendingOfflineChangesCount,
+        offlineQueue,
         clearPendingOfflineChanges,
         syncPendingChangesToLive,
+        webhookConfig,
+        saveWebhookSettings,
+        testWebhookEndpoint,
         switchUser,
         isAuthenticated,
         isAuthLoading,
@@ -2246,6 +2782,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         updateTaskProgress,
         addComment,
         deleteComment,
+        toggleReaction,
         approveTask,
         requestRevision,
         submitForReview,
@@ -2309,3 +2846,6 @@ export function useTasks() {
   }
   return context;
 }
+
+export const useTaskStore = useTasks;
+

@@ -62,10 +62,10 @@ export function SubtaskChecklist({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">
-            Checklist & Action Steps
+            Checklist
           </span>
           <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-muted text-muted-foreground font-semibold">
-            {doneCount} / {totalCount} Done ({pct}%)
+            {doneCount}/{totalCount} ({pct}%)
           </span>
         </div>
 
@@ -107,16 +107,8 @@ export function SubtaskChecklist({
               className="flex items-center justify-between py-1.5 px-2 rounded-lg hover:bg-muted/40 group/item transition"
             >
               <div
-                onClick={() => !disabled && !isAutoIngested && onToggle(st.id)}
-                title={
-                  isAutoIngested
-                    ? "Auto-ingested from Adflow pipeline. Cannot be subtracted manually."
-                    : undefined
-                }
-                className={cn(
-                  "flex items-center gap-2.5 min-w-0 flex-1",
-                  isAutoIngested ? "cursor-not-allowed opacity-90" : "cursor-pointer"
-                )}
+                onClick={() => !disabled && onToggle(st.id)}
+                className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer"
               >
                 {st.completed ? (
                   <CheckSquare
@@ -140,10 +132,7 @@ export function SubtaskChecklist({
                 </span>
 
                 {isAutoIngested && (
-                  <span
-                    className="text-[9px] font-mono text-blue-500 bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.2 rounded font-medium shrink-0"
-                    title="Adflow Auto-Ingested"
-                  >
+                  <span className="text-[9px] font-mono text-blue-500 bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.2 rounded font-medium shrink-0">
                     ⚡ Auto
                   </span>
                 )}
@@ -174,7 +163,7 @@ export function SubtaskChecklist({
 
         {subtasks.length === 0 && (
           <p className="text-center text-xs text-muted-foreground py-2">
-            No steps defined yet. Click &quot;Add Step&quot; above to create checklist items.
+            No checklist steps yet.
           </p>
         )}
       </div>

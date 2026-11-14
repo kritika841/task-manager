@@ -159,18 +159,13 @@ export function AutoDelegatorModal() {
             <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Zap className="size-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-semibold text-foreground">
-                  Auto Delegator
-                </h2>
-                <span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-medium text-success">
-                  Connected to Ads Daily Targets
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Automatically assigns recurring daily targets to team members each day.
-              </p>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold text-foreground">
+                Auto Delegator
+              </h2>
+              <span className="rounded-full bg-success/15 px-2 py-0.5 text-[10px] font-medium text-success">
+                Recurring Rules
+              </span>
             </div>
           </div>
 
@@ -313,10 +308,7 @@ export function AutoDelegatorModal() {
 
               {delegatorRules.length === 0 && (
                 <div className="rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-                  No recurring delegator rules yet.
-                  <p className="mt-1 text-[11px]">
-                    Create a rule on the right to start assigning tasks automatically!
-                  </p>
+                  No recurring rules yet.
                 </div>
               )}
             </div>

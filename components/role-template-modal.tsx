@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   X,
   Layers,
@@ -15,25 +15,26 @@ import {
   Clapperboard,
   TrendingUp,
   Briefcase,
-  ChevronRight,
-  ChevronDown,
+  ShieldCheck,
+  Users,
   ArrowRightLeft,
   Clock,
-  CheckSquare,
-  AlertCircle,
   Copy,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
 import { RoleTemplate, Role, TaskStatus, ParentColumnDef, SubColumnDef } from "@/lib/types";
+import { dateInTargetTimeZone } from "@/lib/supabase";
 import { Button } from "./ui/button";
 import { cn } from "@/lib/utils";
 
-const ROLE_OPTIONS: { role: Role | "general"; label: string; icon: any; color: string }[] = [
-  { role: "developer", label: "Full-Stack Developer", icon: Code2, color: "text-blue-400 bg-blue-500/10 border-blue-500/30" },
-  { role: "content_creator", label: "Content Creator", icon: Clapperboard, color: "text-pink-400 bg-pink-500/10 border-pink-500/30" },
+export const ROLE_OPTIONS: { role: Role | "general"; label: string; icon: any; color: string }[] = [
   { role: "editor", label: "Video Editor", icon: Video, color: "text-amber-400 bg-amber-500/10 border-amber-500/30" },
+  { role: "content_creator", label: "Content Creator", icon: Clapperboard, color: "text-pink-400 bg-pink-500/10 border-pink-500/30" },
   { role: "media_buyer", label: "Media Buyer", icon: TrendingUp, color: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" },
-  { role: "general", label: "General Operations", icon: Briefcase, color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/30" },
+  { role: "developer", label: "Developer", icon: Code2, color: "text-blue-400 bg-blue-500/10 border-blue-500/30" },
+  { role: "manager", label: "Manager", icon: Users, color: "text-purple-400 bg-purple-500/10 border-purple-500/30" },
+  { role: "admin", label: "Admin", icon: ShieldCheck, color: "text-rose-400 bg-rose-500/10 border-rose-500/30" },
+  { role: "general", label: "General", icon: Briefcase, color: "text-indigo-400 bg-indigo-500/10 border-indigo-500/30" },
 ];
 
 const PARENT_COLUMNS_PRESET: { id: TaskStatus; label: string }[] = [
@@ -60,36 +61,37 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
     updateRoleTemplate,
     deleteRoleTemplate,
     applyTemplateToUser,
+    createTask,
     reassignTask,
     users,
     tasks,
     currentUser,
-    isManagerOrAdmin,
+    currentUserId,
   } = useTasks();
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
-    activeTemplateId || templates[0]?.id || "tpl-developer"
+    activeTemplateId || templates[0]?.id || "tpl-video-editor"
   );
+  const [roleFilter, setRoleFilter] = useState<string>("all");
   const [activeTab, setActiveTab] = useState<"templates" | "builder" | "reassign">("templates");
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [editingTemplate, setEditingTemplate] = useState<RoleTemplate | null>(null);
 
-  // Form state for new / edited template
+  // Builder state
   const [formName, setFormName] = useState("");
-  const [formRole, setFormRole] = useState<Role | "general">("developer");
+  const [formRole, setFormRole] = useState<Role | "general">("editor");
   const [formUserId, setFormUserId] = useState<string>("");
   const [formDesc, setFormDesc] = useState("");
   const [formParentCols, setFormParentCols] = useState<ParentColumnDef[]>([]);
 
   // Apply template state
-  const [applyUserId, setApplyUserId] = useState<string>("");
+  const [applyUserId, setApplyUserId] = useState<string>(currentUserId || "");
   const [applyDate, setApplyDate] = useState<string>("");
   const [applySuccessMessage, setApplySuccessMessage] = useState<string>("");
 
   // Reassignment state
   const [reassignSelectedTaskId, setReassignSelectedTaskId] = useState<string>("");
   const [reassignTargetUserId, setReassignTargetUserId] = useState<string>("");
-  const [reassignRole, setReassignRole] = useState<string>("all");
   const [reassignSuccessMsg, setReassignSuccessMsg] = useState<string>("");
 
   // New subcolumn inline input state
@@ -100,20 +102,60 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
   const [newSubColSLA, setNewSubColSLA] = useState(24);
   const [newSubColChecklist, setNewSubColChecklist] = useState("");
 
-  const currentTpl = templates.find((t) => t.id === selectedTemplateId) || templates[0];
+  useEffect(() => {
+    if (currentUserId && !applyUserId) {
+      setApplyUserId(currentUserId);
+    }
+  }, [currentUserId, applyUserId]);
 
-  const handleStartNewTemplate = () => {
-    setFormName("New Custom Role Template");
-    setFormRole("developer");
+  const filteredTemplates =
+    roleFilter === "all"
+      ? templates
+      : templates.filter((t) => t.role === roleFilter);
+
+  const currentTpl =
+    templates.find((t) => t.id === selectedTemplateId) ||
+    filteredTemplates[0] ||
+    templates[0];
+
+  const handleStartNewTemplate = (presetRole?: Role | "general") => {
+    const targetRole = presetRole || (currentUser?.role as Role) || "editor";
+    const roleLabel = ROLE_OPTIONS.find((r) => r.role === targetRole)?.label || "Custom";
+    setFormName(`${roleLabel} Workflow`);
+    setFormRole(targetRole);
     setFormUserId("");
-    setFormDesc("Custom workflow tailored with parent stages and role-specific sub-columns");
+    setFormDesc(`${roleLabel} pipeline stages and checklist`);
     setFormParentCols(
       PARENT_COLUMNS_PRESET.map((p) => ({
         id: p.id,
         label: p.label,
-        subColumns: [],
+        subColumns:
+          p.id === "todo"
+            ? [
+                {
+                  id: `sub-${Date.now()}-1`,
+                  label: `${roleLabel} Daily Deliverable`,
+                  description: "Primary daily task deliverable",
+                  defaultTargetQuantity: 2,
+                  slaHours: 24,
+                  defaultChecklist: ["Review brief", "Complete deliverable", "Submit link"],
+                  color: "#3b82f6",
+                },
+              ]
+            : [],
       }))
     );
+    setIsCreatingNew(true);
+    setEditingTemplate(null);
+    setActiveTab("builder");
+  };
+
+  const handleDuplicateTemplate = (tpl: RoleTemplate) => {
+    setFormName(`${tpl.name} (Custom)`);
+    setFormRole(tpl.role);
+    setFormUserId(tpl.userId || "");
+    setFormDesc(tpl.description || "");
+    setFormParentCols(JSON.parse(JSON.stringify(tpl.parentColumns)));
     setIsCreatingNew(true);
     setEditingTemplate(null);
     setActiveTab("builder");
@@ -131,10 +173,7 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
   };
 
   const handleSaveBuilder = async () => {
-    if (!formName.trim()) {
-      alert("Please provide a template name");
-      return;
-    }
+    if (!formName.trim()) return;
 
     if (isCreatingNew) {
       const created = await createRoleTemplate({
@@ -183,15 +222,11 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
     };
 
     setFormParentCols((prev) =>
-      prev.map((col) => {
-        if (col.id === parentId) {
-          return {
-            ...col,
-            subColumns: [...col.subColumns, newSub],
-          };
-        }
-        return col;
-      })
+      prev.map((col) =>
+        col.id === parentId
+          ? { ...col, subColumns: [...col.subColumns, newSub] }
+          : col
+      )
     );
 
     setNewSubColLabel("");
@@ -204,44 +239,64 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
 
   const handleDeleteSubColumn = (parentId: TaskStatus, subId: string) => {
     setFormParentCols((prev) =>
-      prev.map((col) => {
-        if (col.id === parentId) {
-          return {
-            ...col,
-            subColumns: col.subColumns.filter((s) => s.id !== subId),
-          };
-        }
-        return col;
-      })
+      prev.map((col) =>
+        col.id === parentId
+          ? { ...col, subColumns: col.subColumns.filter((s) => s.id !== subId) }
+          : col
+      )
     );
   };
 
-  const handleApplyTemplate = async () => {
-    if (!applyUserId) {
-      alert("Please select a user to apply this template to.");
-      return;
-    }
-    const tplToApply = currentTpl;
-    if (!tplToApply) return;
+  const handleApplyTemplate = async (targetUserOverride?: string) => {
+    const targetId = targetUserOverride || applyUserId || currentUserId;
+    if (!targetId || !currentTpl) return;
 
-    setApplySuccessMessage("Applying template and generating tasks...");
-    await applyTemplateToUser(tplToApply.id, applyUserId, applyDate || undefined);
-    const assignedUser = users.find((u) => u.id === applyUserId);
+    setApplySuccessMessage("Generating tasks...");
+    await applyTemplateToUser(currentTpl.id, targetId, applyDate || undefined);
+    const assignedUser = users.find((u) => u.id === targetId);
     setApplySuccessMessage(
-      `✓ Successfully generated all template workflow tasks for ${assignedUser?.name || "User"}!`
+      `✓ Assigned ${currentTpl.name} to ${assignedUser?.name || "Me"}`
     );
-    setTimeout(() => setApplySuccessMessage(""), 4000);
+    setTimeout(() => setApplySuccessMessage(""), 3500);
+  };
+
+  const handleCreateSingleStageTask = async (
+    parentCol: ParentColumnDef,
+    subCol: SubColumnDef
+  ) => {
+    const targetId = applyUserId || currentUserId;
+    if (!targetId || !currentTpl) return;
+    await createTask({
+      title: subCol.label,
+      description: subCol.description || `${currentTpl.name} · ${parentCol.label}`,
+      priority: "medium",
+      status: parentCol.id,
+      assigneeId: targetId,
+      dueDate: applyDate || dateInTargetTimeZone(),
+      targetQuantity: subCol.defaultTargetQuantity || 1,
+      subColumnId: subCol.id,
+      parentColumnId: parentCol.id,
+      templateRole: currentTpl.role !== "general" ? currentTpl.role : undefined,
+      customSubtasks: subCol.defaultChecklist?.map((item, idx) => ({
+        id: `sub-stage-${Date.now()}-${idx}`,
+        title: item,
+        completed: false,
+        assignedTo: targetId,
+        sortOrder: idx + 1,
+        isCustom: true,
+      })),
+    });
+    const assignedUser = users.find((u) => u.id === targetId);
+    setApplySuccessMessage(`✓ Added "${subCol.label}" for ${assignedUser?.name || "Me"}`);
+    setTimeout(() => setApplySuccessMessage(""), 3000);
   };
 
   const handleReassignTaskAction = async () => {
-    if (!reassignSelectedTaskId || !reassignTargetUserId) {
-      alert("Please choose a task and a target user.");
-      return;
-    }
+    if (!reassignSelectedTaskId || !reassignTargetUserId) return;
     await reassignTask(reassignSelectedTaskId, reassignTargetUserId);
     const targetUser = users.find((u) => u.id === reassignTargetUserId);
-    setReassignSuccessMsg(`✓ Task reassigned to ${targetUser?.name || "member"}!`);
-    setTimeout(() => setReassignSuccessMsg(""), 3500);
+    setReassignSuccessMsg(`✓ Reassigned to ${targetUser?.name || "member"}`);
+    setTimeout(() => setReassignSuccessMsg(""), 3000);
   };
 
   const effectiveIsOpen = isOpen !== undefined ? isOpen : storeIsOpen;
@@ -254,52 +309,51 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-background/80 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="relative flex flex-col w-full max-w-5xl h-[88vh] max-h-[820px] rounded-2xl border border-border bg-card text-card-foreground shadow-2xl overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
-              <Layers className="size-5" />
+      <div className="relative flex flex-col w-full max-w-5xl h-[86vh] max-h-[800px] rounded-2xl border border-border bg-card text-card-foreground shadow-2xl overflow-hidden">
+        {/* Compact Header */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-muted/20">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20">
+              <Layers className="size-4" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-foreground">
-                  Role & User Workflow Templates
-                </h2>
-                <span className="rounded-full bg-primary/15 text-primary text-[10px] font-semibold uppercase px-2 py-0.5 border border-primary/25">
-                  Admin System
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Manage parent workflow stages and role-specific sub-columns (e.g. Developer, Content Creator) to assign and reassign tasks seamlessly.
-              </p>
-            </div>
+            <h2 className="text-sm font-bold text-foreground">Role Templates</h2>
           </div>
 
-          <button
-            type="button"
-            onClick={handleCloseModal}
-            className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition cursor-pointer"
-          >
-            <X className="size-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => handleStartNewTemplate()}
+              className="text-xs h-7 gap-1"
+            >
+              <Plus className="size-3.5 text-primary" />
+              <span>New Template</span>
+            </Button>
+            <button
+              type="button"
+              onClick={handleCloseModal}
+              className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition cursor-pointer"
+            >
+              <X className="size-4" />
+            </button>
+          </div>
         </div>
 
         {/* Navigation Tabs */}
-        <div className="flex items-center justify-between px-6 border-b border-border bg-card">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between px-5 border-b border-border bg-card">
+          <div className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => setActiveTab("templates")}
               className={cn(
-                "py-3 px-3.5 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-2",
+                "py-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5",
                 activeTab === "templates"
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
               <Sparkles className="size-3.5" />
-              <span>Explore Templates ({templates.length})</span>
+              <span>Templates ({templates.length})</span>
             </button>
 
             <button
@@ -312,156 +366,184 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                 }
               }}
               className={cn(
-                "py-3 px-3.5 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-2",
+                "py-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5",
                 activeTab === "builder"
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
               <Edit2 className="size-3.5" />
-              <span>{isCreatingNew ? "Create New Template" : editingTemplate ? `Edit: ${editingTemplate.name}` : "Template Builder"}</span>
+              <span>
+                {isCreatingNew
+                  ? "New Template"
+                  : editingTemplate
+                  ? `Edit: ${editingTemplate.name}`
+                  : "Builder"}
+              </span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab("reassign")}
               className={cn(
-                "py-3 px-3.5 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-2",
+                "py-2.5 px-3 text-xs font-semibold border-b-2 transition cursor-pointer flex items-center gap-1.5",
                 activeTab === "reassign"
                   ? "border-primary text-primary"
                   : "border-transparent text-muted-foreground hover:text-foreground"
               )}
             >
               <ArrowRightLeft className="size-3.5" />
-              <span>Assign & Reassign Tasks</span>
+              <span>Quick Reassign</span>
             </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={handleStartNewTemplate}
-              className="text-xs h-7.5 gap-1.5"
-            >
-              <Plus className="size-3.5 text-primary" />
-              <span>New Template</span>
-            </Button>
           </div>
         </div>
 
         {/* Content Body */}
-        <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
-          {/* TAB 1: EXPLORE TEMPLATES */}
+        <div className="flex-1 overflow-y-auto p-5 scrollbar-thin">
+          {/* TAB 1: TEMPLATES */}
           {activeTab === "templates" && (
-            <div className="space-y-6">
-              {/* Role Cards Selector */}
-              <div>
-                <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                  Available Role & User Workflows
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {templates.map((tpl) => {
-                    const isSelected = selectedTemplateId === tpl.id;
-                    const isActiveOnBoard = activeTemplateId === tpl.id;
-                    const roleBadge = ROLE_OPTIONS.find((r) => r.role === tpl.role) || ROLE_OPTIONS[0];
-                    const Icon = roleBadge.icon;
-                    const totalSubCols = tpl.parentColumns.reduce(
-                      (acc, p) => acc + p.subColumns.length,
-                      0
-                    );
-
-                    return (
-                      <div
-                        key={tpl.id}
-                        onClick={() => setSelectedTemplateId(tpl.id)}
-                        className={cn(
-                          "flex flex-col p-4 rounded-xl border transition-all duration-150 cursor-pointer relative",
-                          isSelected
-                            ? "border-primary bg-primary/5 ring-2 ring-primary/20 shadow-md"
-                            : "border-border bg-card/60 hover:bg-muted/40 hover:border-border/90"
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-2">
-                            <div className={cn("p-1.5 rounded-lg border", roleBadge.color)}>
-                              <Icon className="size-4" />
-                            </div>
-                            <span className="text-xs font-bold text-foreground">
-                              {tpl.name}
-                            </span>
-                          </div>
-                          {isActiveOnBoard && (
-                            <span className="rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-[9px] font-bold px-2 py-0.2">
-                              Active Board
-                            </span>
-                          )}
-                        </div>
-
-                        <p className="text-xs text-muted-foreground line-clamp-2 mb-3">
-                          {tpl.description}
-                        </p>
-
-                        <div className="flex items-center justify-between text-[11px] text-muted-foreground border-t border-border/50 pt-2.5 mt-auto">
-                          <span className="font-mono">
-                            {tpl.parentColumns.length} Parent · {totalSubCols} Sub-columns
-                          </span>
-                          <span className="capitalize font-medium text-foreground/80">
-                            {tpl.role.replace("_", " ")}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
+            <div className="space-y-5">
+              {/* Role Filter Pills */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setRoleFilter("all")}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer",
+                    roleFilter === "all"
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-card text-muted-foreground border-border hover:text-foreground"
+                  )}
+                >
+                  All Roles
+                </button>
+                {ROLE_OPTIONS.map((r) => {
+                  const Icon = r.icon;
+                  const active = roleFilter === r.role;
+                  return (
+                    <button
+                      key={r.role}
+                      type="button"
+                      onClick={() => {
+                        setRoleFilter(r.role);
+                        const match = templates.find((t) => t.role === r.role);
+                        if (match) setSelectedTemplateId(match.id);
+                      }}
+                      className={cn(
+                        "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium border transition cursor-pointer",
+                        active
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-card text-muted-foreground border-border hover:text-foreground"
+                      )}
+                    >
+                      <Icon className="size-3" />
+                      <span>{r.label}</span>
+                    </button>
+                  );
+                })}
               </div>
 
-              {/* Template Detailed Preview & Quick Actions */}
-              {currentTpl && (
-                <div className="rounded-xl border border-border bg-card/90 p-5 shadow-xs space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="text-base font-bold text-foreground">
-                          {currentTpl.name}
-                        </h3>
-                        <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-muted border border-border">
-                          {currentTpl.role.replace("_", " ")}
+              {/* Template Cards */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filteredTemplates.map((tpl) => {
+                  const isSelected = currentTpl?.id === tpl.id;
+                  const isActiveOnBoard = activeTemplateId === tpl.id;
+                  const roleBadge =
+                    ROLE_OPTIONS.find((r) => r.role === tpl.role) || ROLE_OPTIONS[0];
+                  const Icon = roleBadge.icon;
+                  const totalSubCols = tpl.parentColumns.reduce(
+                    (acc, p) => acc + p.subColumns.length,
+                    0
+                  );
+
+                  return (
+                    <div
+                      key={tpl.id}
+                      onClick={() => setSelectedTemplateId(tpl.id)}
+                      className={cn(
+                        "flex flex-col p-3.5 rounded-xl border transition-all duration-150 cursor-pointer",
+                        isSelected
+                          ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                          : "border-border bg-card/60 hover:bg-muted/40"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-1.5">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className={cn("p-1.5 rounded-lg border shrink-0", roleBadge.color)}>
+                            <Icon className="size-3.5" />
+                          </div>
+                          <span className="text-xs font-bold text-foreground truncate">
+                            {tpl.name}
+                          </span>
+                        </div>
+                        {isActiveOnBoard && (
+                          <span className="rounded-full bg-emerald-500/15 text-emerald-500 border border-emerald-500/30 text-[9px] font-bold px-2 py-0.5 shrink-0">
+                            Active
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-[11px] text-muted-foreground line-clamp-1 mb-2.5">
+                        {tpl.description}
+                      </p>
+
+                      <div className="flex items-center justify-between text-[10px] text-muted-foreground border-t border-border/50 pt-2 mt-auto">
+                        <span className="font-mono">{totalSubCols} task stages</span>
+                        <span className="capitalize font-semibold text-foreground/80">
+                          {roleBadge.label}
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {currentTpl.description}
-                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Selected Template Details & 1-Click Assignment */}
+              {currentTpl && (
+                <div className="rounded-xl border border-border bg-card/90 p-4 space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-bold text-foreground">{currentTpl.name}</h3>
+                      <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-muted border border-border">
+                        {currentTpl.role.replace("_", " ")}
+                      </span>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <Button
                         variant={activeTemplateId === currentTpl.id ? "primary" : "secondary"}
                         size="sm"
-                        onClick={() => {
-                          if (activeTemplateId === currentTpl.id) {
-                            setActiveTemplateId(null);
-                          } else {
-                            setActiveTemplateId(currentTpl.id);
-                          }
-                        }}
-                        className="text-xs gap-1.5"
+                        onClick={() =>
+                          setActiveTemplateId(
+                            activeTemplateId === currentTpl.id ? null : currentTpl.id
+                          )
+                        }
+                        className="text-xs h-7 gap-1"
                       >
                         <CheckCircle2 className="size-3.5" />
                         <span>
-                          {activeTemplateId === currentTpl.id
-                            ? "Active on Board"
-                            : "Set as Active Board Workflow"}
+                          {activeTemplateId === currentTpl.id ? "Active Board" : "Use on Board"}
                         </span>
                       </Button>
 
                       <Button
                         variant="secondary"
                         size="sm"
-                        onClick={() => handleEditTemplate(currentTpl)}
-                        className="text-xs gap-1.5"
+                        onClick={() => handleDuplicateTemplate(currentTpl)}
+                        className="text-xs h-7 gap-1"
+                        title="Clone as custom template"
                       >
-                        <Edit2 className="size-3.5" />
+                        <Copy className="size-3" />
+                        <span>Clone</span>
+                      </Button>
+
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleEditTemplate(currentTpl)}
+                        className="text-xs h-7 gap-1"
+                      >
+                        <Edit2 className="size-3" />
                         <span>Edit</span>
                       </Button>
 
@@ -474,7 +556,7 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                               deleteRoleTemplate(currentTpl.id);
                             }
                           }}
-                          className="text-xs text-destructive hover:bg-destructive/10"
+                          className="text-xs h-7 text-destructive hover:bg-destructive/10"
                         >
                           <Trash2 className="size-3.5" />
                         </Button>
@@ -482,77 +564,19 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                     </div>
                   </div>
 
-                  {/* Visual Parent & Sub-Columns Architecture */}
-                  <div>
-                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                      Workflow Pipeline Structure (Parent & Sub-columns)
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3 items-start">
-                      {currentTpl.parentColumns.map((parent) => (
-                        <div
-                          key={parent.id}
-                          className="rounded-xl border border-border/80 bg-muted/20 p-3 space-y-2"
-                        >
-                          <div className="flex items-center justify-between pb-1.5 border-b border-border/60">
-                            <span className="text-xs font-bold text-foreground">
-                              {parent.label}
-                            </span>
-                            <span className="text-[10px] font-mono text-muted-foreground">
-                              {parent.subColumns.length} stages
-                            </span>
-                          </div>
-
-                          <div className="space-y-1.5">
-                            {parent.subColumns.map((sub) => (
-                              <div
-                                key={sub.id}
-                                className="p-2 rounded-lg bg-card border border-border/60 shadow-2xs hover:border-primary/40 transition"
-                              >
-                                <div className="text-xs font-semibold text-foreground">
-                                  {sub.label}
-                                </div>
-                                {sub.description && (
-                                  <div className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
-                                    {sub.description}
-                                  </div>
-                                )}
-                                <div className="flex items-center justify-between mt-1 pt-1 border-t border-border/40 text-[9px] text-muted-foreground">
-                                  <span className="flex items-center gap-1">
-                                    <Clock className="size-2.5 text-primary" />
-                                    <span>{sub.slaHours || 24}h SLA</span>
-                                  </span>
-                                  <span>{sub.defaultTargetQuantity || 1} units</span>
-                                </div>
-                              </div>
-                            ))}
-
-                            {parent.subColumns.length === 0 && (
-                              <div className="text-[11px] text-muted-foreground/60 italic text-center py-2">
-                                No sub-columns configured
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* 1-Click Apply Section */}
-                  <div className="border-t border-border pt-4">
-                    <div className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
-                      <UserCheck className="size-4 text-primary" />
-                      <span>Instantiate & Apply Template to User</span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-3">
+                  {/* Quick Apply Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-muted/30 border border-border/70 p-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <UserCheck className="size-4 text-primary shrink-0" />
                       <select
                         value={applyUserId}
                         onChange={(e) => setApplyUserId(e.target.value)}
-                        className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground focus:ring-1 focus:ring-primary"
+                        className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground focus:ring-1 focus:ring-primary"
                       >
-                        <option value="">Select team member...</option>
+                        <option value="">Select member...</option>
                         {users.map((u) => (
                           <option key={u.id} value={u.id}>
-                            {u.name} ({u.role.replace("_", " ")})
+                            {u.name} {u.id === currentUserId ? "(Me)" : ""} · {u.role.replace("_", " ")}
                           </option>
                         ))}
                       </select>
@@ -561,50 +585,125 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                         type="date"
                         value={applyDate}
                         onChange={(e) => setApplyDate(e.target.value)}
-                        className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground focus:ring-1 focus:ring-primary"
-                        title="Target Date (defaults to today)"
+                        className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground focus:ring-1 focus:ring-primary"
+                        title="Due Date (defaults to today)"
                       />
 
                       <Button
                         variant="primary"
                         size="sm"
-                        onClick={handleApplyTemplate}
-                        className="text-xs gap-1.5"
+                        onClick={() => handleApplyTemplate()}
+                        className="text-xs h-7 gap-1"
                       >
                         <Sparkles className="size-3.5" />
-                        <span>Generate Template Tasks</span>
+                        <span>Assign All Stages</span>
                       </Button>
 
-                      {applySuccessMessage && (
-                        <span className="text-xs font-semibold text-emerald-500 animate-in fade-in">
-                          {applySuccessMessage}
-                        </span>
+                      {currentUserId && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            setApplyUserId(currentUserId);
+                            handleApplyTemplate(currentUserId);
+                          }}
+                          className="text-xs h-7 gap-1"
+                        >
+                          <UserCheck className="size-3.5 text-primary" />
+                          <span>Assign to Me</span>
+                        </Button>
                       )}
                     </div>
+
+                    {applySuccessMessage && (
+                      <span className="text-xs font-semibold text-emerald-500">
+                        {applySuccessMessage}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Columns & Stage Cards */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-2.5 items-start">
+                    {currentTpl.parentColumns.map((parent) => (
+                      <div
+                        key={parent.id}
+                        className="rounded-xl border border-border/80 bg-muted/15 p-2.5 space-y-2"
+                      >
+                        <div className="flex items-center justify-between pb-1 border-b border-border/60">
+                          <span className="text-xs font-bold text-foreground">{parent.label}</span>
+                          <span className="text-[10px] font-mono text-muted-foreground">
+                            {parent.subColumns.length}
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          {parent.subColumns.map((sub) => (
+                            <div
+                              key={sub.id}
+                              className="p-2 rounded-lg bg-card border border-border/60 hover:border-primary/40 transition group"
+                            >
+                              <div className="flex items-start justify-between gap-1">
+                                <span className="text-xs font-semibold text-foreground leading-snug">
+                                  {sub.label}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCreateSingleStageTask(parent, sub)}
+                                  className="opacity-0 group-hover:opacity-100 text-[10px] font-semibold text-primary hover:bg-primary/10 px-1.5 py-0.5 rounded transition shrink-0 cursor-pointer"
+                                  title="Add only this stage as a task"
+                                >
+                                  + Add
+                                </button>
+                              </div>
+                              {sub.defaultChecklist && sub.defaultChecklist.length > 0 && (
+                                <div className="mt-1 space-y-0.5">
+                                  {sub.defaultChecklist.slice(0, 2).map((item, i) => (
+                                    <div
+                                      key={i}
+                                      className="text-[10px] text-muted-foreground truncate"
+                                    >
+                                      • {item}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-border/40 text-[9px] text-muted-foreground">
+                                <span className="flex items-center gap-0.5">
+                                  <Clock className="size-2.5 text-primary" />
+                                  {sub.slaHours || 24}h
+                                </span>
+                                <span>{sub.defaultTargetQuantity || 1}u</span>
+                              </div>
+                            </div>
+                          ))}
+
+                          {parent.subColumns.length === 0 && (
+                            <div className="text-[10px] text-muted-foreground/50 text-center py-2">
+                              Empty
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
             </div>
           )}
 
-          {/* TAB 2: TEMPLATE BUILDER */}
+          {/* TAB 2: BUILDER */}
           {activeTab === "builder" && (
-            <div className="space-y-6 max-w-4xl mx-auto">
+            <div className="space-y-5 max-w-4xl mx-auto">
               <div className="flex items-center justify-between pb-3 border-b border-border">
-                <div>
-                  <h3 className="text-base font-bold text-foreground">
-                    {isCreatingNew ? "Create New Workflow Template" : `Edit: ${formName}`}
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    Define the parent workflow stages and customize role-specific sub-columns with default SLA hours, checklists, and units.
-                  </p>
-                </div>
+                <h3 className="text-sm font-bold text-foreground">
+                  {isCreatingNew ? "Create Role Template" : `Edit: ${formName}`}
+                </h3>
                 <div className="flex items-center gap-2">
                   <Button
                     variant="secondary"
                     size="sm"
                     onClick={() => setActiveTab("templates")}
-                    className="text-xs"
+                    className="text-xs h-7"
                   >
                     Cancel
                   </Button>
@@ -612,7 +711,7 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                     variant="primary"
                     size="sm"
                     onClick={handleSaveBuilder}
-                    className="text-xs gap-1.5"
+                    className="text-xs h-7 gap-1"
                   >
                     <CheckCircle2 className="size-3.5" />
                     <span>Save Template</span>
@@ -620,8 +719,7 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                 </div>
               </div>
 
-              {/* Template Metadata */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-foreground mb-1">
                     Template Name
@@ -630,19 +728,19 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                     type="text"
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
-                    placeholder="e.g. Senior Frontend Engineer Workflow"
-                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground focus:ring-1 focus:ring-primary"
+                    placeholder="e.g. Short-Form Video Editor"
+                    className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground"
                   />
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-foreground mb-1">
-                    Target Role
+                    Role
                   </label>
                   <select
                     value={formRole}
-                    onChange={(e) => setFormRole(e.target.value as any)}
-                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground focus:ring-1 focus:ring-primary"
+                    onChange={(e) => setFormRole(e.target.value as Role | "general")}
+                    className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground"
                   >
                     {ROLE_OPTIONS.map((r) => (
                       <option key={r.role} value={r.role}>
@@ -652,188 +750,154 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                   </select>
                 </div>
 
-                <div className="sm:col-span-2">
+                <div>
                   <label className="block text-xs font-semibold text-foreground mb-1">
-                    Description & Objectives
+                    Summary
                   </label>
-                  <textarea
-                    rows={2}
+                  <input
+                    type="text"
                     value={formDesc}
                     onChange={(e) => setFormDesc(e.target.value)}
-                    placeholder="Describe how tasks flow through this pipeline..."
-                    className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground focus:ring-1 focus:ring-primary"
+                    placeholder="Short description..."
+                    className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground"
                   />
                 </div>
               </div>
 
-              {/* Parent & Sub-Columns Builder */}
-              <div className="space-y-4">
-                <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  Parent Columns & Role Sub-Columns
-                </div>
-
-                <div className="space-y-4">
-                  {formParentCols.map((parent) => (
-                    <div
-                      key={parent.id}
-                      className="rounded-xl border border-border bg-card p-4 space-y-3"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <span className="size-2.5 rounded-full bg-primary" />
-                          <span className="text-xs font-bold text-foreground">
-                            {parent.label}
-                          </span>
-                          <span className="text-[10px] font-mono text-muted-foreground">
-                            ({parent.subColumns.length} sub-columns)
-                          </span>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => setAddingSubColParentId(parent.id)}
-                          className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:bg-primary/10 px-2.5 py-1 rounded-md transition cursor-pointer"
-                        >
-                          <Plus className="size-3" />
-                          <span>Add Sub-Column</span>
-                        </button>
+              <div className="space-y-3">
+                {formParentCols.map((parent) => (
+                  <div
+                    key={parent.id}
+                    className="rounded-xl border border-border bg-card p-3.5 space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="size-2 rounded-full bg-primary" />
+                        <span className="text-xs font-bold text-foreground">{parent.label}</span>
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          ({parent.subColumns.length})
+                        </span>
                       </div>
 
-                      {/* Sub-columns listing */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                        {parent.subColumns.map((sub) => (
-                          <div
-                            key={sub.id}
-                            className="p-3 rounded-lg border border-border bg-muted/20 relative group"
-                          >
-                            <div className="flex items-start justify-between">
-                              <span className="text-xs font-semibold text-foreground">
-                                {sub.label}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteSubColumn(parent.id, sub.id)}
-                                className="text-muted-foreground hover:text-destructive opacity-40 group-hover:opacity-100 transition p-0.5"
-                                title="Delete sub-column"
-                              >
-                                <Trash2 className="size-3" />
-                              </button>
-                            </div>
-                            {sub.description && (
-                              <p className="text-[11px] text-muted-foreground mt-1 line-clamp-2">
-                                {sub.description}
-                              </p>
-                            )}
-                            <div className="flex items-center gap-3 mt-2 pt-2 border-t border-border/40 text-[10px] text-muted-foreground">
-                              <span>Target: {sub.defaultTargetQuantity || 1} units</span>
-                              <span>SLA: {sub.slaHours || 24}h</span>
-                              {sub.defaultChecklist && (
-                                <span>{sub.defaultChecklist.length} checklist items</span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {/* Add subcolumn form inline */}
-                      {addingSubColParentId === parent.id && (
-                        <div className="p-3 rounded-lg border border-dashed border-primary/50 bg-primary/5 space-y-3">
-                          <div className="text-xs font-bold text-foreground">
-                            New Sub-Column under "{parent.label}"
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                            <input
-                              type="text"
-                              value={newSubColLabel}
-                              onChange={(e) => setNewSubColLabel(e.target.value)}
-                              placeholder="Sub-column label (e.g. Code Review)"
-                              className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground"
-                            />
-                            <input
-                              type="number"
-                              min={1}
-                              value={newSubColUnits}
-                              onChange={(e) => setNewSubColUnits(Number(e.target.value) || 1)}
-                              placeholder="Target Units"
-                              className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground"
-                            />
-                            <input
-                              type="number"
-                              min={1}
-                              value={newSubColSLA}
-                              onChange={(e) => setNewSubColSLA(Number(e.target.value) || 24)}
-                              placeholder="SLA (hours)"
-                              className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground"
-                            />
-                          </div>
-                          <textarea
-                            rows={2}
-                            value={newSubColChecklist}
-                            onChange={(e) => setNewSubColChecklist(e.target.value)}
-                            placeholder="Default checklist steps (1 per line)..."
-                            className="w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground"
-                          />
-                          <div className="flex items-center justify-end gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setAddingSubColParentId(null)}
-                              className="text-xs h-7"
-                            >
-                              Cancel
-                            </Button>
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              onClick={() => handleAddSubColumn(parent.id)}
-                              className="text-xs h-7"
-                            >
-                              Confirm Sub-Column
-                            </Button>
-                          </div>
-                        </div>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setAddingSubColParentId(parent.id)}
+                        className="flex items-center gap-1 text-[11px] font-semibold text-primary hover:bg-primary/10 px-2 py-1 rounded-md transition cursor-pointer"
+                      >
+                        <Plus className="size-3" />
+                        <span>Add Stage</span>
+                      </button>
                     </div>
-                  ))}
-                </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                      {parent.subColumns.map((sub) => (
+                        <div
+                          key={sub.id}
+                          className="p-2.5 rounded-lg border border-border bg-muted/20 relative group"
+                        >
+                          <div className="flex items-start justify-between">
+                            <span className="text-xs font-semibold text-foreground">
+                              {sub.label}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSubColumn(parent.id, sub.id)}
+                              className="text-muted-foreground hover:text-destructive opacity-50 group-hover:opacity-100 transition p-0.5"
+                            >
+                              <Trash2 className="size-3" />
+                            </button>
+                          </div>
+                          <div className="flex items-center gap-2 mt-1.5 text-[10px] text-muted-foreground">
+                            <span>{sub.defaultTargetQuantity || 1} units</span>
+                            <span>· {sub.slaHours || 24}h SLA</span>
+                            {sub.defaultChecklist && (
+                              <span>· {sub.defaultChecklist.length} steps</span>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {addingSubColParentId === parent.id && (
+                      <div className="p-3 rounded-lg border border-dashed border-primary/50 bg-primary/5 space-y-2.5">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <input
+                            type="text"
+                            value={newSubColLabel}
+                            onChange={(e) => setNewSubColLabel(e.target.value)}
+                            placeholder="Stage title (e.g. Rough Cut)"
+                            className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground"
+                          />
+                          <input
+                            type="number"
+                            min={1}
+                            value={newSubColUnits}
+                            onChange={(e) => setNewSubColUnits(Number(e.target.value) || 1)}
+                            placeholder="Units"
+                            className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground"
+                          />
+                          <input
+                            type="number"
+                            min={1}
+                            value={newSubColSLA}
+                            onChange={(e) => setNewSubColSLA(Number(e.target.value) || 24)}
+                            placeholder="SLA hours"
+                            className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground"
+                          />
+                        </div>
+                        <textarea
+                          rows={2}
+                          value={newSubColChecklist}
+                          onChange={(e) => setNewSubColChecklist(e.target.value)}
+                          placeholder="Checklist items (one per line)..."
+                          className="w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground"
+                        />
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setAddingSubColParentId(null)}
+                            className="text-xs h-7"
+                          >
+                            Cancel
+                          </Button>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => handleAddSubColumn(parent.id)}
+                            className="text-xs h-7"
+                          >
+                            Add Stage
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
-          {/* TAB 3: ASSIGN & REASSIGN TASKS HUB */}
+          {/* TAB 3: QUICK REASSIGN */}
           {activeTab === "reassign" && (
-            <div className="space-y-6 max-w-4xl mx-auto">
-              <div>
-                <h3 className="text-base font-bold text-foreground">
-                  Task Assignment & Reassignment Center
-                </h3>
-                <p className="text-xs text-muted-foreground">
-                  As an admin, reassign tasks across team roles (e.g. from Content Creator to Video Editor, or to Developer) to ensure optimal team bandwidth and delivery flow.
-                </p>
-              </div>
-
-              {/* Quick Reassign Action Card */}
-              <div className="rounded-xl border border-border bg-card p-5 space-y-4 shadow-xs">
-                <div className="text-xs font-bold text-foreground uppercase tracking-wider">
-                  Reassign Task to New Role or Member
-                </div>
-
+            <div className="space-y-4 max-w-4xl mx-auto">
+              <div className="rounded-xl border border-border bg-card p-4 space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-semibold text-foreground mb-1">
-                      1. Select Task to Reassign
+                      Task
                     </label>
                     <select
                       value={reassignSelectedTaskId}
                       onChange={(e) => setReassignSelectedTaskId(e.target.value)}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground focus:ring-1 focus:ring-primary"
+                      className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground"
                     >
                       <option value="">Choose task...</option>
                       {tasks.map((t) => {
                         const assignee = users.find((u) => u.id === t.assigneeId);
                         return (
                           <option key={t.id} value={t.id}>
-                            {t.taskNumber} — {t.title} (Currently: {assignee?.name || "Unassigned"} | {t.status})
+                            {t.taskNumber} — {t.title} ({assignee?.name || "Unassigned"})
                           </option>
                         );
                       })}
@@ -842,91 +906,74 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
 
                   <div>
                     <label className="block text-xs font-semibold text-foreground mb-1">
-                      2. New Assignee & Role
+                      New Assignee
                     </label>
                     <select
                       value={reassignTargetUserId}
                       onChange={(e) => setReassignTargetUserId(e.target.value)}
-                      className="w-full rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground focus:ring-1 focus:ring-primary"
+                      className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground"
                     >
-                      <option value="">Select new assignee...</option>
+                      <option value="">Select member...</option>
                       {users.map((u) => (
                         <option key={u.id} value={u.id}>
-                          {u.name} — {u.role.replace("_", " ")} ({u.department})
+                          {u.name} · {u.role.replace("_", " ")}
                         </option>
                       ))}
                     </select>
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between pt-2">
-                  <span className="text-xs text-muted-foreground">
-                    Reassigning will notify the member and update all active workflow swimlanes instantly.
-                  </span>
-                  <div className="flex items-center gap-3">
-                    {reassignSuccessMsg && (
-                      <span className="text-xs font-semibold text-emerald-500 animate-in fade-in">
-                        {reassignSuccessMsg}
-                      </span>
-                    )}
-                    <Button
-                      variant="primary"
-                      size="sm"
-                      onClick={handleReassignTaskAction}
-                      className="text-xs gap-1.5"
-                    >
-                      <ArrowRightLeft className="size-3.5" />
-                      <span>Reassign Task</span>
-                    </Button>
-                  </div>
+                <div className="flex items-center justify-end gap-3">
+                  {reassignSuccessMsg && (
+                    <span className="text-xs font-semibold text-emerald-500">
+                      {reassignSuccessMsg}
+                    </span>
+                  )}
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={handleReassignTaskAction}
+                    className="text-xs h-7.5 gap-1.5"
+                  >
+                    <ArrowRightLeft className="size-3.5" />
+                    <span>Reassign</span>
+                  </Button>
                 </div>
               </div>
 
-              {/* Quick Tasks Overview by Role */}
-              <div>
-                <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
-                  Active Tasks Grouped by Current Owner
-                </div>
-                <div className="rounded-xl border border-border overflow-hidden">
-                  <div className="max-h-72 overflow-y-auto divide-y divide-border">
-                    {tasks.slice(0, 20).map((task) => {
-                      const assignee = users.find((u) => u.id === task.assigneeId);
-                      return (
-                        <div
-                          key={task.id}
-                          className="flex items-center justify-between p-3 hover:bg-muted/30 transition text-xs"
-                        >
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-muted">
-                              {task.taskNumber}
-                            </span>
-                            <span className="font-medium text-foreground truncate max-w-[280px]">
-                              {task.title}
-                            </span>
-                            <span className="text-[10px] text-muted-foreground uppercase font-mono px-1.5 py-0.2 rounded bg-muted/60">
-                              {task.status}
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground">
-                              {assignee?.name || "Unassigned"} ({assignee?.role.replace("_", " ") || "Member"})
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setReassignSelectedTaskId(task.id);
-                                window.scrollTo({ top: 0, behavior: "smooth" });
-                              }}
-                              className="text-primary hover:underline text-[11px] font-semibold cursor-pointer"
-                            >
-                              Quick Reassign
-                            </button>
-                          </div>
+              <div className="rounded-xl border border-border overflow-hidden">
+                <div className="max-h-72 overflow-y-auto divide-y divide-border">
+                  {tasks.slice(0, 20).map((task) => {
+                    const assignee = users.find((u) => u.id === task.assigneeId);
+                    return (
+                      <div
+                        key={task.id}
+                        className="flex items-center justify-between p-2.5 hover:bg-muted/30 transition text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-muted">
+                            {task.taskNumber}
+                          </span>
+                          <span className="font-medium text-foreground truncate max-w-[280px]">
+                            {task.title}
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground text-[11px]">
+                            {assignee?.name || "Unassigned"}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setReassignSelectedTaskId(task.id)}
+                            className="text-primary hover:underline text-[11px] font-semibold cursor-pointer"
+                          >
+                            Select
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>

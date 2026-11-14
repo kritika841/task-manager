@@ -79,9 +79,7 @@ export function MediaDeliverable({
     // Strict 20MB check
     if (file.size > MAX_FILE_SIZE_BYTES) {
       const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
-      setErrorMessage(
-        `File is ${sizeMb}MB. Uploads are strictly capped at 20MB. Please compress your media or upload via Google Drive link below.`
-      );
+      setErrorMessage(`File is ${sizeMb}MB (max 20MB). Use a Drive link instead.`);
       return;
     }
 
@@ -314,7 +312,7 @@ export function MediaDeliverable({
                 <div className="flex flex-col items-center gap-2 py-2">
                   <Loader2 className="size-6 text-primary animate-spin" />
                   <span className="text-xs font-medium text-foreground">
-                    Uploading asset locally (under 20MB policy)...
+                    Uploading...
                   </span>
                 </div>
               ) : (
@@ -324,10 +322,10 @@ export function MediaDeliverable({
                   </div>
                   <div>
                     <span className="text-xs font-semibold text-foreground">
-                      Click to upload or drag & drop media
+                      Upload or drop media
                     </span>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Videos (.mp4, .mov), Images (.png, .jpg), documents (Strictly max 20MB)
+                      Video, image, or PDF (max 20MB)
                     </p>
                   </div>
                 </>
@@ -356,9 +354,6 @@ export function MediaDeliverable({
                   Save Link
                 </Button>
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                For video files exceeding 20MB, upload to Google Drive and paste the shareable link here.
-              </p>
             </form>
           )}
 

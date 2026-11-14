@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
-import { getCommentsForTask, addCommentToTask, deleteCommentFromTask } from "@/lib/comments-store";
+import {
+  getCommentsForTask,
+  addCommentToTask,
+  deleteCommentFromTask,
+  toggleCommentReaction,
+} from "@/lib/comments-store";
 import { supabaseAdmin } from "@/lib/supabase";
+import { dispatchWebhookEvent } from "@/lib/webhooks-store";
 
 export async function GET(
   req: Request,
@@ -16,7 +22,10 @@ export async function GET(
     return NextResponse.json({ ok: true, comments });
   } catch (error: any) {
     console.error("GET comments error:", error);
-    return NextResponse.json({ error: error.message || "Failed to fetch comments" }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || "Failed to fetch comments" },
+      { status: 500 }
+    );
   }
 }
 
@@ -36,7 +45,7 @@ export async function POST(
       );
     }
 
-    // Get user details
+    // Get commenter details
     let authorName = "Team Member";
     let authorAvatar: string | undefined;
     try {
@@ -58,44 +67,101 @@ export async function POST(
       mentions: mentions || [],
     });
 
-    // Check for mentions or target task assignee to deliver targeted notifications
+    // Deliver targeted notifications for both regular daily targets AND AdFlow creative tasks (ad-*)
     try {
-      const { data: taskData } = await supabaseAdmin
-        .from("daily_team_targets")
-        .select("task_name, user_id, assigned_by")
-        .eq("id", id)
-        .single();
+      let taskTitle = "Task";
+      let primaryOwnerIds: string[] = [];
+      let realAdId: string | null = null;
 
-      if (taskData) {
-        // Notify task assignee if commenter is someone else
-        if (taskData.user_id && taskData.user_id !== userId) {
+      if (id.startsWith("ad-")) {
+        realAdId = id.replace("ad-", "");
+        const { data: adData } = await supabaseAdmin
+          .from("ads")
+          .select("id, name, editor_id, creator_id")
+          .eq("id", realAdId)
+          .maybeSingle();
+
+        if (adData) {
+          taskTitle = adData.name || `Ad Creative ${realAdId}`;
+          if (adData.editor_id) primaryOwnerIds.push(adData.editor_id);
+          if (adData.creator_id && !primaryOwnerIds.includes(adData.creator_id)) {
+            primaryOwnerIds.push(adData.creator_id);
+          }
+        }
+      } else {
+        const { data: taskData } = await supabaseAdmin
+          .from("daily_team_targets")
+          .select("task_name, user_id, assigned_by")
+          .eq("id", id)
+          .maybeSingle();
+
+        if (taskData) {
+          taskTitle = taskData.task_name || "Daily Target";
+          if (taskData.user_id) primaryOwnerIds.push(taskData.user_id);
+        }
+      }
+
+      const notifiedUserIds = new Set<string>([userId]);
+
+      // 1. Notify primary task owner(s) if commenter is someone else
+      for (const ownerId of primaryOwnerIds) {
+        if (ownerId && !notifiedUserIds.has(ownerId)) {
+          notifiedUserIds.add(ownerId);
           await supabaseAdmin.from("notifications").insert({
-            user_id: taskData.user_id,
-            title: `New Comment on ${taskData.task_name}`,
-            body: `${authorName}: "${content.slice(0, 100)}"`,
+            user_id: ownerId,
+            title: `New Comment on ${taskTitle}`,
+            body: `${authorName}: "${content.trim().slice(0, 100)}"`,
+            ad_id: realAdId,
           });
         }
+      }
 
-        // Notify mentioned users
-        if (Array.isArray(mentions) && mentions.length > 0) {
-          const { data: mentionedUsers } = await supabaseAdmin
-            .from("profiles")
-            .select("id, name, email")
-            .in("id", mentions);
+      // 2. Notify mentioned users (both explicit mention IDs and @Name matches in content)
+      const mentionIds = new Set<string>(Array.isArray(mentions) ? mentions : []);
+      if (content.includes("@")) {
+        const { data: allProfiles } = await supabaseAdmin
+          .from("profiles")
+          .select("id, name, email")
+          .eq("active", true)
+          .is("deleted_at", null);
 
-          if (mentionedUsers) {
-            for (const mu of mentionedUsers) {
-              if (mu.id !== userId && mu.id !== taskData.user_id) {
-                await supabaseAdmin.from("notifications").insert({
-                  user_id: mu.id,
-                  title: `${authorName} mentioned you in ${taskData.task_name}`,
-                  body: content.slice(0, 120),
-                });
-              }
+        if (allProfiles) {
+          const lowerContent = content.toLowerCase();
+          for (const p of allProfiles) {
+            const firstName = (p.name || "").split(" ")[0]?.toLowerCase();
+            const fullName = (p.name || "").toLowerCase();
+            if (
+              (fullName && lowerContent.includes(`@${fullName}`)) ||
+              (firstName && lowerContent.includes(`@${firstName}`))
+            ) {
+              mentionIds.add(p.id);
             }
           }
         }
       }
+
+      for (const mId of mentionIds) {
+        if (mId && !notifiedUserIds.has(mId)) {
+          notifiedUserIds.add(mId);
+          await supabaseAdmin.from("notifications").insert({
+            user_id: mId,
+            title: `${authorName} mentioned you in ${taskTitle}`,
+            body: content.trim().slice(0, 120),
+            ad_id: realAdId,
+          });
+        }
+      }
+
+      // Dispatch outbound webhook non-blocking
+      dispatchWebhookEvent("comment.created", {
+        taskId: id,
+        taskTitle,
+        commentId: newComment.id,
+        authorId: userId,
+        authorName,
+        content: newComment.content,
+        mentions: Array.from(mentionIds),
+      }).catch(() => {});
     } catch (notifErr) {
       console.warn("Could not dispatch comment notifications:", notifErr);
     }
@@ -103,7 +169,41 @@ export async function POST(
     return NextResponse.json({ ok: true, comment: newComment });
   } catch (error: any) {
     console.error("POST comment error:", error);
-    return NextResponse.json({ error: error.message || "Failed to post comment" }, { status: 500 });
+    return NextResponse.json(
+      { error: error.message || "Failed to post comment" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(
+  req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id } = await params;
+    const body = await req.json();
+    const { commentId, userId, emoji } = body;
+
+    if (!id || !commentId || !userId || !emoji) {
+      return NextResponse.json(
+        { error: "Task ID, commentId, userId, and emoji are required" },
+        { status: 400 }
+      );
+    }
+
+    const updated = await toggleCommentReaction(id, commentId, userId, emoji);
+    if (!updated) {
+      return NextResponse.json({ error: "Comment not found" }, { status: 404 });
+    }
+
+    return NextResponse.json({ ok: true, comment: updated });
+  } catch (error: any) {
+    console.error("PATCH comment reaction error:", error);
+    return NextResponse.json(
+      { error: error.message || "Failed to toggle reaction" },
+      { status: 500 }
+    );
   }
 }
 

@@ -13,8 +13,11 @@ import {
   UserCheck,
   Send,
   Sparkles,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
+import { playNotificationSound } from "@/lib/sound";
 import { NotificationItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -67,6 +70,8 @@ export function NotificationCenter() {
     currentUser,
     tasks,
     setSelectedTaskId,
+    soundMuted,
+    toggleSound,
   } = useTasks();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -88,13 +93,15 @@ export function NotificationCenter() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOpen]);
 
-  // Show a popup toast when a new unread notification arrives for this user
+  // Show a popup toast and play chime when a new unread notification arrives for this user
   useEffect(() => {
     if (unreadNotificationsCount > prevCountRef.current && notifications.length > 0) {
       const newest = notifications[0];
       if (!newest.readAt) {
+        playNotificationSound("task");
         setActiveToast(newest);
         const timer = setTimeout(() => setActiveToast(null), 5000);
+        prevCountRef.current = unreadNotificationsCount;
         return () => clearTimeout(timer);
       }
     }
@@ -203,6 +210,20 @@ export function NotificationCenter() {
             </div>
 
             <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={toggleSound}
+                className={cn(
+                  "flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition cursor-pointer",
+                  soundMuted
+                    ? "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    : "text-primary hover:bg-primary/10"
+                )}
+                title={soundMuted ? "Unmute notification chime" : "Mute notification chime"}
+              >
+                {soundMuted ? <VolumeX className="size-3.5" /> : <Volume2 className="size-3.5" />}
+                <span>{soundMuted ? "Muted" : "Sound On"}</span>
+              </button>
               {unreadNotificationsCount > 0 && (
                 <button
                   type="button"
@@ -211,7 +232,7 @@ export function NotificationCenter() {
                   title="Mark all as read"
                 >
                   <CheckCheck className="size-3" />
-                  <span>Mark all read</span>
+                  <span>Mark read</span>
                 </button>
               )}
               <button

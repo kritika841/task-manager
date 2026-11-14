@@ -458,9 +458,187 @@ export const DEFAULT_ROLE_TEMPLATES: RoleTemplate[] = [
       },
     ],
   },
+  {
+    id: "tpl-manager",
+    name: "Operations & Team Manager Pipeline",
+    role: "manager",
+    description: "Daily team target allocation, creative QA sign-off, blocker resolution, and SLA tracking",
+    isDefault: true,
+    createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-22T00:00:00.000Z",
+    parentColumns: [
+      {
+        id: "backlog",
+        label: "Backlog",
+        subColumns: [
+          {
+            id: "mgr-weekly-planning",
+            label: "Weekly Sprint & Capacity Plan",
+            description: "Plan upcoming creative batches, editor bandwidth, and campaign goals",
+            defaultTargetQuantity: 1,
+            slaHours: 48,
+            defaultChecklist: ["Audit team capacity units", "Prioritize upcoming ad batches"],
+            color: "#64748b",
+          },
+        ],
+      },
+      {
+        id: "todo",
+        label: "To Do",
+        subColumns: [
+          {
+            id: "mgr-daily-allocation",
+            label: "Morning Target Allocation",
+            description: "Assign daily targets across creators, editors, and media buyers",
+            defaultTargetQuantity: 1,
+            slaHours: 4,
+            defaultChecklist: ["Assign daily unit targets", "Verify carryover tasks from yesterday"],
+            color: "#3b82f6",
+          },
+        ],
+      },
+      {
+        id: "in_progress",
+        label: "In Progress",
+        subColumns: [
+          {
+            id: "mgr-blocker-triage",
+            label: "Pipeline Unblocking & Follow-up",
+            description: "Resolve missing raw footage, brief clarifications, or revision bottlenecks",
+            defaultTargetQuantity: 2,
+            slaHours: 8,
+            defaultChecklist: ["Unblock stalled tasks", "Rebalance overloaded member queues"],
+            color: "#8b5cf6",
+          },
+        ],
+      },
+      {
+        id: "in_review",
+        label: "In Review",
+        subColumns: [
+          {
+            id: "mgr-deliverable-qa",
+            label: "Deliverable Quality Sign-Off",
+            description: "Review submitted videos, scripts, and ad sets before final approval",
+            defaultTargetQuantity: 3,
+            slaHours: 4,
+            defaultChecklist: ["Verify Drive deliverable link", "Check hook & audio quality", "Approve or request revision"],
+            color: "#f59e0b",
+          },
+        ],
+      },
+      {
+        id: "completed",
+        label: "Done",
+        subColumns: [
+          {
+            id: "mgr-eod-report",
+            label: "EOD Throughput & SLA Audit",
+            description: "End-of-day review of completed units and SLA compliance",
+            defaultTargetQuantity: 1,
+            slaHours: 2,
+            defaultChecklist: ["Review completed daily units", "Log EOD summary notes"],
+            color: "#10b981",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    id: "tpl-admin",
+    name: "Executive & Workspace Admin Pipeline",
+    role: "admin",
+    description: "Workspace governance, cross-department directives, feature triage, and strategic sign-off",
+    isDefault: true,
+    createdAt: "2026-10-01T00:00:00.000Z",
+    updatedAt: "2026-10-22T00:00:00.000Z",
+    parentColumns: [
+      {
+        id: "backlog",
+        label: "Backlog",
+        subColumns: [
+          {
+            id: "adm-roadmap-okrs",
+            label: "Strategic Roadmap & OKRs",
+            description: "Company-wide quarterly targets, hiring plans, and growth initiatives",
+            defaultTargetQuantity: 1,
+            slaHours: 72,
+            defaultChecklist: ["Define key growth metrics", "Align department leads"],
+            color: "#64748b",
+          },
+        ],
+      },
+      {
+        id: "todo",
+        label: "To Do",
+        subColumns: [
+          {
+            id: "adm-directives",
+            label: "Cross-Team Directives",
+            description: "High-priority operational initiatives and delegator rules",
+            defaultTargetQuantity: 1,
+            slaHours: 24,
+            defaultChecklist: ["Configure auto-delegator rules", "Set team reminders & priorities"],
+            color: "#3b82f6",
+          },
+        ],
+      },
+      {
+        id: "in_progress",
+        label: "In Progress",
+        subColumns: [
+          {
+            id: "adm-ops-review",
+            label: "Operations & Feedback Triage",
+            description: "Review internal team feature requests, system health, and ad pipeline throughput",
+            defaultTargetQuantity: 2,
+            slaHours: 12,
+            defaultChecklist: ["Review submitted team feedback", "Audit department bandwidth"],
+            color: "#8b5cf6",
+          },
+        ],
+      },
+      {
+        id: "in_review",
+        label: "In Review",
+        subColumns: [
+          {
+            id: "adm-executive-approval",
+            label: "Executive & Budget Approval",
+            description: "Final sign-off on major campaigns, budgets, and production releases",
+            defaultTargetQuantity: 1,
+            slaHours: 6,
+            defaultChecklist: ["Validate ROI & budget thresholds", "Approve for release"],
+            color: "#f59e0b",
+          },
+        ],
+      },
+      {
+        id: "completed",
+        label: "Done",
+        subColumns: [
+          {
+            id: "adm-closed-verified",
+            label: "Verified & Closed",
+            description: "Directive completed and verified across operations",
+            defaultTargetQuantity: 1,
+            slaHours: 2,
+            defaultChecklist: ["Confirm completion across teams"],
+            color: "#10b981",
+          },
+        ],
+      },
+    ],
+  },
 ];
 
 let memoryTemplatesCache: RoleTemplate[] | null = null;
+
+function mergeWithDefaultTemplates(loaded: RoleTemplate[]): RoleTemplate[] {
+  const existingIds = new Set(loaded.map((t) => t.id));
+  const missingDefaults = DEFAULT_ROLE_TEMPLATES.filter((d) => !existingIds.has(d.id));
+  return missingDefaults.length > 0 ? [...loaded, ...missingDefaults] : loaded;
+}
 
 export async function getTemplates(): Promise<RoleTemplate[]> {
   if (memoryTemplatesCache && memoryTemplatesCache.length > 0) {
@@ -471,8 +649,12 @@ export async function getTemplates(): Promise<RoleTemplate[]> {
     const content = await readFile(TEMPLATES_FILE, "utf-8");
     const parsed = JSON.parse(content);
     if (Array.isArray(parsed) && parsed.length > 0) {
-      memoryTemplatesCache = parsed;
-      return parsed;
+      const merged = mergeWithDefaultTemplates(parsed);
+      memoryTemplatesCache = merged;
+      if (merged.length !== parsed.length) {
+        await writeFile(TEMPLATES_FILE, JSON.stringify(merged, null, 2), "utf-8").catch(() => {});
+      }
+      return merged;
     }
   } catch {}
 

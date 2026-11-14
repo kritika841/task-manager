@@ -17,6 +17,8 @@ export function ShortcutsModal() {
     { key: "T", description: "Switch to Table View (Dense Grid & Multi-Select)" },
     { key: "L", description: "Switch to Checklist View (Unit Stepper)" },
     { key: "O", description: "Switch to Overview / Analytics & Capacity" },
+    { key: "D", description: "Switch to Calendar View" },
+    { key: "G", description: "Switch to Timeline / Gantt View" },
     { key: "Esc", description: "Close active modal/drawer / Clear task selection" },
     { key: "?", description: "Show this Keyboard Shortcuts cheat sheet" },
   ];

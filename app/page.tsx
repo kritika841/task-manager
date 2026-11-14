@@ -30,6 +30,7 @@ import { TaskBoard } from "@/components/task-board";
 import { TaskTable } from "@/components/task-table";
 import { TaskList } from "@/components/task-list";
 import { TaskCalendar } from "@/components/task-calendar";
+import { TaskTimeline } from "@/components/task-timeline";
 import { TaskAnalytics } from "@/components/task-analytics";
 import { TaskDrawer } from "@/components/task-drawer";
 import { TaskCreateModal } from "@/components/task-create-modal";
@@ -47,6 +48,7 @@ function TaskDashboardContent() {
     users,
     filteredTasks,
     currentUser,
+    currentUserId,
     baseVisibleTasks,
     isAdmin,
     isManager,
@@ -60,6 +62,7 @@ function TaskDashboardContent() {
     resetFilter,
     openCreateModal,
     setIsAutoDelegatorOpen,
+    setIsRoleTemplateModalOpen,
     exportTasksToCSV,
   } = useTasks();
 
@@ -137,136 +140,71 @@ function TaskDashboardContent() {
       }).length;
 
   return (
-    <div className="space-y-4">
-      {/* Notion Breadcrumb & Page Title Header */}
-      <div className="flex flex-col gap-1.5 pt-1">
-        {/* Subtle Notion Breadcrumbs */}
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1 font-medium text-foreground">
-            <CheckSquare className="size-3.5 text-primary" />
-            <span>Tasks</span>
+    <div className="space-y-3">
+      {/* Compact Page Title & Self-Task Quick Actions */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-0.5">
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
+            Tasks
+          </h1>
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
+              isAdmin
+                ? "bg-primary/15 text-primary border border-primary/20"
+                : isManager
+                ? "bg-indigo-500/15 text-indigo-500 border border-indigo-500/20"
+                : "bg-muted text-muted-foreground"
+            )}
+          >
+            {currentUser?.role ? currentUser.role.replace("_", " ") : "Member"}
           </span>
-          <span>/</span>
-          <span className="text-muted-foreground hover:text-foreground transition cursor-pointer">
-            Satmi Operations
+          <span className="text-xs font-mono text-muted-foreground">
+            ({filteredTasks.length})
           </span>
         </div>
 
-        {/* Big Notion Title & Actions */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-0.5">
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground">
-              Tasks
-            </h1>
-            <span
-              className={cn(
-                "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
-                isAdmin
-                  ? "bg-primary/15 text-primary border border-primary/20"
-                  : isManager
-                  ? "bg-indigo-500/15 text-indigo-500 border border-indigo-500/20"
-                  : "bg-muted text-muted-foreground"
-              )}
-            >
-              {isAdmin ? "Admin" : isManager ? "Manager" : "Member"}
-            </span>
-            <span className="text-xs font-mono text-muted-foreground">
-              ({filteredTasks.length} {filteredTasks.length === 1 ? "task" : "tasks"})
-            </span>
-          </div>
-
-          {/* Primary Quick Create Button */}
-          <div className="flex items-center gap-2">
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => openCreateModal()}
-              className="gap-1.5 text-xs h-7.5 px-3 rounded-lg shadow-2xs font-semibold"
-            >
-              <Plus className="size-3.5" />
-              <span>New task</span>
-            </Button>
-          </div>
+        {/* Self-Tasking & Role Template Quick Actions */}
+        <div className="flex items-center gap-1.5">
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => openCreateModal(currentUserId || currentUser?.id)}
+            className="gap-1.5 text-xs h-7.5 px-2.5 rounded-lg font-semibold border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 cursor-pointer"
+            title="Create a task assigned to yourself"
+          >
+            <Plus className="size-3.5" />
+            <span>Self Task</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsRoleTemplateModalOpen(true)}
+            className="gap-1.5 text-xs h-7.5 px-2.5 rounded-lg border border-border/80 text-muted-foreground hover:text-foreground cursor-pointer"
+            title="Browse & apply role templates"
+          >
+            <Layers className="size-3.5 text-primary" />
+            <span>Role Templates</span>
+          </Button>
         </div>
       </div>
 
-      {/* Notion Database Views Tab Bar & Inline Action Tools */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border/80 pb-2 gap-3">
-        {/* Left: Notion Database View Tabs */}
+      {/* View Tabs & Inline Action Tools */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border/80 pb-2 gap-2.5">
+        {/* Left: View Tabs & Quick Filter Pills */}
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none text-xs">
-          <button
-            type="button"
-            onClick={() => {
-              resetFilter();
-              setViewMode("board");
-            }}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
-              viewMode === "board" && isAllActive
-                ? "bg-muted text-foreground font-semibold"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-            )}
-          >
-            <span>All</span>
-          </button>
-
           <button
             type="button"
             onClick={() => setViewMode("board")}
             className={cn(
               "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
-              viewMode === "board" && !isAllActive
+              viewMode === "board"
                 ? "bg-muted text-foreground font-semibold"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
             )}
           >
             <Kanban className="size-3.5 text-primary" />
             <span>Board</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setFilter({
-                onlyMyTasks: !isMyTasksActive,
-                assigneeId: "all",
-              });
-              setViewMode("board");
-            }}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
-              isMyTasksActive
-                ? "bg-primary/15 text-primary font-semibold border border-primary/25"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-            )}
-          >
-            <UserCheck className="size-3.5" />
-            <span>Mine</span>
-            {myTasksCount > 0 && (
-              <span className="text-[10px] font-mono opacity-80">({myTasksCount})</span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              setFilter({
-                status: isNeedsReviewActive ? "all" : "in_review",
-              });
-              setViewMode("board");
-            }}
-            className={cn(
-              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
-              isNeedsReviewActive
-                ? "bg-warning/15 text-warning font-semibold border border-warning/25"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-            )}
-          >
-            <Clock className="size-3.5" />
-            <span>Needs Review</span>
-            {inReviewCount > 0 && (
-              <span className="text-[10px] font-mono opacity-80">({inReviewCount})</span>
-            )}
           </button>
 
           <button
@@ -311,6 +249,20 @@ function TaskDashboardContent() {
             <span>Calendar</span>
           </button>
 
+          <button
+            type="button"
+            onClick={() => setViewMode("timeline")}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
+              viewMode === "timeline"
+                ? "bg-muted text-foreground font-semibold"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+            )}
+          >
+            <Layers className="size-3.5" />
+            <span>Timeline</span>
+          </button>
+
           {isAdmin && (
             <button
               type="button"
@@ -326,9 +278,56 @@ function TaskDashboardContent() {
               <span>Analytics</span>
             </button>
           )}
+
+          <span className="h-4 w-px bg-border/80 mx-1 shrink-0" />
+
+          {/* Assigned to Me / My Plan Quick Filter Pill */}
+          <button
+            type="button"
+            onClick={() => {
+              setFilter({
+                onlyMyTasks: !isMyTasksActive,
+                assigneeId: "all",
+              });
+            }}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
+              isMyTasksActive
+                ? "bg-primary/15 text-primary font-semibold border border-primary/25"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+            )}
+            title="Filter tasks assigned to me (My Plan)"
+          >
+            <UserCheck className="size-3.5" />
+            <span>My Plan</span>
+            {myTasksCount > 0 && (
+              <span className="text-[10px] font-mono opacity-80">({myTasksCount})</span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              setFilter({
+                status: isNeedsReviewActive ? "all" : "in_review",
+              });
+            }}
+            className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
+              isNeedsReviewActive
+                ? "bg-warning/15 text-warning font-semibold border border-warning/25"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+            )}
+          >
+            <Clock className="size-3.5" />
+            <span>Review</span>
+            {inReviewCount > 0 && (
+              <span className="text-[10px] font-mono opacity-80">({inReviewCount})</span>
+            )}
+          </button>
         </div>
 
-        {/* Right: Inline Action Toolbar (Notion Style) */}
+        {/* Right: Inline Action Toolbar */}
         <div className="flex items-center gap-1.5 shrink-0">
           {/* Quick Search */}
           <div className="relative">
@@ -351,7 +350,7 @@ function TaskDashboardContent() {
             )}
           </div>
 
-          {/* AdFlow Tasks Toggle (Default: Off) */}
+          {/* AdFlow Tasks Toggle */}
           <button
             type="button"
             onClick={() => setFilter({ showAdflowTasks: !filter.showAdflowTasks })}
@@ -361,11 +360,7 @@ function TaskDashboardContent() {
                 ? "bg-primary/15 text-primary border-primary/30 font-semibold shadow-2xs"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted border-border/70"
             )}
-            title={
-              filter.showAdflowTasks
-                ? "AdFlow tasks active. Click to hide (Default: Off)."
-                : "AdFlow tasks hidden. Click to view live pipeline creatives."
-            }
+            title="Toggle Read-Only AdFlow tasks"
           >
             <Zap
               className={cn(
@@ -373,7 +368,7 @@ function TaskDashboardContent() {
                 filter.showAdflowTasks ? "text-primary fill-primary" : "text-muted-foreground"
               )}
             />
-            <span className="hidden sm:inline">AdFlow Tasks</span>
+            <span className="hidden sm:inline">AdFlow</span>
             <span
               className={cn(
                 "px-1 py-0.2 rounded text-[9px] font-mono uppercase font-bold",
@@ -507,7 +502,7 @@ function TaskDashboardContent() {
                         <span>Include AdFlow Tasks</span>
                       </span>
                       <span className="text-[10px] text-muted-foreground">
-                        Show live creatives from Ads Management (Default: Off)
+                        Read-only sync from AdFlow
                       </span>
                     </div>
                     <input
@@ -630,6 +625,7 @@ function TaskDashboardContent() {
         {viewMode === "table" && <TaskTable />}
         {viewMode === "list" && <TaskList />}
         {viewMode === "calendar" && <TaskCalendar />}
+        {viewMode === "timeline" && <TaskTimeline />}
         {viewMode === "analytics" && isAdmin && <TaskAnalytics />}
       </div>
 

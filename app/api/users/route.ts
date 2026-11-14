@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { Role, User } from "@/lib/types";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
+import { hashPassword, resolveRequestActor } from "@/lib/auth-server";
 
 function getDepartment(role: string): string {
   switch (role) {
@@ -15,6 +16,8 @@ function getDepartment(role: string): string {
       return "Content & Creative";
     case "media_buyer":
       return "Media & Growth";
+    case "developer":
+      return "Engineering & Product";
     default:
       return "Operations";
   }
@@ -26,6 +29,10 @@ function getDailyCapacity(role: string): number {
       return 6;
     case "content_creator":
       return 4;
+    case "media_buyer":
+      return 5;
+    case "developer":
+      return 6;
     case "manager":
       return 8;
     case "admin":
@@ -39,6 +46,7 @@ function parseUserMetadata(avatarUrl: string | null, name: string, role: string)
   let color: string | undefined;
   let employeeCode: string | undefined;
   let dailyCapacityUnits: number | undefined;
+  let passwordHash: string | undefined;
 
   if (avatarUrl) {
     try {
@@ -47,6 +55,7 @@ function parseUserMetadata(avatarUrl: string | null, name: string, role: string)
         color = parsed.color;
         employeeCode = parsed.employeeCode;
         dailyCapacityUnits = parsed.dailyCapacityUnits;
+        passwordHash = parsed.passwordHash;
       } else if (avatarUrl.startsWith("#")) {
         color = avatarUrl;
       }
@@ -60,7 +69,12 @@ function parseUserMetadata(avatarUrl: string | null, name: string, role: string)
       ? dailyCapacityUnits
       : getDailyCapacity(role);
 
-  return { employeeCode: code, color: resolvedColor, dailyCapacityUnits: resolvedCapacity };
+  return {
+    employeeCode: code,
+    color: resolvedColor,
+    dailyCapacityUnits: resolvedCapacity,
+    passwordHash,
+  };
 }
 
 export async function GET(req: Request) {
@@ -112,6 +126,16 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
+
+    // Server-side role check: only admins can provision users
+    const auth = await resolveRequestActor(req, body.actorId);
+    if (auth.authenticated && auth.actor && auth.actor.role !== "admin") {
+      return NextResponse.json(
+        { error: "Forbidden: Only workspace Admins can provision team members." },
+        { status: 403 }
+      );
+    }
+
     const name = (body.name || "").trim();
     const email = (body.email || "").trim().toLowerCase();
     const role = (body.role as Role) || "member";
@@ -148,7 +172,15 @@ export async function POST(req: Request) {
       }
     }
 
-    const meta = JSON.stringify({ color, employeeCode, dailyCapacityUnits: capacityUnits });
+    const metaObj: Record<string, any> = {
+      color,
+      employeeCode,
+      dailyCapacityUnits: capacityUnits,
+    };
+    if (password) {
+      metaObj.passwordHash = hashPassword(password);
+    }
+    const meta = JSON.stringify(metaObj);
 
     // 2. Check if user already exists in profiles table
     const { data: existing } = await supabaseAdmin
@@ -243,10 +275,23 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const body = await req.json();
-    const { id, name, role, active, employeeCode, color, dailyCapacityUnits, password } = body;
+    const { id, name, role, active, employeeCode, color, dailyCapacityUnits, password, actorId } = body;
 
     if (!id) {
       return NextResponse.json({ error: "User ID is required" }, { status: 400 });
+    }
+
+    const auth = await resolveRequestActor(req, actorId);
+    if (
+      auth.authenticated &&
+      auth.actor &&
+      auth.actor.role !== "admin" &&
+      auth.actor.id !== id
+    ) {
+      return NextResponse.json(
+        { error: "Forbidden: Only Admins can modify other team members." },
+        { status: 403 }
+      );
     }
 
     const { data: current, error: fetchErr } = await supabaseAdmin
@@ -281,12 +326,21 @@ export async function PATCH(req: Request) {
     const finalColor = color || currentMeta.color;
     const finalCapacity =
       dailyCapacityUnits !== undefined ? Number(dailyCapacityUnits) : currentMeta.dailyCapacityUnits;
+    const finalPasswordHash =
+      password && typeof password === "string" && password.trim()
+        ? hashPassword(password.trim())
+        : currentMeta.passwordHash;
 
-    updates.avatar_url = JSON.stringify({
+    const metaPayload: Record<string, any> = {
       color: finalColor,
       employeeCode: finalCode,
       dailyCapacityUnits: finalCapacity,
-    });
+    };
+    if (finalPasswordHash) {
+      metaPayload.passwordHash = finalPasswordHash;
+    }
+
+    updates.avatar_url = JSON.stringify(metaPayload);
 
     const { data: updated, error: updateErr } = await supabaseAdmin
       .from("profiles")
@@ -323,9 +377,18 @@ export async function DELETE(req: Request) {
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get("id");
+    const actorId = url.searchParams.get("actorId");
 
     if (!id) {
       return NextResponse.json({ error: "User ID is required" }, { status: 400 });
+    }
+
+    const auth = await resolveRequestActor(req, actorId);
+    if (auth.authenticated && auth.actor && auth.actor.role !== "admin") {
+      return NextResponse.json(
+        { error: "Forbidden: Only Admins can deactivate team members." },
+        { status: 403 }
+      );
     }
 
     // Soft delete matching AdFlow (sets active = false, deleted_at = now())

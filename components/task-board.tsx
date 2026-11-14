@@ -326,16 +326,12 @@ export function TaskBoard() {
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (
-                      confirm(
-                        `Archive task ${task.taskNumber} ("${task.title}")? This preserves pipeline targets in Adflow.`
-                      )
-                    ) {
+                    if (confirm(`Archive task ${task.taskNumber}?`)) {
                       deleteTask(task.id);
                     }
                   }}
                   className="size-5 rounded hover:bg-amber-500/15 text-muted-foreground/40 hover:text-amber-500 flex items-center justify-center transition cursor-pointer opacity-0 group-hover:opacity-100"
-                  title="Archive task (Soft Delete)"
+                  title="Archive task"
                 >
                   <Archive className="size-3" />
                 </button>
@@ -344,22 +340,25 @@ export function TaskBoard() {
           </div>
         </div>
 
-        {/* AdFlow Creative Badge, Production Stage & Sub-Column Tag */}
+        {/* Compact AdFlow Badge, Stage & Sub-Column Tag */}
         {(task.adId || task.productionStage || task.subColumnId) && (
-          <div className="flex items-center gap-1.5 mb-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-1 mb-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
             {task.adId && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-primary/15 text-primary border border-primary/25">
-                <span className="size-1 rounded-full bg-primary animate-pulse" />
-                <span>AdFlow Creative</span>
+              <span
+                className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded text-[9px] font-semibold bg-primary/15 text-primary border border-primary/25"
+                title="Read-Only AdFlow Sync (Local Task Updates Enabled)"
+              >
+                <span className="size-1 rounded-full bg-primary" />
+                <span>AdFlow</span>
               </span>
             )}
             {task.productionStage && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono uppercase bg-muted text-muted-foreground border border-border">
+              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-mono uppercase bg-muted text-muted-foreground border border-border">
                 {task.productionStage.replace(/_/g, " ")}
               </span>
             )}
             {task.subColumnId && (
-              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20">
+              <span className="inline-flex items-center px-1.5 py-0.2 rounded text-[9px] font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20">
                 {task.subColumnId.replace(/^(dev|cc|ed|mb)-/, "").replace(/-/g, " ")}
               </span>
             )}
@@ -612,26 +611,39 @@ export function TaskBoard() {
   );
 
   return (
-    <div className="space-y-4">
-      {/* Board Top Toolbar: Layout Switcher & Bulk Tick */}
+    <div className="space-y-3">
+      {/* Board Top Toolbar: Layout Switcher, Read-Only AdFlow Sync Indicator & Quick Actions */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-foreground select-none rounded-lg border border-border bg-card px-2.5 py-1.5 hover:bg-muted transition shadow-2xs">
+        <div className="flex items-center gap-2 flex-wrap">
+          <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-foreground select-none rounded-lg border border-border bg-card px-2.5 py-1 hover:bg-muted transition shadow-2xs">
             <input
               type="checkbox"
               checked={filteredTasks.length > 0 && selectedTaskIds.length === filteredTasks.length}
               onChange={(e) => selectAllFilteredTasks(e.target.checked)}
               className="rounded border-border text-primary focus:ring-primary size-3.5 cursor-pointer"
             />
-            <span>Bulk Tick ({selectedTaskIds.length}/{filteredTasks.length})</span>
+            <span>Select ({selectedTaskIds.length}/{filteredTasks.length})</span>
           </label>
 
-          <div className="text-xs text-muted-foreground hidden sm:block">
-            Showing <strong>{filteredTasks.length}</strong> tasks across {boardLayout === "swimlanes" ? `${activeMembers.length} member swimlanes` : "5 workflow stages"}.
-          </div>
+          <button
+            type="button"
+            onClick={() => openCreateModal(currentUserId)}
+            className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 text-xs font-semibold transition cursor-pointer shadow-2xs"
+            title="Assign a new task to yourself"
+          >
+            <Plus className="size-3.5" />
+            <span>Self Task</span>
+          </button>
+
+          {filteredTasks.some((t) => Boolean(t.adId) || t.id.startsWith("ad-")) && (
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+              <span className="size-1.5 rounded-full bg-emerald-500" />
+              <span>Read-Only AdFlow Sync (Local Task Updates Enabled)</span>
+            </span>
+          )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {boardLayout === "swimlanes" && (
             <button
               type="button"
@@ -663,7 +675,7 @@ export function TaskBoard() {
                 onChange={(e) => setActiveTemplateId(e.target.value || null)}
                 className="bg-transparent text-xs font-semibold text-foreground border-none outline-none cursor-pointer pr-1"
               >
-                <option value="">Auto / Developer</option>
+                <option value="">Auto / All Roles</option>
                 {templates.map((tpl) => (
                   <option key={tpl.id} value={tpl.id}>
                     {tpl.name}
@@ -672,61 +684,59 @@ export function TaskBoard() {
               </select>
             </div>
 
-            {isManagerOrAdmin && (
-              <button
-                type="button"
-                onClick={() => setIsRoleTemplateModalOpen(true)}
-                className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 text-xs font-semibold transition cursor-pointer shadow-2xs"
-                title="Admin Template Management: create templates, role sub-columns & reassign tasks"
-              >
-                <Layers className="size-3.5" />
-                <span>Templates</span>
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={() => setIsRoleTemplateModalOpen(true)}
+              className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 text-xs font-semibold transition cursor-pointer shadow-2xs"
+              title="Role Templates"
+            >
+              <Layers className="size-3.5" />
+              <span>Templates</span>
+            </button>
           </div>
 
-          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 p-1">
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
             <button
               type="button"
               onClick={() => setBoardLayout("columns")}
               className={cn(
-                "flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer",
+                "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition cursor-pointer",
                 boardLayout === "columns"
                   ? "bg-card text-foreground shadow-xs font-semibold"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
               <Columns className="size-3.5" />
-              <span>Columns</span>
+              <span>Board</span>
             </button>
 
             <button
               type="button"
               onClick={() => setBoardLayout("subcolumns")}
               className={cn(
-                "flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer",
+                "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition cursor-pointer",
                 boardLayout === "subcolumns"
                   ? "bg-card text-foreground shadow-xs font-semibold"
                   : "text-muted-foreground hover:text-foreground"
               )}
-              title="Parent Stages with Role-Specific Sub-Columns"
+              title="Role Sub-Columns"
             >
               <Layers className="size-3.5" />
-              <span>Role Sub-Columns</span>
+              <span>Sub-Columns</span>
             </button>
 
             <button
               type="button"
               onClick={() => setBoardLayout("swimlanes")}
               className={cn(
-                "flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer",
+                "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition cursor-pointer",
                 boardLayout === "swimlanes"
                   ? "bg-card text-foreground shadow-xs font-semibold"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
               <Rows className="size-3.5" />
-              <span>Member Swimlanes</span>
+              <span>Swimlanes</span>
             </button>
           </div>
         </div>
@@ -734,7 +744,7 @@ export function TaskBoard() {
 
       {/* 1. STANDARD COLUMNS LAYOUT */}
       {boardLayout === "columns" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 items-start">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
           {COLUMNS.map((column) => {
             const columnTasks = filteredTasks.filter((t) => t.status === column.id);
             const isHovered = dragOverColumn === column.id;
@@ -753,7 +763,7 @@ export function TaskBoard() {
                 }}
                 onDrop={(e) => handleDrop(e, column.id)}
                 className={cn(
-                  "flex flex-col rounded-xl border bg-card/40 dark:bg-zinc-900/40 p-3 min-w-[250px] shadow-xs transition-colors duration-150 min-h-[320px]",
+                  "flex flex-col rounded-xl border bg-card/40 dark:bg-zinc-900/40 p-2.5 min-w-0 shadow-xs transition-colors duration-150 min-h-[320px]",
                   isHovered
                     ? "border-primary bg-primary/5 ring-2 ring-primary/20"
                     : "border-border/70 dark:border-zinc-800/80"
@@ -773,7 +783,7 @@ export function TaskBoard() {
                     />
                     <div
                       className={cn(
-                        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tracking-wide",
+                        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tracking-wide whitespace-nowrap",
                         column.pillBg
                       )}
                     >
@@ -836,41 +846,30 @@ export function TaskBoard() {
         }
 
         return (
-          <div className="space-y-4">
-            {/* Active Role Template Header Banner */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border border-primary/25 bg-primary/5 shadow-xs">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 rounded-lg bg-primary/15 text-primary border border-primary/20">
-                  <Layers className="size-4" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-foreground">{activeTpl.name}</span>
-                    <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/25">
-                      {activeTpl.role.replace("_", " ")}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">{activeTpl.description}</p>
-                </div>
+          <div className="space-y-3">
+            {/* Compact Role Template Header */}
+            <div className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl border border-primary/20 bg-primary/5">
+              <div className="flex items-center gap-2">
+                <Layers className="size-3.5 text-primary" />
+                <span className="text-xs font-bold text-foreground">{activeTpl.name}</span>
+                <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-primary/20 text-primary">
+                  {activeTpl.role.replace("_", " ")}
+                </span>
               </div>
 
-              <div className="flex items-center gap-2">
-                {isManagerOrAdmin && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    onClick={() => setIsRoleTemplateModalOpen(true)}
-                    className="text-xs h-7.5 gap-1.5"
-                  >
-                    <span>Customize Pipeline & Reassign</span>
-                    <ChevronRight className="size-3" />
-                  </Button>
-                )}
-              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setIsRoleTemplateModalOpen(true)}
+                className="text-xs h-7 gap-1"
+              >
+                <span>Templates</span>
+                <ChevronRight className="size-3" />
+              </Button>
             </div>
 
             {/* Parent Columns Grid with Nested Sub-Columns */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 items-start">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
               {activeTpl.parentColumns.map((parent) => {
                 const parentTasks = filteredTasks.filter((t) => t.status === parent.id);
                 const colDef = COLUMNS.find((c) => c.id === parent.id) || COLUMNS[1];
@@ -878,12 +877,12 @@ export function TaskBoard() {
                 return (
                   <div
                     key={parent.id}
-                    className="flex flex-col rounded-xl border border-border/80 bg-card/40 dark:bg-zinc-900/40 p-3 min-w-[260px] shadow-xs space-y-3"
+                    className="flex flex-col rounded-xl border border-border/80 bg-card/40 dark:bg-zinc-900/40 p-2.5 min-w-0 shadow-xs space-y-3"
                   >
                     {/* Sticky Parent Header */}
                     <div className="sticky top-12 z-20 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md flex items-center justify-between pb-2.5 pt-1.5 -mt-1 -mx-2 px-2 border-b border-border/60 rounded-t-xl shadow-2xs">
                       <div className="flex items-center gap-2">
-                        <div className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold tracking-wide", colDef.pillBg)}>
+                        <div className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold tracking-wide whitespace-nowrap", colDef.pillBg)}>
                           <span className={cn("size-2 rounded-full shrink-0", colDef.dotColor)} />
                           <span>{parent.label}</span>
                           <span className="text-[10px] font-mono opacity-80 ml-0.5">
@@ -924,8 +923,8 @@ export function TaskBoard() {
                                 : "border-border/60 hover:border-border/90"
                             )}
                           >
-                            {/* Sub-column header */}
-                            <div className="flex items-center justify-between pb-1 border-b border-border/40">
+                            {/* Sub-column header (sticky below parent stage header) */}
+                            <div className="sticky top-[94px] z-10 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-sm flex items-center justify-between py-1.5 -mx-1 px-1 border-b border-border/40 rounded-t">
                               <div className="flex items-center gap-1.5 min-w-0">
                                 <span
                                   className="size-1.5 rounded-full shrink-0"
@@ -939,12 +938,6 @@ export function TaskBoard() {
                                 {subTasks.length}
                               </span>
                             </div>
-
-                            {subCol.description && (
-                              <p className="text-[10px] text-muted-foreground line-clamp-1">
-                                {subCol.description}
-                              </p>
-                            )}
 
                             {/* Sub-column Cards */}
                             <div className="space-y-2 flex-1">
@@ -981,6 +974,32 @@ export function TaskBoard() {
       {/* 3. MEMBER SWIMLANES LAYOUT */}
       {boardLayout === "swimlanes" && (
         <div className="space-y-4">
+          {/* Sticky Global 5-Stage Status Bar for Swimlanes */}
+          <div className="sticky top-12 z-20 hidden md:grid md:grid-cols-5 gap-3 px-3 py-2.5 rounded-xl border border-border/80 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-sm">
+            {COLUMNS.map((column) => {
+              const colCount = filteredTasks.filter((t) => t.status === column.id).length;
+              return (
+                <div
+                  key={column.id}
+                  className="flex items-center justify-between px-2.5 py-1 rounded-lg bg-muted/30 border border-border/50"
+                >
+                  <div
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide",
+                      column.pillBg
+                    )}
+                  >
+                    <span className={cn("size-2 rounded-full shrink-0", column.dotColor)} />
+                    <span>{column.label}</span>
+                  </div>
+                  <span className="text-xs font-mono font-bold text-muted-foreground pr-1">
+                    {colCount}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
           {activeMembers.map((member) => {
             const memberTasks = filteredTasks.filter((t) => t.assigneeId === member.id);
             const isCollapsed = !!collapsedSwimlanes[member.id];
@@ -991,12 +1010,12 @@ export function TaskBoard() {
             return (
               <div
                 key={member.id}
-                className="rounded-2xl border border-border bg-card shadow-xs overflow-hidden"
+                className="rounded-2xl border border-border bg-card shadow-xs"
               >
                 {/* Swimlane Header */}
                 <div
                   onClick={() => toggleSwimlane(member.id)}
-                  className="flex items-center justify-between px-4 py-3 bg-muted/30 border-b border-border cursor-pointer select-none hover:bg-muted/50 transition"
+                  className="flex items-center justify-between px-4 py-3 bg-muted/30 border-b border-border cursor-pointer select-none hover:bg-muted/50 transition rounded-t-2xl"
                 >
                   <div className="flex items-center gap-3">
                     <ChevronDown
@@ -1080,7 +1099,7 @@ export function TaskBoard() {
 
                 {/* Swimlane Columns Grid */}
                 {!isCollapsed && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 p-3 bg-card/40">
+                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3 p-3 bg-card/40">
                     {COLUMNS.map((column) => {
                       const swimlaneTasks = memberTasks.filter((t) => t.status === column.id);
                       const key = `${member.id}-${column.id}`;
@@ -1103,7 +1122,7 @@ export function TaskBoard() {
                               : "border-border/60 bg-muted/10"
                           )}
                         >
-                          <div className="sticky top-12 z-10 bg-card/95 backdrop-blur-sm flex items-center justify-between text-[11px] font-medium text-muted-foreground pb-2 pt-1 border-b border-border/40 mb-2 -mt-1 -mx-1 px-1 rounded-t-lg">
+                          <div className="sticky top-[102px] z-10 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-sm flex items-center justify-between text-[11px] font-medium text-muted-foreground pb-2 pt-1 border-b border-border/40 mb-2 -mt-1 -mx-1 px-1 rounded-t-lg">
                             <span className="flex items-center gap-1.5">
                               <input
                                 type="checkbox"

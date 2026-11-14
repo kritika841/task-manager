@@ -16,7 +16,7 @@ import {
   Archive,
   RotateCcw,
 } from "lucide-react";
-import { Task, Subtask } from "@/lib/types";
+import { Task, Subtask, TaskStatus } from "@/lib/types";
 import { useTasks } from "@/lib/store";
 import { StatusBadge, PriorityBadge } from "./ui/badge";
 import { ProgressBar } from "./ui/progress-bar";
@@ -54,20 +54,17 @@ export function TaskList() {
 
   return (
     <div className="space-y-3">
-      {/* Top Toolbar: Bulk Tick */}
+      {/* Top Toolbar */}
       <div className="flex items-center justify-between px-1">
-        <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-foreground select-none rounded-lg border border-border bg-card px-2.5 py-1.5 hover:bg-muted transition shadow-2xs">
+        <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-foreground select-none rounded-lg border border-border bg-card px-2.5 py-1 hover:bg-muted transition shadow-2xs">
           <input
             type="checkbox"
             checked={isAllSelected}
             onChange={(e) => selectAllFilteredTasks(e.target.checked)}
             className="rounded border-border text-primary focus:ring-primary size-3.5 cursor-pointer"
           />
-          <span>Bulk Tick ({selectedTaskIds.length}/{filteredTasks.length})</span>
+          <span>Select ({selectedTaskIds.length}/{filteredTasks.length})</span>
         </label>
-        <span className="text-xs text-muted-foreground">
-          Showing {filteredTasks.length} checklist items
-        </span>
       </div>
 
       {filteredTasks.map((task) => {
@@ -158,7 +155,23 @@ export function TaskList() {
                   </div>
                 </div>
 
-                <StatusBadge status={task.status} />
+                <div className="relative" onClick={(e) => e.stopPropagation()}>
+                  <StatusBadge status={task.status} />
+                  <select
+                    value={task.status}
+                    onChange={(e) =>
+                      updateTask(task.id, { status: e.target.value as TaskStatus })
+                    }
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-xs"
+                    title="Change status"
+                  >
+                    <option value="backlog">Backlog</option>
+                    <option value="todo">To Do</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="in_review">In Review</option>
+                    <option value="completed">Done</option>
+                  </select>
+                </div>
                 <PriorityBadge priority={task.priority} />
 
                 {/* Assignee Avatar */}
@@ -204,16 +217,12 @@ export function TaskList() {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (
-                          confirm(
-                            `Archive task ${task.taskNumber} ("${task.title}")? This preserves pipeline data in Adflow.`
-                          )
-                        ) {
+                        if (confirm(`Archive task ${task.taskNumber}?`)) {
                           deleteTask(task.id);
                         }
                       }}
                       className="size-7 rounded hover:bg-amber-500/15 text-muted-foreground/60 hover:text-amber-500 flex items-center justify-center transition cursor-pointer"
-                      title="Archive task (Soft Delete)"
+                      title="Archive task"
                     >
                       <Archive className="size-3.5" />
                     </button>
@@ -225,8 +234,8 @@ export function TaskList() {
             {/* Expanded Checklist Units */}
             {isExpanded && (
               <div className="border-t border-border bg-muted/20 px-4 py-3 pl-12 space-y-2">
-                <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                  Checklist Units ({completedQty} of {targetQty} completed)
+                <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+                  Checklist ({completedQty}/{targetQty})
                 </div>
 
                 <div className="space-y-1.5">

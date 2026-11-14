@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin, dateInTargetTimeZone } from "@/lib/supabase";
 import { DailyTaskRule } from "@/lib/types";
+import { resolveRequestActor } from "@/lib/auth-server";
 
 export async function GET() {
   try {
@@ -39,6 +40,19 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
     const today = dateInTargetTimeZone();
+
+    const auth = await resolveRequestActor(req, body.createdBy);
+    if (
+      auth.authenticated &&
+      auth.actor &&
+      auth.actor.role !== "admin" &&
+      auth.actor.role !== "manager"
+    ) {
+      return NextResponse.json(
+        { error: "Forbidden: Only Managers or Admins can modify Auto Delegator rules." },
+        { status: 403 }
+      );
+    }
 
     const payload: Record<string, any> = {
       user_id: body.userId,
@@ -101,9 +115,23 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
+    const actorId = searchParams.get("actorId");
 
     if (!id) {
       return NextResponse.json({ error: "Rule ID is required" }, { status: 400 });
+    }
+
+    const auth = await resolveRequestActor(req, actorId);
+    if (
+      auth.authenticated &&
+      auth.actor &&
+      auth.actor.role !== "admin" &&
+      auth.actor.role !== "manager"
+    ) {
+      return NextResponse.json(
+        { error: "Forbidden: Only Managers or Admins can delete Auto Delegator rules." },
+        { status: 403 }
+      );
     }
 
     const { error } = await supabaseAdmin

@@ -143,11 +143,11 @@ export function TaskTable() {
   const isCompact = density === "compact";
 
   return (
-    <div className="panel overflow-hidden space-y-2">
+    <div className="panel space-y-2">
       {/* Table Toolbar: Column visibility toggle */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-border/60 bg-card/60 text-xs">
         <span className="text-muted-foreground font-mono">
-          Showing {sortedTasks.length} task{sortedTasks.length === 1 ? "" : "s"}
+          {sortedTasks.length} {sortedTasks.length === 1 ? "task" : "tasks"}
         </span>
 
         <div className="relative">
@@ -157,7 +157,7 @@ export function TaskTable() {
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-2.5 py-1 bg-card hover:bg-muted transition cursor-pointer"
           >
             <SlidersHorizontal className="size-3" />
-            <span>Customize Columns</span>
+            <span>Columns</span>
           </button>
 
           {showColumnMenu && (
@@ -189,9 +189,9 @@ export function TaskTable() {
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto sm:overflow-visible">
         <table className="w-full text-left text-sm">
-          <thead className="sticky top-0 bg-muted/70 text-xs text-muted-foreground select-none">
+          <thead className="sticky top-12 z-20 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md border-b border-border text-xs text-muted-foreground select-none shadow-2xs">
             <tr>
               <th className="px-3 py-3 w-10 text-center">
                 <input
@@ -340,6 +340,11 @@ export function TaskTable() {
                     >
                       <div className="font-medium text-foreground group-hover:text-primary transition-colors text-xs sm:text-sm flex items-center gap-1.5 flex-wrap">
                         <span>{task.title}</span>
+                        {task.adId && (
+                          <span className="rounded bg-primary/15 px-1.5 py-0.2 text-[9px] font-semibold text-primary">
+                            AdFlow
+                          </span>
+                        )}
                         {blocked && (
                           <span className="flex items-center gap-1 rounded bg-destructive/15 px-1.5 py-0.2 text-[9px] font-medium text-destructive">
                             <Lock className="size-2.5" />

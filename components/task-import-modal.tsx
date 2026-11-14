@@ -121,13 +121,13 @@ Color Grading Reel,medium,6,2026-10-16,https://drive.google.com/sample2`;
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Paste CSV rows below or upload a .csv file. Columns supported: <code>Title, Priority, TargetUnits, DueDate, DeliverableUrl</code>.
+          Columns: <code>Title, Priority, TargetUnits, DueDate, DeliverableUrl</code>
         </p>
 
         <div className="flex items-center justify-between">
           <label className="text-xs text-primary font-semibold hover:underline cursor-pointer flex items-center gap-1.5">
             <Upload className="size-3.5" />
-            <span>Select .csv file from computer</span>
+            <span>Upload .csv</span>
             <input type="file" accept=".csv" onChange={handleFileUpload} className="hidden" />
           </label>
 
@@ -136,7 +136,7 @@ Color Grading Reel,medium,6,2026-10-16,https://drive.google.com/sample2`;
             onClick={() => setCsvText(sampleCsv)}
             className="text-[11px] text-muted-foreground hover:text-foreground underline"
           >
-            Insert Sample Template
+            Sample CSV
           </button>
         </div>
 

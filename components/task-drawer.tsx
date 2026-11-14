@@ -49,6 +49,7 @@ export function TaskDrawer() {
     updateTaskProgress,
     addComment,
     deleteComment,
+    toggleReaction,
     approveTask,
     requestRevision,
     submitForReview,
@@ -125,13 +126,13 @@ export function TaskDrawer() {
               <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded bg-muted text-muted-foreground">
                 {task.taskNumber}
               </span>
-              {isStandardAdflow && (
+              {(isStandardAdflow || task.adId) && (
                 <span
-                  className="flex items-center gap-1 rounded bg-blue-500/15 px-2 py-0.5 text-[10px] font-semibold text-blue-500"
-                  title="Canonical Adflow Task"
+                  className="flex items-center gap-1 rounded bg-emerald-500/15 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400"
+                  title="Read-Only AdFlow Sync (Local Task Updates Enabled)"
                 >
-                  <Lock className="size-3" />
-                  <span>Adflow Pipeline</span>
+                  <ShieldCheck className="size-3" />
+                  <span>AdFlow (Local Updates)</span>
                 </span>
               )}
               {task.isArchived && (
@@ -172,17 +173,13 @@ export function TaskDrawer() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (
-                        confirm(
-                          `Archive task ${task.taskNumber} ("${task.title}")? This preserves pipeline integrity and payroll data in Adflow.`
-                        )
-                      ) {
+                      if (confirm(`Archive task ${task.taskNumber}?`)) {
                         deleteTask(task.id);
                         setSelectedTaskId(null);
                       }
                     }}
                     className="size-7 rounded-lg border border-amber-500/20 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-500 flex items-center justify-center transition cursor-pointer"
-                    title="Archive task (Soft Delete)"
+                    title="Archive task"
                   >
                     <Archive className="size-3.5" />
                   </button>
@@ -202,7 +199,7 @@ export function TaskDrawer() {
 
           {/* Clean 3-Tab Navigation */}
           <div className="flex border-b border-border px-4 bg-muted/20 text-xs">
-            {/* Tab 1: Overview & Deliverable */}
+            {/* Tab 1: Overview */}
             <button
               type="button"
               onClick={() => setActiveTab("overview")}
@@ -214,10 +211,10 @@ export function TaskDrawer() {
               )}
             >
               <FileText className="size-3.5" />
-              <span>Overview & Media</span>
+              <span>Overview</span>
             </button>
 
-            {/* Tab 2: Subtasks & Checklist */}
+            {/* Tab 2: Checklist */}
             <button
               type="button"
               onClick={() => setActiveTab("checklist")}
@@ -237,7 +234,7 @@ export function TaskDrawer() {
               )}
             </button>
 
-            {/* Tab 3: Discussion & Activity */}
+            {/* Tab 3: Activity */}
             <button
               type="button"
               onClick={() => setActiveTab("activity")}
@@ -249,7 +246,7 @@ export function TaskDrawer() {
               )}
             >
               <MessageSquare className="size-3.5" />
-              <span>Discussion & History</span>
+              <span>Activity</span>
               {(task.comments?.length || 0) > 0 && (
                 <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-primary/10 text-primary font-bold">
                   {task.comments?.length}
@@ -367,6 +364,29 @@ export function TaskDrawer() {
                     </div>
                   </div>
 
+                  {/* Production Stage (for AdFlow / Creative pipeline tasks) */}
+                  {(task.adId || task.productionStage) && (
+                    <div className="grid grid-cols-3 items-center">
+                      <span className="text-muted-foreground font-medium">Stage</span>
+                      <div className="col-span-2">
+                        <Select
+                          value={task.productionStage || "editing"}
+                          onChange={(e) =>
+                            updateTask(task.id, { productionStage: e.target.value })
+                          }
+                          className="w-full text-xs h-8 bg-card"
+                        >
+                          <option value="ready_for_shoot">Ready for Shoot</option>
+                          <option value="shooting">Shooting</option>
+                          <option value="ready_for_edit">Ready for Edit</option>
+                          <option value="editing">Editing</option>
+                          <option value="pending_review">Pending Review</option>
+                          <option value="approved">Approved</option>
+                        </Select>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Priority */}
                   <div className="grid grid-cols-3 items-center">
                     <span className="text-muted-foreground font-medium flex items-center gap-1.5">
@@ -447,8 +467,8 @@ export function TaskDrawer() {
                     <div className="col-span-2 flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => updateTaskProgress(task.id, completedQty - 1)}
-                        disabled={completedQty <= (task.autoCompletedQuantity || 0)}
+                        onClick={() => updateTaskProgress(task.id, Math.max(0, completedQty - 1))}
+                        disabled={completedQty <= 0}
                         className="size-7 rounded border border-border bg-card hover:bg-muted font-bold flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                       >
                         -
@@ -584,10 +604,6 @@ export function TaskDrawer() {
                       </span>
                     )}
                   </div>
-
-                  <p className="text-[11px] text-muted-foreground">
-                    Select tasks that must be finished before this task can proceed:
-                  </p>
 
                   <div className="space-y-1 max-h-36 overflow-y-auto">
                     {otherTasks.map((ot) => {
@@ -803,6 +819,9 @@ export function TaskDrawer() {
                     addComment(task.id, content, mentions)
                   }
                   onDeleteComment={(commentId) => deleteComment(task.id, commentId)}
+                  onToggleReaction={(commentId, emoji) =>
+                    toggleReaction(task.id, commentId, emoji)
+                  }
                 />
 
                 {/* Audit History Timeline */}

@@ -161,9 +161,17 @@ export interface DailyTaskRule {
   updatedAt?: string;
 }
 
-export type ViewMode = 'board' | 'table' | 'list' | 'calendar' | 'analytics';
+export type ViewMode = 'board' | 'table' | 'list' | 'calendar' | 'timeline' | 'analytics';
 export type BoardLayout = 'columns' | 'subcolumns' | 'swimlanes';
 export type DensityMode = 'comfortable' | 'compact';
+
+export interface OfflineMutation {
+  id: string;
+  type: 'create' | 'update' | 'delete' | 'restore' | 'progress' | 'subtask';
+  taskId: string;
+  payload: Record<string, any>;
+  createdAt: string;
+}
 
 export type DateRangePreset = 'all' | 'today' | 'yesterday' | 'this_week' | 'next_7_days' | 'overdue';
 export type SavedFilterPreset = 'all' | 'pending_review' | 'overdue_carried' | 'high_urgent' | 'my_active';
@@ -196,6 +204,10 @@ export interface WebhookConfig {
   enabled: boolean;
   url: string;
   events: string[];
+  secret?: string;
+  lastTriggeredAt?: string | null;
+  lastStatus?: number | null;
+  lastError?: string | null;
 }
 
 export type AdsSyncMode = "realtime" | "interval" | "manual";
@@ -210,4 +222,54 @@ export interface AdsConnectionState {
   statusMessage?: string;
   pendingChangesCount: number;
 }
+
+export interface PersonalNoteItem {
+  id: string;
+  title: string;
+  content: string;
+  pinned?: boolean;
+  updatedAt: string;
+  createdAt?: string;
+}
+
+export interface PersonalNotepad {
+  userId: string;
+  content: string;
+  notes: PersonalNoteItem[];
+  updatedAt: string;
+}
+
+export interface Reminder {
+  id: string;
+  title: string;
+  note?: string;
+  remindAt: string;
+  targetUserId: string;
+  createdByUserId: string;
+  createdByName: string;
+  completed: boolean;
+  dismissed?: boolean;
+  notified?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FeatureRequestType = 'feature' | 'feedback' | 'bug';
+export type FeatureRequestStatus = 'open' | 'in_progress' | 'resolved';
+
+export interface FeatureRequest {
+  id: string;
+  authorId: string;
+  authorName: string;
+  authorRole: Role;
+  type: FeatureRequestType;
+  title: string;
+  details: string;
+  priority?: TaskPriority;
+  status: FeatureRequestStatus;
+  adminNotes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 
