@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev -p ${PORT:-4000}",
+    "dev": "PORT=4000 next dev -p 4000",
     "build": "next build",
-    "start": "next start -p ${PORT:-4000}",
+    "start": "PORT=4000 next start -p 4000",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

@@ -24,6 +24,7 @@ import {
   LogOut,
   PanelLeft,
   Check,
+  LayoutTemplate,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
 import { ThemeToggle } from "./theme-toggle";
@@ -33,6 +34,7 @@ import { BulkActionsToolbar } from "./bulk-actions-toolbar";
 import { ShortcutsModal } from "./shortcuts-modal";
 import { NotificationCenter } from "./notification-center";
 import { SettingsModal } from "./settings-modal";
+import { RoleTemplateModal } from "./role-template-modal";
 import { Button } from "./ui/button";
 import { cn, getUserColor, getEmployeeCode } from "@/lib/utils";
 
@@ -59,6 +61,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setIsShortcutsModalOpen,
     isSettingsModalOpen,
     setIsSettingsModalOpen,
+    isRoleTemplateModalOpen,
+    setIsRoleTemplateModalOpen,
     isAdsManagementConnected,
     isSyncing,
   } = useTasks();
@@ -380,23 +384,38 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* Automation & Management (Managers/Admins only) */}
           {isManagerOrAdmin && (
-            <div>
+            <div className="space-y-1">
               <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                Automation
+                Workflows & Automation
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsRoleTemplateModalOpen(true);
+                  setMobileMenuOpen(false);
+                }}
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium transition duration-150 cursor-pointer text-foreground hover:bg-primary/10 hover:text-primary border border-primary/20 bg-primary/5"
+              >
+                <div className="flex items-center gap-2.5">
+                  <LayoutTemplate className="size-4 shrink-0 text-primary" />
+                  <span className="font-semibold">Role Templates</span>
+                </div>
+                <span className="text-[10px] font-semibold text-primary">Sub-cols</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => {
                   setIsAutoDelegatorOpen(true);
                   setMobileMenuOpen(false);
                 }}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium transition duration-150 cursor-pointer text-foreground hover:bg-primary/10 hover:text-primary border border-primary/20 bg-primary/5"
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-xs font-medium transition duration-150 cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <div className="flex items-center gap-2.5">
-                  <Zap className="size-4 shrink-0 text-primary" />
-                  <span className="font-semibold">Auto Delegator</span>
+                  <Zap className="size-4 shrink-0 text-amber-500" />
+                  <span>Auto Delegator</span>
                 </div>
-                <span className="text-[10px] font-semibold text-primary">Rules</span>
+                <span className="text-[10px] font-mono text-muted-foreground">Rules</span>
               </button>
             </div>
           )}
@@ -670,6 +689,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* Settings & Ads Connection Modal */}
       <SettingsModal />
+
+      {/* Role Templates & Sub-column Workflows Modal */}
+      <RoleTemplateModal
+        isOpen={isRoleTemplateModalOpen}
+        onClose={() => setIsRoleTemplateModalOpen(false)}
+      />
     </div>
   );
 }

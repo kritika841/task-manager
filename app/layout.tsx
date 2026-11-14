@@ -22,7 +22,7 @@ export default function RootLayout({
         />
         <script
           dangerouslySetInnerHTML={{
-            __html: `(function(){try{var t=localStorage.getItem('satmi-theme')||'obsidian';if(t==='light'){document.documentElement.classList.remove('dark','theme-midnight');document.documentElement.dataset.theme='light';}else if(t==='midnight'){document.documentElement.classList.add('dark','theme-midnight');document.documentElement.dataset.theme='midnight';}else{document.documentElement.classList.add('dark');document.documentElement.classList.remove('theme-midnight');document.documentElement.dataset.theme='obsidian';}}catch(e){}})();`,
+            __html: `(function(){try{var t=localStorage.getItem('satmi-theme')||'midnight';if(t==='obsidian'){t='midnight';localStorage.setItem('satmi-theme','midnight');}if(t==='light'){document.documentElement.classList.remove('dark','theme-midnight');document.documentElement.dataset.theme='light';}else{document.documentElement.classList.add('dark','theme-midnight');document.documentElement.dataset.theme='midnight';}}catch(e){}})();`,
           }}
         />
       </head>

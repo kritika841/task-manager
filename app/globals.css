@@ -26,35 +26,10 @@
   --ring: 173 80% 32%;
 }
 
-.dark {
-  --background: 0 0% 10%; /* #191919 Notion Matte Obsidian */
-  --foreground: 0 0% 92%; /* #eaeaea Notion crisp text */
-  --card: 0 0% 14%; /* #242424 Notion elevated surface */
-  --card-foreground: 0 0% 92%;
-  --popover: 0 0% 15%; /* #262626 */
-  --popover-foreground: 0 0% 92%;
-  --muted: 0 0% 18%; /* #2e2e2e */
-  --muted-foreground: 0 0% 60%; /* #999999 */
-  --accent: 174 35% 18%;
-  --accent-foreground: 166 70% 84%;
-  --primary: 173 70% 40%;
-  --primary-foreground: 0 0% 100%;
-  --destructive: 350 72% 55%;
-  --destructive-foreground: 0 0% 100%;
-  --success: 154 64% 48%;
-  --success-foreground: 156 80% 8%;
-  --warning: 40 92% 58%;
-  --warning-foreground: 35 90% 9%;
-  --border: 0 0% 21%; /* #353535 Notion subtle border */
-  --input: 0 0% 23%;
-  --ring: 173 70% 40%;
-  color-scheme: dark;
-}
-
-/* Original Slate/Blue Dark Preset */
+.dark,
 .dark.theme-midnight,
 [data-theme="midnight"].dark {
-  --background: 222 32% 8%; /* Original dark blue background */
+  --background: 222 32% 8%; /* Midnight blue background */
   --foreground: 210 24% 96%;
   --card: 222 27% 11%; /* Deep slate blue card */
   --card-foreground: 210 24% 96%;

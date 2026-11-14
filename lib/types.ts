@@ -1,4 +1,4 @@
-export type Role = 'admin' | 'manager' | 'editor' | 'content_creator' | 'media_buyer' | 'member';
+export type Role = 'admin' | 'manager' | 'developer' | 'editor' | 'content_creator' | 'media_buyer' | 'member';
 
 export interface User {
   id: string;
@@ -100,6 +100,39 @@ export interface Task {
   adId?: string;
   creativeName?: string;
   productionStage?: string;
+  // Role & Template Workflow Fields:
+  subColumnId?: string;
+  parentColumnId?: TaskStatus;
+  templateRole?: Role;
+}
+
+export interface SubColumnDef {
+  id: string;
+  label: string;
+  description?: string;
+  defaultTargetQuantity?: number;
+  slaHours?: number;
+  defaultChecklist?: string[];
+  color?: string;
+}
+
+export interface ParentColumnDef {
+  id: TaskStatus;
+  label: string;
+  subColumns: SubColumnDef[];
+}
+
+export interface RoleTemplate {
+  id: string;
+  name: string;
+  role: Role | "general";
+  userId?: string; // Optional user-specific override
+  userName?: string;
+  description: string;
+  isDefault?: boolean;
+  parentColumns: ParentColumnDef[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TaskComment {
@@ -129,7 +162,7 @@ export interface DailyTaskRule {
 }
 
 export type ViewMode = 'board' | 'table' | 'list' | 'calendar' | 'analytics';
-export type BoardLayout = 'columns' | 'swimlanes';
+export type BoardLayout = 'columns' | 'subcolumns' | 'swimlanes';
 export type DensityMode = 'comfortable' | 'compact';
 
 export type DateRangePreset = 'all' | 'today' | 'yesterday' | 'this_week' | 'next_7_days' | 'overdue';

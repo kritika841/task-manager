@@ -28,6 +28,7 @@ import {
   DateRangePreset,
   SavedFilterPreset,
   AdsSyncMode,
+  RoleTemplate,
 } from "./types";
 import { supabase, dateInTargetTimeZone, isCanonicalAdflowTask } from "./supabase";
 
@@ -177,6 +178,18 @@ interface TaskContextType {
   pendingOfflineChangesCount: number;
   clearPendingOfflineChanges: () => void;
   syncPendingChangesToLive: () => Promise<void>;
+  // Role & User Templates
+  templates: RoleTemplate[];
+  activeTemplateId: string | null;
+  setActiveTemplateId: (id: string | null) => void;
+  isRoleTemplateModalOpen: boolean;
+  setIsRoleTemplateModalOpen: (open: boolean) => void;
+  fetchTemplates: () => Promise<void>;
+  createRoleTemplate: (data: Omit<RoleTemplate, "id" | "createdAt" | "updatedAt">) => Promise<RoleTemplate | null>;
+  updateRoleTemplate: (id: string, updates: Partial<RoleTemplate>) => Promise<RoleTemplate | null>;
+  deleteRoleTemplate: (id: string) => Promise<boolean>;
+  applyTemplateToUser: (templateId: string, userId: string, targetDate?: string) => Promise<void>;
+  reassignTask: (taskId: string, targetUserId: string, extraUpdates?: Partial<Task>) => Promise<void>;
 }
 
 const defaultFilter: FilterState = {
@@ -187,7 +200,7 @@ const defaultFilter: FilterState = {
   project: "all",
   onlyMyTasks: false,
   showArchived: false,
-  showAdflowTasks: false, // Default is OFF per user instruction
+  showAdflowTasks: true, // Visible by default so live Ads Management data is immediately accessible!
   datePreset: "all",
   savedPreset: "all",
 };
@@ -202,17 +215,15 @@ const STORAGE_KEY_ADS_SYNC_MODE = "satmi-ads-sync-mode-v1";
 const STORAGE_KEY_ENFORCE_LOCK = "satmi-ads-enforce-lock-v1";
 const STORAGE_KEY_AUTO_RULES = "satmi-ads-auto-rules-v1";
 const STORAGE_KEY_OFFLINE_CHANGES = "satmi-ads-offline-changes-v1";
+const STORAGE_KEY_ACTIVE_TEMPLATE = "satmi-active-template-id-v1";
 
 export function isTaskAdflow(task: Task): boolean {
+  // Only target actual AdFlow creative entities, NEVER filter out regular daily tasks
   return Boolean(
     task.adId ||
     task.id.startsWith("ad-") ||
     task.tags?.includes("AdFlow") ||
-    task.tags?.includes("Active Creative") ||
-    task.isCanonicalAdflowTask ||
-    isCanonicalAdflowTask(task.title) ||
-    (task.title && /^(Raw clip generation|Ad video edits|Social media edits|Script writing|Video shoots)/i.test(task.title)) ||
-    (task.tags && task.tags.includes("Video Ads"))
+    task.tags?.includes("Active Creative")
   );
 }
 
@@ -246,6 +257,19 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [enforceCanonicalLock, setEnforceCanonicalLockState] = useState<boolean>(true);
   const [autoMaterializeRulesOnSync, setAutoMaterializeRulesOnSyncState] = useState<boolean>(true);
   const [pendingOfflineChangesCount, setPendingOfflineChangesCount] = useState<number>(0);
+
+  // Role & User Templates State
+  const [templates, setTemplates] = useState<RoleTemplate[]>([]);
+  const [activeTemplateId, setActiveTemplateIdState] = useState<string | null>(null);
+  const [isRoleTemplateModalOpen, setIsRoleTemplateModalOpen] = useState<boolean>(false);
+
+  const setActiveTemplateId = useCallback((id: string | null) => {
+    setActiveTemplateIdState(id);
+    try {
+      if (id) localStorage.setItem(STORAGE_KEY_ACTIVE_TEMPLATE, id);
+      else localStorage.removeItem(STORAGE_KEY_ACTIVE_TEMPLATE);
+    } catch {}
+  }, []);
 
   // Keep ref of selectedTaskId to prevent overwriting active editing
   const selectedTaskIdRef = useRef<string | null>(null);
@@ -337,7 +361,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const savedLayout = localStorage.getItem(STORAGE_KEY_LAYOUT) as BoardLayout;
-      if (savedLayout === "columns" || savedLayout === "swimlanes") {
+      if (savedLayout === "columns" || savedLayout === "swimlanes" || savedLayout === "subcolumns") {
         setBoardLayoutState(savedLayout);
       }
       const savedDensity = localStorage.getItem(STORAGE_KEY_DENSITY) as DensityMode;
@@ -363,6 +387,10 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       const savedPending = localStorage.getItem(STORAGE_KEY_OFFLINE_CHANGES);
       if (savedPending) {
         setPendingOfflineChangesCount(Number(savedPending) || 0);
+      }
+      const savedTemplate = localStorage.getItem(STORAGE_KEY_ACTIVE_TEMPLATE);
+      if (savedTemplate) {
+        setActiveTemplateIdState(savedTemplate);
       }
     } catch {}
   }, []);
@@ -458,11 +486,26 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Fetch Role Templates
+  const fetchTemplates = useCallback(async () => {
+    try {
+      const res = await fetch("/api/templates", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.templates)) {
+        setTemplates(data.templates);
+      }
+    } catch (err) {
+      console.error("fetchTemplates error:", err);
+    }
+  }, []);
+
   // Initial load
   useEffect(() => {
     fetchTasks(true);
     fetchDelegatorRules();
-  }, [fetchTasks, fetchDelegatorRules]);
+    fetchTemplates();
+  }, [fetchTasks, fetchDelegatorRules, fetchTemplates]);
 
   useEffect(() => {
     if (currentUserId) {
@@ -1007,6 +1050,9 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       startDate?: string;
       dueTime?: string;
       estimatedHours?: number;
+      subColumnId?: string;
+      parentColumnId?: TaskStatus;
+      templateRole?: Role;
     }): Promise<Task | null> => {
       const today = dateInTargetTimeZone();
       const targetQty = Math.max(1, Number(data.targetQuantity) || 1);
@@ -1045,6 +1091,9 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         startDate: data.startDate,
         dueTime: data.dueTime,
         estimatedHours: data.estimatedHours,
+        subColumnId: data.subColumnId,
+        parentColumnId: data.parentColumnId || data.status,
+        templateRole: data.templateRole,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
         comments: [],
@@ -1078,6 +1127,9 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
             startDate: data.startDate,
             dueTime: data.dueTime,
             estimatedHours: data.estimatedHours,
+            subColumnId: data.subColumnId,
+            parentColumnId: data.parentColumnId || data.status,
+            templateRole: data.templateRole,
           }),
         });
 
@@ -1897,8 +1949,118 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   );
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([fetchTasks(true), fetchDelegatorRules(), fetchNotifications()]);
-  }, [fetchTasks, fetchDelegatorRules, fetchNotifications]);
+    await Promise.all([fetchTasks(true), fetchDelegatorRules(), fetchNotifications(), fetchTemplates()]);
+  }, [fetchTasks, fetchDelegatorRules, fetchNotifications, fetchTemplates]);
+
+  // Role & User Template Actions
+  const createRoleTemplate = useCallback(
+    async (data: Omit<RoleTemplate, "id" | "createdAt" | "updatedAt">): Promise<RoleTemplate | null> => {
+      try {
+        const res = await fetch("/api/templates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error("Failed to create template");
+        const json = await res.json();
+        if (json.template) {
+          setTemplates((prev) => [json.template, ...prev]);
+          return json.template;
+        }
+      } catch (err) {
+        console.error("createRoleTemplate error:", err);
+      }
+      return null;
+    },
+    []
+  );
+
+  const updateRoleTemplate = useCallback(
+    async (id: string, updates: Partial<RoleTemplate>): Promise<RoleTemplate | null> => {
+      try {
+        const res = await fetch("/api/templates", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, ...updates }),
+        });
+        if (!res.ok) throw new Error("Failed to update template");
+        const json = await res.json();
+        if (json.template) {
+          setTemplates((prev) => prev.map((t) => (t.id === id ? json.template : t)));
+          return json.template;
+        }
+      } catch (err) {
+        console.error("updateRoleTemplate error:", err);
+      }
+      return null;
+    },
+    []
+  );
+
+  const deleteRoleTemplate = useCallback(
+    async (id: string): Promise<boolean> => {
+      try {
+        const res = await fetch(`/api/templates?id=${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+        if (!res.ok) throw new Error("Failed to delete template");
+        setTemplates((prev) => prev.filter((t) => t.id !== id));
+        if (activeTemplateId === id) {
+          setActiveTemplateId(null);
+        }
+        return true;
+      } catch (err) {
+        console.error("deleteRoleTemplate error:", err);
+        return false;
+      }
+    },
+    [activeTemplateId, setActiveTemplateId]
+  );
+
+  const applyTemplateToUser = useCallback(
+    async (templateId: string, userId: string, targetDate?: string) => {
+      const tpl = templates.find((t) => t.id === templateId);
+      if (!tpl) return;
+      const dueDate = targetDate || dateInTargetTimeZone();
+
+      for (const parentCol of tpl.parentColumns) {
+        for (const subCol of parentCol.subColumns) {
+          await createTask({
+            title: `${subCol.label}`,
+            description: subCol.description || `Instantiated from template: ${tpl.name}`,
+            status: parentCol.id,
+            priority: "medium",
+            assigneeId: userId,
+            dueDate,
+            targetQuantity: subCol.defaultTargetQuantity || 1,
+            subColumnId: subCol.id,
+            parentColumnId: parentCol.id,
+            templateRole: tpl.role !== "general" ? tpl.role : undefined,
+            customSubtasks: subCol.defaultChecklist?.map((item, idx) => ({
+              id: `sub-init-${Date.now()}-${idx}`,
+              title: item,
+              completed: false,
+              assignedTo: userId,
+              sortOrder: idx + 1,
+              isCustom: true,
+            })),
+          });
+        }
+      }
+      await fetchTasks(false);
+    },
+    [templates, createTask, fetchTasks]
+  );
+
+  const reassignTask = useCallback(
+    async (taskId: string, targetUserId: string, extraUpdates?: Partial<Task>) => {
+      await updateTask(taskId, {
+        assigneeId: targetUserId,
+        ...extraUpdates,
+      });
+    },
+    [updateTask]
+  );
 
   // Enhanced Filtered Tasks (Supports Search, Members, Status, Priority, Presets, and Date Ranges)
   const filteredTasks = useMemo(() => {
@@ -2121,6 +2283,18 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         refreshAll,
         isSyncing,
         lastSyncedAt,
+        // Role & User Templates
+        templates,
+        activeTemplateId,
+        setActiveTemplateId,
+        isRoleTemplateModalOpen,
+        setIsRoleTemplateModalOpen,
+        fetchTemplates,
+        createRoleTemplate,
+        updateRoleTemplate,
+        deleteRoleTemplate,
+        applyTemplateToUser,
+        reassignTask,
       }}
     >
       {children}

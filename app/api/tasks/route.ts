@@ -20,6 +20,8 @@ function getDepartment(role: string): string {
       return "Executive & Admin";
     case "manager":
       return "Operations & Review";
+    case "developer":
+      return "Engineering & Product";
     case "editor":
       return "Video Editing";
     case "content_creator":
@@ -33,6 +35,8 @@ function getDepartment(role: string): string {
 
 function getDailyCapacity(role: string): number {
   switch (role) {
+    case "developer":
+      return 6;
     case "editor":
       return 6;
     case "content_creator":
@@ -64,6 +68,9 @@ interface ParsedNotes {
   isArchived?: boolean;
   archivedAt?: string;
   archivedBy?: string | null;
+  subColumnId?: string;
+  parentColumnId?: TaskStatus;
+  templateRole?: Role;
 }
 
 function parseNotes(raw: string | null): ParsedNotes {
@@ -89,6 +96,9 @@ function parseNotes(raw: string | null): ParsedNotes {
         isArchived: Boolean(parsed.isArchived),
         archivedAt: parsed.archivedAt,
         archivedBy: parsed.archivedBy,
+        subColumnId: parsed.subColumnId,
+        parentColumnId: parsed.parentColumnId,
+        templateRole: parsed.templateRole,
       };
     }
   } catch {}
@@ -112,7 +122,10 @@ function stringifyNotes(meta: ParsedNotes): string {
     meta.timeTracking ||
     meta.isArchived !== undefined ||
     meta.archivedAt ||
-    meta.archivedBy;
+    meta.archivedBy ||
+    meta.subColumnId ||
+    meta.parentColumnId ||
+    meta.templateRole;
 
   if (!hasExtra) {
     return meta.description || "";
@@ -137,6 +150,9 @@ function stringifyNotes(meta: ParsedNotes): string {
     isArchived: meta.isArchived,
     archivedAt: meta.archivedAt,
     archivedBy: meta.archivedBy,
+    subColumnId: meta.subColumnId,
+    parentColumnId: meta.parentColumnId,
+    templateRole: meta.templateRole,
   });
 }
 
@@ -365,78 +381,110 @@ export async function GET(req: Request) {
         archivedAt: parsedNotes.archivedAt,
         archivedBy: parsedNotes.archivedBy,
         isCanonicalAdflowTask: isStandardAdflow,
+        subColumnId: parsedNotes.subColumnId,
+        parentColumnId: parsedNotes.parentColumnId || status,
+        templateRole: parsedNotes.templateRole,
       };
     });
 
     // 8. Convert active AdFlow creatives into Task models
-    // Rules:
-    // - Current editing or actively worked creatives (editing_started_at or stage === 'editing') -> "in_progress"
-    // - Not actively being worked upon -> "todo"
-    // - Submitted for review / pending review -> "in_review"
-    // - Task ID is the exact creative code: HIM0223, TAM0225, etc.
+    // Accurately maps each creative stage to its corresponding role and workflow column:
+    // - ready_to_shoot -> Content Creator shoot queue (To Do)
+    // - shoot_complete -> Creator footage review (In Progress)
+    // - ready_for_edit -> Editor ingest/cut queue (To Do)
+    // - editing -> Editor active cutting (In Progress)
+    // - creator_review -> Review by creator (In Review)
+    // - final_review -> Manager / Admin sign-off (In Review)
+    // - approved -> Approved (Done)
     const adCreativeTasks: Task[] = (activeAds || []).map((ad) => {
-      // Determine assignee: if editing stage or editor assigned, assign to editor; else creator
-      const isEditingStage =
-        ad.production_stage === "editing" ||
-        ad.production_stage === "ready_for_edit" ||
-        Boolean(ad.editing_started_at);
+      const stage = (ad.production_stage || "").toLowerCase();
+      const statusRaw = (ad.status || "").toLowerCase();
 
-      const assigneeId = (isEditingStage && ad.editor_id) ? ad.editor_id : (ad.creator_id || ad.editor_id || users[0]?.id || "");
-      const assignee = users.find((u) => u.id === assigneeId);
+      // Determine role ownership and stage label:
+      const isShootStage = stage === "ready_to_shoot" || stage === "shoot_complete";
+      const isEditStage = stage === "ready_for_edit" || stage === "editing";
 
-      // Determine task status according to user specification:
-      // Active editing creatives ONLY in in_progress; others in todo
-      let status: TaskStatus = "todo";
-      if (ad.status === "pending_review" || ad.production_stage === "creator_review" || ad.submitted_at) {
-        status = "in_review";
-      } else if (ad.editing_started_at || ad.production_stage === "editing") {
-        status = "in_progress";
-      } else if (ad.status === "approved" || ad.production_stage === "approved") {
-        status = "completed";
+      let assigneeId = "";
+      if (isShootStage) {
+        assigneeId = ad.creator_id || ad.editor_id || (users[0]?.id || "");
+      } else if (isEditStage) {
+        assigneeId = ad.editor_id || ad.creator_id || (users[0]?.id || "");
       } else {
-        status = "todo";
+        assigneeId = ad.editor_id || ad.creator_id || (users[0]?.id || "");
       }
 
+      // Determine task status, human-readable stage, and sub-column mapping:
+      let status: TaskStatus = "todo";
+      let stageLabel = "Ad Creative";
+      let subColumnId = "";
+      let templateRole: Role = isShootStage ? "content_creator" : "editor";
+
+      if (stage === "approved" || statusRaw === "approved") {
+        status = "completed";
+        stageLabel = "Approved";
+        subColumnId = "ed-final-export";
+      } else if (stage === "final_review") {
+        status = "in_review";
+        stageLabel = "Final Review";
+        subColumnId = "ed-final-review";
+      } else if (stage === "creator_review" || statusRaw === "pending_review") {
+        status = "in_review";
+        stageLabel = "Creator Review";
+        subColumnId = "ed-creator-review";
+      } else if (stage === "editing") {
+        status = "in_progress";
+        stageLabel = "Video Editing";
+        subColumnId = "ed-primary-cut";
+      } else if (stage === "shoot_complete") {
+        status = "in_progress";
+        stageLabel = "Shoot Complete (Footage Review)";
+        subColumnId = "cc-broll-capture";
+        templateRole = "content_creator";
+      } else if (stage === "ready_for_edit") {
+        status = "todo";
+        stageLabel = "Queued for Edit";
+        subColumnId = "ed-rough-cut";
+      } else if (stage === "ready_to_shoot") {
+        status = "todo";
+        stageLabel = "Ready to Shoot";
+        subColumnId = "cc-video-shoots";
+        templateRole = "content_creator";
+      } else {
+        status = ad.editing_started_at ? "in_progress" : "todo";
+        stageLabel = ad.production_stage ? ad.production_stage.replace(/_/g, " ") : "Creative";
+      }
+
+      const assignee = users.find((u) => u.id === assigneeId);
       const priority: TaskPriority = (ad.deadline && ad.deadline < today) ? "urgent" : (status === "in_progress" ? "high" : "medium");
-
-      const stageLabel =
-        ad.production_stage === "editing"
-          ? "Video Edit"
-          : ad.production_stage === "ready_for_edit"
-          ? "Queued for Edit"
-          : ad.production_stage === "shoot_complete"
-          ? "Raw Footage Review"
-          : "Creative Shoot";
-
       const comments = allComments[`ad-${ad.id}`] || [];
 
       return {
         id: `ad-${ad.id}`,
-        taskNumber: ad.name, // Real AdFlow creative code e.g. HIM0223, TAM0225
+        taskNumber: ad.name, // Real AdFlow creative code e.g. HIM0223, TAM0225, ISH0058
         title: `${ad.name} — ${stageLabel}`,
-        description: `AdFlow creative [${ad.name}]. Production Stage: ${ad.production_stage || "Draft"}.${ad.notes ? `\n\nNotes: ${ad.notes}` : ""}`,
+        description: `AdFlow creative [${ad.name}]. Production Stage: ${stageLabel}.${ad.notes ? `\n\nNotes: ${ad.notes}` : ""}`,
         status,
         priority,
         assigneeId,
-        creatorId: ad.creator_id || users[0]?.id || "",
+        creatorId: ad.creator_id || (users[0]?.id || ""),
         dueDate: ad.deadline || today,
         subtasks: [
           {
             id: `sub-ad-${ad.id}-1`,
-            title: `Produce & deliver creative: ${ad.name}`,
+            title: `Deliver creative: ${ad.name} (${stageLabel})`,
             completed: status === "completed",
             assignedTo: assigneeId,
             sortOrder: 1,
             isCustom: false,
           },
         ],
-        project: assignee?.department || "Video Editing",
-        tags: ["AdFlow", "Active Creative", ad.production_stage || "Production"],
+        project: assignee?.department || (isEditStage ? "Video Editing" : "Content & Creative"),
+        tags: ["AdFlow", "Active Creative", stageLabel],
         createdAt: ad.created_at || new Date().toISOString(),
         updatedAt: ad.updated_at || new Date().toISOString(),
         comments,
         targetQuantity: 1,
-        completedQuantity: status === "completed" ? 1 : (status === "in_progress" ? 0 : 0),
+        completedQuantity: status === "completed" ? 1 : 0,
         manualCompletedQuantity: 0,
         autoCompletedQuantity: status === "completed" ? 1 : 0,
         isCarried: false,
@@ -444,6 +492,9 @@ export async function GET(req: Request) {
         adId: ad.id,
         creativeName: ad.name,
         productionStage: ad.production_stage,
+        subColumnId,
+        parentColumnId: status,
+        templateRole,
       };
     });
 
@@ -513,6 +564,9 @@ export async function POST(req: Request) {
       startDate: body.startDate,
       dueTime: body.dueTime,
       estimatedHours: body.estimatedHours,
+      subColumnId: body.subColumnId,
+      parentColumnId: body.parentColumnId || body.status,
+      templateRole: body.templateRole,
     };
 
     const initialCompleted = body.status === "completed" ? targetQuantity : 0;
@@ -594,6 +648,9 @@ export async function PATCH(req: Request) {
       actualHours,
       timeTracking,
       actorId,
+      subColumnId,
+      parentColumnId,
+      templateRole,
     } = body;
 
     if (!id) {
@@ -676,6 +733,9 @@ export async function PATCH(req: Request) {
     if (estimatedHours !== undefined) currentNotesMeta.estimatedHours = estimatedHours;
     if (actualHours !== undefined) currentNotesMeta.actualHours = actualHours;
     if (timeTracking !== undefined) currentNotesMeta.timeTracking = timeTracking;
+    if (subColumnId !== undefined) currentNotesMeta.subColumnId = subColumnId;
+    if (parentColumnId !== undefined) currentNotesMeta.parentColumnId = parentColumnId;
+    if (templateRole !== undefined) currentNotesMeta.templateRole = templateRole;
 
     const updates: Record<string, any> = {
       updated_at: new Date().toISOString(),

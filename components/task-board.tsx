@@ -23,6 +23,8 @@ import {
   Rows,
   Trash2,
   Archive,
+  ExternalLink,
+  Sparkles,
 } from "lucide-react";
 import { Task, TaskStatus, User } from "@/lib/types";
 import { useTasks } from "@/lib/store";
@@ -97,6 +99,10 @@ export function TaskBoard() {
     selectTasks,
     updateTaskProgress,
     currentUserId,
+    templates,
+    activeTemplateId,
+    setActiveTemplateId,
+    setIsRoleTemplateModalOpen,
   } = useTasks();
 
   const [expandedTaskIds, setExpandedTaskIds] = useState<Record<string, boolean>>({});
@@ -164,7 +170,12 @@ export function TaskBoard() {
     }
   };
 
-  const handleDrop = (e: React.DragEvent, columnId: TaskStatus, targetUserId?: string) => {
+  const handleDrop = (
+    e: React.DragEvent,
+    columnId: TaskStatus,
+    targetUserId?: string,
+    targetSubColumnId?: string
+  ) => {
     e.preventDefault();
     e.stopPropagation();
     setDragOverColumn(null);
@@ -175,14 +186,21 @@ export function TaskBoard() {
     if (taskId) {
       const taskObj = tasks.find((t) => t.id === taskId);
       if (taskObj) {
-        // Skip if dropping to exact same status and assignee
-        if (taskObj.status === columnId && (!targetUserId || taskObj.assigneeId === targetUserId)) {
+        if (
+          taskObj.status === columnId &&
+          (!targetUserId || taskObj.assigneeId === targetUserId) &&
+          (!targetSubColumnId || taskObj.subColumnId === targetSubColumnId)
+        ) {
           return;
         }
 
         const updates: Partial<Task> = { status: columnId };
         if (targetUserId) {
           updates.assigneeId = targetUserId;
+        }
+        if (targetSubColumnId !== undefined) {
+          updates.subColumnId = targetSubColumnId;
+          updates.parentColumnId = columnId;
         }
         updateTask(taskId, updates);
       }
@@ -326,6 +344,28 @@ export function TaskBoard() {
           </div>
         </div>
 
+        {/* AdFlow Creative Badge, Production Stage & Sub-Column Tag */}
+        {(task.adId || task.productionStage || task.subColumnId) && (
+          <div className="flex items-center gap-1.5 mb-1.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
+            {task.adId && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-primary/15 text-primary border border-primary/25">
+                <span className="size-1 rounded-full bg-primary animate-pulse" />
+                <span>AdFlow Creative</span>
+              </span>
+            )}
+            {task.productionStage && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono uppercase bg-muted text-muted-foreground border border-border">
+                {task.productionStage.replace(/_/g, " ")}
+              </span>
+            )}
+            {task.subColumnId && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-medium bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                {task.subColumnId.replace(/^(dev|cc|ed|mb)-/, "").replace(/-/g, " ")}
+              </span>
+            )}
+          </div>
+        )}
+
         {/* Task Title */}
         <h3 className="text-[13px] font-medium text-foreground leading-snug line-clamp-2 mb-2 group-hover:text-primary transition-colors">
           {task.title}
@@ -333,7 +373,7 @@ export function TaskBoard() {
 
         {/* Deliverable or Target Units with 1-click + unit increment */}
         {((targetQty > 1) || task.deliverableUrl) && (
-          <div className="flex items-center gap-2 mb-2.5" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center gap-2 mb-2.5 flex-wrap" onClick={(e) => e.stopPropagation()}>
             {targetQty > 1 && (
               <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono bg-muted/80 text-muted-foreground border border-border/60">
                 <span>{completedQty}/{targetQty} units</span>
@@ -359,10 +399,11 @@ export function TaskBoard() {
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center gap-1 text-[10px] text-primary/80 hover:text-primary truncate underline"
+                className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded hover:bg-emerald-500/20 transition truncate"
+                title="Open Deliverable Video / Drive link"
               >
-                <Tag className="size-2.5" />
-                <span>Deliverable</span>
+                <ExternalLink className="size-2.5" />
+                <span>Drive Deliverable</span>
               </a>
             )}
           </div>
@@ -612,6 +653,38 @@ export function TaskBoard() {
             </button>
           )}
 
+          {/* Active Role Template Selector */}
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs shadow-2xs">
+              <Sparkles className="size-3 text-primary" />
+              <span className="text-[11px] text-muted-foreground hidden sm:inline">Role:</span>
+              <select
+                value={activeTemplateId || ""}
+                onChange={(e) => setActiveTemplateId(e.target.value || null)}
+                className="bg-transparent text-xs font-semibold text-foreground border-none outline-none cursor-pointer pr-1"
+              >
+                <option value="">Auto / Developer</option>
+                {templates.map((tpl) => (
+                  <option key={tpl.id} value={tpl.id}>
+                    {tpl.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {isManagerOrAdmin && (
+              <button
+                type="button"
+                onClick={() => setIsRoleTemplateModalOpen(true)}
+                className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 text-xs font-semibold transition cursor-pointer shadow-2xs"
+                title="Admin Template Management: create templates, role sub-columns & reassign tasks"
+              >
+                <Layers className="size-3.5" />
+                <span>Templates</span>
+              </button>
+            )}
+          </div>
+
           <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 p-1">
             <button
               type="button"
@@ -625,6 +698,21 @@ export function TaskBoard() {
             >
               <Columns className="size-3.5" />
               <span>Columns</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setBoardLayout("subcolumns")}
+              className={cn(
+                "flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium transition cursor-pointer",
+                boardLayout === "subcolumns"
+                  ? "bg-card text-foreground shadow-xs font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              title="Parent Stages with Role-Specific Sub-Columns"
+            >
+              <Layers className="size-3.5" />
+              <span>Role Sub-Columns</span>
             </button>
 
             <button
@@ -671,8 +759,8 @@ export function TaskBoard() {
                     : "border-border/70 dark:border-zinc-800/80"
                 )}
               >
-                {/* Notion Column Header */}
-                <div className="flex items-center justify-between pb-2 mb-2">
+                {/* Notion Column Header - STICKY STATUSES */}
+                <div className="sticky top-12 z-20 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md flex items-center justify-between pb-2.5 pt-1.5 mb-2 -mt-1 -mx-2 px-2 border-b border-border/60 rounded-t-xl shadow-2xs">
                   <div className="flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -736,7 +824,161 @@ export function TaskBoard() {
         </div>
       )}
 
-      {/* 2. MEMBER SWIMLANES LAYOUT */}
+      {/* 2. ROLE WORKFLOW SUB-COLUMNS LAYOUT */}
+      {boardLayout === "subcolumns" && (() => {
+        const activeTpl = templates.find((t) => t.id === activeTemplateId) || templates[0];
+        if (!activeTpl) {
+          return (
+            <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+              No workflow template available. Click "Templates" to create one.
+            </div>
+          );
+        }
+
+        return (
+          <div className="space-y-4">
+            {/* Active Role Template Header Banner */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border border-primary/25 bg-primary/5 shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-primary/15 text-primary border border-primary/20">
+                  <Layers className="size-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold text-foreground">{activeTpl.name}</span>
+                    <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/25">
+                      {activeTpl.role.replace("_", " ")}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">{activeTpl.description}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {isManagerOrAdmin && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setIsRoleTemplateModalOpen(true)}
+                    className="text-xs h-7.5 gap-1.5"
+                  >
+                    <span>Customize Pipeline & Reassign</span>
+                    <ChevronRight className="size-3" />
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Parent Columns Grid with Nested Sub-Columns */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4 items-start">
+              {activeTpl.parentColumns.map((parent) => {
+                const parentTasks = filteredTasks.filter((t) => t.status === parent.id);
+                const colDef = COLUMNS.find((c) => c.id === parent.id) || COLUMNS[1];
+
+                return (
+                  <div
+                    key={parent.id}
+                    className="flex flex-col rounded-xl border border-border/80 bg-card/40 dark:bg-zinc-900/40 p-3 min-w-[260px] shadow-xs space-y-3"
+                  >
+                    {/* Sticky Parent Header */}
+                    <div className="sticky top-12 z-20 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md flex items-center justify-between pb-2.5 pt-1.5 -mt-1 -mx-2 px-2 border-b border-border/60 rounded-t-xl shadow-2xs">
+                      <div className="flex items-center gap-2">
+                        <div className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold tracking-wide", colDef.pillBg)}>
+                          <span className={cn("size-2 rounded-full shrink-0", colDef.dotColor)} />
+                          <span>{parent.label}</span>
+                          <span className="text-[10px] font-mono opacity-80 ml-0.5">
+                            {parentTasks.length}
+                          </span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => openCreateModal(undefined, parent.id)}
+                        className="text-muted-foreground/60 hover:text-foreground transition p-1 rounded-md hover:bg-muted/50 cursor-pointer"
+                        title={`Add task to ${parent.label}`}
+                      >
+                        <Plus className="size-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Sub-Columns List under this Parent Stage */}
+                    <div className="space-y-3 flex-1">
+                      {parent.subColumns.map((subCol) => {
+                        const subTasks = parentTasks.filter(
+                          (t) => t.subColumnId === subCol.id || (!t.subColumnId && parent.subColumns[0]?.id === subCol.id)
+                        );
+                        const isHovered = dragOverColumn === subCol.id;
+
+                        return (
+                          <div
+                            key={subCol.id}
+                            onDragOver={(e) => handleDragOver(e, subCol.id)}
+                            onDragLeave={(e) => {
+                              if (e.currentTarget === e.target) setDragOverColumn(null);
+                            }}
+                            onDrop={(e) => handleDrop(e, parent.id, undefined, subCol.id)}
+                            className={cn(
+                              "rounded-lg border p-2.5 bg-card/90 transition-all flex flex-col space-y-2",
+                              isHovered
+                                ? "border-primary bg-primary/5 ring-2 ring-primary/20 shadow-xs"
+                                : "border-border/60 hover:border-border/90"
+                            )}
+                          >
+                            {/* Sub-column header */}
+                            <div className="flex items-center justify-between pb-1 border-b border-border/40">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span
+                                  className="size-1.5 rounded-full shrink-0"
+                                  style={{ backgroundColor: subCol.color || "#0ea5e9" }}
+                                />
+                                <span className="text-xs font-semibold text-foreground truncate">
+                                  {subCol.label}
+                                </span>
+                              </div>
+                              <span className="font-mono text-[9px] text-muted-foreground ml-1">
+                                {subTasks.length}
+                              </span>
+                            </div>
+
+                            {subCol.description && (
+                              <p className="text-[10px] text-muted-foreground line-clamp-1">
+                                {subCol.description}
+                              </p>
+                            )}
+
+                            {/* Sub-column Cards */}
+                            <div className="space-y-2 flex-1">
+                              {subTasks.map((task) => renderCard(task))}
+                              {subTasks.length === 0 && (
+                                <div className="text-[10px] text-muted-foreground/60 italic text-center py-3 border border-dashed border-border/50 rounded-md">
+                                  Drop into {subCol.label}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {parent.subColumns.length === 0 && (
+                        <div className="space-y-2">
+                          {parentTasks.map((task) => renderCard(task))}
+                          {parentTasks.length === 0 && (
+                            <div className="text-xs text-muted-foreground/60 italic text-center py-4 border border-dashed border-border/50 rounded-lg">
+                              No tasks in {parent.label}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 3. MEMBER SWIMLANES LAYOUT */}
       {boardLayout === "swimlanes" && (
         <div className="space-y-4">
           {activeMembers.map((member) => {
@@ -861,7 +1103,7 @@ export function TaskBoard() {
                               : "border-border/60 bg-muted/10"
                           )}
                         >
-                          <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground pb-2 border-b border-border/40 mb-2">
+                          <div className="sticky top-12 z-10 bg-card/95 backdrop-blur-sm flex items-center justify-between text-[11px] font-medium text-muted-foreground pb-2 pt-1 border-b border-border/40 mb-2 -mt-1 -mx-1 px-1 rounded-t-lg">
                             <span className="flex items-center gap-1.5">
                               <input
                                 type="checkbox"
