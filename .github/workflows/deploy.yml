@@ -63,4 +63,81 @@ jobs:
           pm2 save
           sleep 3
           curl -fsS -o /dev/null http://127.0.0.1:4000 && echo "App is up on :4000"
+
+          # Configure Nginx reverse proxy for tasks.satmi.in -> http://127.0.0.1:4000
+          if ! sudo test -f /etc/letsencrypt/live/tasks.satmi.in/fullchain.pem; then
+            sudo tee /etc/nginx/sites-available/tasks.satmi.in >/dev/null <<'NGINX_HTTP'
+          server {
+              listen 80;
+              server_name tasks.satmi.in;
+              client_max_body_size 25m;
+
+              location / {
+                  proxy_pass http://127.0.0.1:4000;
+                  proxy_buffer_size 16k;
+                  proxy_buffers 4 16k;
+                  proxy_busy_buffers_size 32k;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_cache_bypass $http_upgrade;
+              }
+          }
+          NGINX_HTTP
+            sudo ln -sf /etc/nginx/sites-available/tasks.satmi.in /etc/nginx/sites-enabled/tasks.satmi.in
+            sudo nginx -t && sudo systemctl reload nginx
+            sudo certbot --nginx -d tasks.satmi.in --non-interactive --agree-tos --redirect --register-unsafely-without-email || true
+          fi
+
+          if sudo test -f /etc/letsencrypt/live/tasks.satmi.in/fullchain.pem; then
+            SSL_CERT="/etc/letsencrypt/live/tasks.satmi.in/fullchain.pem"
+            SSL_KEY="/etc/letsencrypt/live/tasks.satmi.in/privkey.pem"
+          else
+            SSL_CERT="/etc/letsencrypt/live/satmi.in/fullchain.pem"
+            SSL_KEY="/etc/letsencrypt/live/satmi.in/privkey.pem"
+          fi
+
+          sudo tee /etc/nginx/sites-available/tasks.satmi.in >/dev/null <<'NGINX_SSL'
+          server {
+              server_name tasks.satmi.in;
+              client_max_body_size 25m;
+
+              location / {
+                  proxy_pass http://127.0.0.1:4000;
+                  proxy_buffer_size 16k;
+                  proxy_buffers 4 16k;
+                  proxy_busy_buffers_size 32k;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection "upgrade";
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+                  proxy_cache_bypass $http_upgrade;
+              }
+
+              listen 443 ssl; # managed by Certbot
+              ssl_certificate __SSL_CERT__; # managed by Certbot
+              ssl_certificate_key __SSL_KEY__; # managed by Certbot
+              include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+              ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+          }
+          server {
+              if ($host = tasks.satmi.in) {
+                  return 301 https://$host$request_uri;
+              } # managed by Certbot
+              listen 80;
+              server_name tasks.satmi.in;
+              return 404; # managed by Certbot
+          }
+          NGINX_SSL
+          sudo sed -i "s|__SSL_CERT__|$SSL_CERT|g; s|__SSL_KEY__|$SSL_KEY|g" /etc/nginx/sites-available/tasks.satmi.in
+          sudo ln -sf /etc/nginx/sites-available/tasks.satmi.in /etc/nginx/sites-enabled/tasks.satmi.in
+          sudo nginx -t && sudo systemctl reload nginx
+          echo "Nginx configured and reloaded for tasks.satmi.in (SSL cert: $SSL_CERT)"
           REMOTE
