@@ -11,6 +11,9 @@ export interface ReminderRecord {
   targetUserName?: string;
   createdByUserId: string;
   createdByName: string;
+  enabled?: boolean;
+  isLongTerm?: boolean;
+  recurrence?: string;
   completed: boolean;
   dismissed?: boolean;
   notified?: boolean;
@@ -203,6 +206,9 @@ export async function POST(req: NextRequest) {
         targetUserName: resolvedTargetName,
         createdByUserId: creatorId,
         createdByName: creatorName,
+        enabled: body.enabled !== undefined ? Boolean(body.enabled) : true,
+        isLongTerm: Boolean(body.isLongTerm),
+        recurrence: typeof body.recurrence === "string" ? body.recurrence : "once",
         completed: false,
         dismissed: false,
         notified: false,
@@ -291,6 +297,9 @@ async function handleUpdate(req: NextRequest) {
       title: body.title !== undefined ? String(body.title).trim() : current.title,
       note: body.note !== undefined ? String(body.note).trim() : current.note,
       remindAt: updatedRemindAt,
+      enabled: body.enabled !== undefined ? Boolean(body.enabled) : current.enabled ?? true,
+      isLongTerm: body.isLongTerm !== undefined ? Boolean(body.isLongTerm) : current.isLongTerm,
+      recurrence: body.recurrence !== undefined ? String(body.recurrence) : current.recurrence,
       completed: updatedCompleted,
       dismissed: updatedDismissed,
       notified: updatedNotified,

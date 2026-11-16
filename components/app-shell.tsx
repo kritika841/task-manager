@@ -3,12 +3,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import {
-  Kanban,
-  Table2,
-  ListTodo,
-  BarChart3,
-  Calendar,
-  Layers,
   Clock,
   Plus,
   Search,
@@ -20,22 +14,19 @@ import {
   Command,
   Archive,
   Settings,
-  Unplug,
   LogOut,
   PanelLeft,
-  Check,
   LayoutTemplate,
   StickyNote,
   AlarmClock,
   Volume2,
   VolumeX,
   Sparkles,
-  Users,
+  LayoutDashboard,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
 import { isSoundMuted, toggleSoundMuted } from "@/lib/sound";
 import { ThemeToggle } from "./theme-toggle";
-import { SlaTimer } from "./sla-timer";
 import { CommandPalette } from "./command-palette";
 import { BulkActionsToolbar } from "./bulk-actions-toolbar";
 import { ShortcutsModal } from "./shortcuts-modal";
@@ -43,7 +34,6 @@ import { NotificationCenter } from "./notification-center";
 import { SettingsModal } from "./settings-modal";
 import { RoleTemplateModal } from "./role-template-modal";
 import { FeatureRequestModal } from "./feature-request-modal";
-import { PersonalNotepad } from "./personal-notepad";
 import { RemindersPanel } from "./reminders-panel";
 import { Button } from "./ui/button";
 import { cn, getUserColor, getEmployeeCode } from "@/lib/utils";
@@ -60,16 +50,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     tasks,
     filteredTasks,
     baseVisibleTasks,
-    users,
     currentUser,
     currentUserId,
     isAdmin,
     isManagerOrAdmin,
+    activeSection,
+    setActiveSection,
     viewMode,
-    setViewMode,
     filter,
     setFilter,
-    switchUser,
     logout,
     setIsCreateModalOpen,
     setIsAutoDelegatorOpen,
@@ -78,8 +67,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setIsSettingsModalOpen,
     isRoleTemplateModalOpen,
     setIsRoleTemplateModalOpen,
-    isAdsManagementConnected,
-    isSyncing,
   } = store;
 
   const isDeveloper = store.isDeveloper ?? currentUser?.role === "developer";
@@ -89,8 +76,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [userDropdownOpen, setUserDropdownOpen] = useState(false);
-  const [isNotepadOpen, setIsNotepadOpen] = useState(false);
-  const [isRemindersOpen, setIsRemindersOpen] = useState(false);
   const [isFeedbackOpen, setIsFeedbackOpen] = useState(false);
   const [feedbackInitialTab, setFeedbackInitialTab] = useState<
     "submit" | "manage"
@@ -171,7 +156,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Link
             href="/"
             className="flex flex-col items-start gap-1 group transition-transform active:scale-95"
-            onClick={() => setMobileMenuOpen(false)}
+            onClick={() => {
+              setActiveSection("overview");
+              setMobileMenuOpen(false);
+            }}
           >
             <div className="relative flex items-center">
               <img
@@ -191,266 +179,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
 
-        {/* Sidebar Navigation */}
-        <div className="flex-1 overflow-y-auto px-3 py-3.5 space-y-4">
-          {/* Views */}
+        {/* Sidebar Navigation: Overview, Workspace Tools, Filters */}
+        <div className="flex-1 overflow-y-auto px-3 py-3.5 space-y-5">
+          {/* 1. Overview */}
           <div>
             <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Views
+              Overview
             </div>
             <nav className="space-y-0.5">
               <button
                 type="button"
                 onClick={() => {
-                  setViewMode("board");
+                  setActiveSection("overview");
                   setMobileMenuOpen(false);
                 }}
                 className={cn(
                   "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  viewMode === "board"
+                  activeSection === "overview"
                     ? "bg-accent text-accent-foreground font-semibold"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
                 <div className="flex items-center gap-2.5">
-                  <Kanban className="size-4 shrink-0 text-primary" />
-                  <span>Board</span>
+                  <LayoutDashboard className="size-4 shrink-0 text-primary" />
+                  <span>Overview</span>
                 </div>
                 <span className="text-[10px] font-mono opacity-70">
                   {filteredTasks.length}
                 </span>
               </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setViewMode("table");
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  viewMode === "table"
-                    ? "bg-accent text-accent-foreground font-semibold"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Table2 className="size-4 shrink-0 text-primary" />
-                  <span>Table</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setViewMode("list");
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  viewMode === "list"
-                    ? "bg-accent text-accent-foreground font-semibold"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <ListTodo className="size-4 shrink-0 text-primary" />
-                  <span>Checklist</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setViewMode("calendar");
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  viewMode === "calendar"
-                    ? "bg-accent text-accent-foreground font-semibold"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Calendar className="size-4 shrink-0 text-primary" />
-                  <span>Calendar</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setViewMode("timeline");
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  viewMode === "timeline"
-                    ? "bg-accent text-accent-foreground font-semibold"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Layers className="size-4 shrink-0 text-primary" />
-                  <span>Timeline</span>
-                </div>
-              </button>
-
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setViewMode("analytics");
-                    setMobileMenuOpen(false);
-                  }}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                    viewMode === "analytics"
-                      ? "bg-accent text-accent-foreground font-semibold"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                >
-                  <div className="flex items-center gap-2.5">
-                    <BarChart3 className="size-4 shrink-0 text-primary" />
-                    <span>Analytics</span>
-                  </div>
-                </button>
-              )}
             </nav>
           </div>
 
-          {/* Quick Filters */}
-          <div>
-            <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Filters
-            </div>
-            <nav className="space-y-0.5">
-              <button
-                type="button"
-                onClick={() => {
-                  setFilter({
-                    onlyMyTasks: !filter.onlyMyTasks,
-                    assigneeId: "all",
-                  });
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  filter.onlyMyTasks
-                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <UserCheck className="size-4 shrink-0" />
-                  <span>My Tasks</span>
-                </div>
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-0.2 text-[10px] font-mono font-medium",
-                    filter.onlyMyTasks
-                      ? "bg-primary-foreground/20 text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  )}
-                >
-                  {myTasksCount}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setFilter({
-                    status: filter.status === "in_review" ? "all" : "in_review",
-                  });
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  filter.status === "in_review"
-                    ? "bg-warning text-warning-foreground font-semibold shadow-xs"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Clock className="size-4 shrink-0 text-warning" />
-                  <span>Needs Review</span>
-                </div>
-                {inReviewCount > 0 && (
-                  <span className="rounded-full bg-warning/15 px-2 py-0.2 text-[10px] font-mono font-semibold text-warning">
-                    {inReviewCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setFilter({
-                    showArchived: !filter.showArchived,
-                  });
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  filter.showArchived
-                    ? "bg-amber-500 text-white font-semibold shadow-xs"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Archive className="size-4 shrink-0 text-amber-500" />
-                  <span>Archived</span>
-                </div>
-                {archivedCount > 0 && (
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.2 text-[10px] font-mono font-semibold",
-                      filter.showArchived
-                        ? "bg-white/20 text-white"
-                        : "bg-amber-500/15 text-amber-500"
-                    )}
-                  >
-                    {archivedCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setFilter({
-                    showAdflowTasks: !filter.showAdflowTasks,
-                  });
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  filter.showAdflowTasks
-                    ? "bg-primary/15 text-primary font-semibold border border-primary/25"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Zap className="size-4 shrink-0 text-primary" />
-                  <span>AdFlow Tasks</span>
-                </div>
-                <span
-                  className={cn(
-                    "rounded-full px-1.5 py-0.2 text-[9px] font-mono font-semibold uppercase",
-                    filter.showAdflowTasks
-                      ? "bg-primary/20 text-primary"
-                      : "bg-muted text-muted-foreground"
-                  )}
-                >
-                  {filter.showAdflowTasks ? "On" : "Off"}
-                </span>
-              </button>
-            </nav>
-          </div>
-
-          {/* Personal & Team Tools */}
+          {/* 2. Workspace Tools */}
           <div>
             <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Workspace Tools
@@ -459,34 +220,41 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <button
                 type="button"
                 onClick={() => {
-                  setIsNotepadOpen(true);
+                  setActiveSection("notepad");
                   setMobileMenuOpen(false);
                 }}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground"
+                className={cn(
+                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
+                  activeSection === "notepad"
+                    ? "bg-accent text-accent-foreground font-semibold"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
               >
                 <div className="flex items-center gap-2.5">
                   <StickyNote className="size-4 shrink-0 text-primary" />
                   <span>Personal Notepad</span>
                 </div>
-                <span className="rounded bg-muted px-1.5 py-0.2 text-[9px] font-medium text-muted-foreground">
-                  Private
-                </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => {
-                  setIsRemindersOpen(true);
+                  setActiveSection("reminders");
                   setMobileMenuOpen(false);
                 }}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground"
+                className={cn(
+                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
+                  activeSection === "reminders"
+                    ? "bg-accent text-accent-foreground font-semibold"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
               >
                 <div className="flex items-center gap-2.5">
                   <AlarmClock className="size-4 shrink-0 text-amber-500" />
                   <span>Reminders</span>
                 </div>
                 {dueRemindersCount > 0 ? (
-                  <span className="rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] font-mono font-bold text-white animate-pulse">
+                  <span className="rounded-full bg-amber-500 px-1.5 py-0.2 text-[10px] font-mono font-bold text-white">
                     {dueRemindersCount} due
                   </span>
                 ) : pendingRemindersCount > 0 ? (
@@ -538,22 +306,114 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   <Settings className="size-4 shrink-0 text-primary" />
                   <span>Settings</span>
                 </div>
+              </button>
+            </nav>
+          </div>
+
+          {/* 3. Filters */}
+          <div>
+            <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Filters
+            </div>
+            <nav className="space-y-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveSection("overview");
+                  setFilter({
+                    onlyMyTasks: !filter.onlyMyTasks,
+                    assigneeId: "all",
+                  });
+                  setMobileMenuOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
+                  filter.onlyMyTasks
+                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <div className="flex items-center gap-2.5">
+                  <UserCheck className="size-4 shrink-0" />
+                  <span>My Tasks</span>
+                </div>
                 <span
                   className={cn(
-                    "rounded-full px-1.5 py-0.2 text-[9px] font-semibold uppercase",
-                    isAdsManagementConnected
-                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                      : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                    "rounded-full px-2 py-0.2 text-[10px] font-mono font-medium",
+                    filter.onlyMyTasks
+                      ? "bg-primary-foreground/20 text-primary-foreground"
+                      : "bg-muted text-muted-foreground"
                   )}
                 >
-                  {isAdsManagementConnected ? "Read-Only" : "Local"}
+                  {myTasksCount}
                 </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveSection("overview");
+                  setFilter({
+                    status: filter.status === "in_review" ? "all" : "in_review",
+                  });
+                  setMobileMenuOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
+                  filter.status === "in_review"
+                    ? "bg-warning text-warning-foreground font-semibold shadow-xs"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Clock className="size-4 shrink-0 text-warning" />
+                  <span>Needs Review</span>
+                </div>
+                {inReviewCount > 0 && (
+                  <span className="rounded-full bg-warning/15 px-2 py-0.2 text-[10px] font-mono font-semibold text-warning">
+                    {inReviewCount}
+                  </span>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveSection("overview");
+                  setFilter({
+                    showArchived: !filter.showArchived,
+                  });
+                  setMobileMenuOpen(false);
+                }}
+                className={cn(
+                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
+                  filter.showArchived
+                    ? "bg-amber-500 text-white font-semibold shadow-xs"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Archive className="size-4 shrink-0 text-amber-500" />
+                  <span>Archived</span>
+                </div>
+                {archivedCount > 0 && (
+                  <span
+                    className={cn(
+                      "rounded-full px-2 py-0.2 text-[10px] font-mono font-semibold",
+                      filter.showArchived
+                        ? "bg-white/20 text-white"
+                        : "bg-amber-500/15 text-amber-500"
+                    )}
+                  >
+                    {archivedCount}
+                  </span>
+                )}
               </button>
             </nav>
           </div>
         </div>
 
-        {/* Bottom User Profile & Account Switcher Menu */}
+        {/* Bottom User Profile Menu (No Account Switcher — must log out to switch users) */}
         <div className="border-t border-border/80 p-2 relative" ref={userMenuRef}>
           <button
             type="button"
@@ -592,11 +452,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <ChevronDown className="size-3.5 text-muted-foreground group-hover:text-foreground shrink-0" />
           </button>
 
-          {/* Account Switching & Concealed Developer Feedback Popover */}
           {userDropdownOpen && (
-            <div className="absolute left-2 bottom-14 z-50 w-68 rounded-xl border border-border bg-card p-2 shadow-float animate-in fade-in slide-in-from-bottom-2 duration-150">
+            <div className="absolute left-2 bottom-14 z-50 w-56 rounded-xl border border-border bg-card p-2 shadow-float animate-in fade-in slide-in-from-bottom-2 duration-150">
               {/* Active Account Header */}
-              <div className="px-2.5 py-1.5 border-b border-border/70 mb-1.5">
+              <div className="px-2.5 py-1.5 border-b border-border/70 mb-1">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-foreground truncate">
                     {currentUser.name}
@@ -610,60 +469,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
 
-              {/* Switch Account List */}
-              <div className="mb-1.5">
-                <div className="flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  <Users className="size-3" />
-                  <span>Switch Account</span>
-                </div>
-                <div className="max-h-44 overflow-y-auto space-y-0.5 pr-0.5">
-                  {users.map((u) => {
-                    const isCurrent = u.id === currentUserId;
-                    const empCode = u.employeeCode || getEmployeeCode(u.name);
-                    const uColor = getUserColor(empCode, u.color);
-                    return (
-                      <button
-                        key={u.id}
-                        type="button"
-                        onClick={() => {
-                          switchUser(u.id);
-                          setUserDropdownOpen(false);
-                        }}
-                        className={cn(
-                          "flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-xs transition cursor-pointer",
-                          isCurrent
-                            ? "bg-primary/10 text-foreground font-semibold"
-                            : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                        )}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className="size-5 rounded-full text-[10px] font-bold flex items-center justify-center shrink-0"
-                            style={{
-                              backgroundColor: `${uColor}20`,
-                              color: uColor,
-                            }}
-                          >
-                            {u.avatar}
-                          </span>
-                          <span className="truncate">{u.name}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="text-[9px] font-mono uppercase text-muted-foreground">
-                            {u.role.replace("_", " ")}
-                          </span>
-                          {isCurrent && (
-                            <Check className="size-3 text-emerald-500" />
-                          )}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
               {/* Quick Actions */}
-              <div className="border-t border-border/70 pt-1 space-y-0.5 text-xs">
+              <div className="space-y-0.5 text-xs">
                 <button
                   type="button"
                   onClick={() => {
@@ -706,7 +513,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </button>
               </div>
 
-              {/* Concealed Feature Request / Feedback to Developer Trigger */}
+              {/* Feature Request / Feedback */}
               <div className="border-t border-border/50 mt-1 pt-1 flex items-center justify-between px-1">
                 <button
                   type="button"
@@ -718,7 +525,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   className="flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[10px] text-muted-foreground/80 hover:text-foreground hover:bg-muted/50 transition cursor-pointer"
                 >
                   <Sparkles className="size-3 text-primary/70" />
-                  <span>Request a feature / Feedback</span>
+                  <span>Feedback</span>
                 </button>
 
                 {isAdminOrDeveloper && (
@@ -730,7 +537,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       setUserDropdownOpen(false);
                     }}
                     className="rounded-md bg-primary/10 px-1.5 py-0.5 text-[9px] font-semibold text-primary hover:bg-primary/20 transition cursor-pointer"
-                    title="View submitted feature requests (Admin/Developer only)"
+                    title="View submitted feature requests"
                   >
                     Dev Inbox
                   </button>
@@ -775,25 +582,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <PanelLeft className="size-4" />
             </button>
 
-            {/* Workspace Title */}
+            {/* Workspace Breadcrumb */}
             <div className="flex items-center gap-2 text-xs">
               <span className="font-semibold text-foreground">Satmi</span>
               <span className="text-muted-foreground">/</span>
               <span className="text-muted-foreground capitalize">
-                {viewMode}
+                {activeSection === "overview" ? viewMode : activeSection}
               </span>
             </div>
           </div>
 
           {/* Right Header Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2">
-            <SlaTimer />
-
             {/* Search (Cmd+K) */}
             <button
               type="button"
               onClick={() => setIsCommandPaletteOpen(true)}
-              className="hidden md:flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition cursor-pointer"
+              className="hidden md:flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition cursor-pointer"
               title="Search & Commands (Cmd + K)"
             >
               <Search className="size-3.5" />
@@ -801,42 +606,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <kbd className="text-[9px] font-mono bg-card px-1 py-0.2 rounded border border-border">
                 ⌘K
               </kbd>
-            </button>
-
-            {/* Personal Notepad Quick Button */}
-            <button
-              type="button"
-              onClick={() => setIsNotepadOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/30 px-2.5 py-1 text-xs font-medium text-foreground hover:bg-muted transition cursor-pointer"
-              title="Personal Notepad (Private to you)"
-            >
-              <StickyNote className="size-3.5 text-primary" />
-              <span className="hidden sm:inline text-[11px]">Notepad</span>
-            </button>
-
-            {/* Reminders Quick Button */}
-            <button
-              type="button"
-              onClick={() => setIsRemindersOpen(true)}
-              className={cn(
-                "relative inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition cursor-pointer",
-                dueRemindersCount > 0
-                  ? "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                  : "border-border bg-muted/30 text-foreground hover:bg-muted"
-              )}
-              title="Reminders"
-            >
-              <AlarmClock className="size-3.5 text-amber-500" />
-              <span className="hidden sm:inline text-[11px]">Reminders</span>
-              {dueRemindersCount > 0 ? (
-                <span className="rounded-full bg-amber-500 px-1.5 py-0.2 text-[9px] font-mono font-bold text-white">
-                  {dueRemindersCount}
-                </span>
-              ) : pendingRemindersCount > 0 ? (
-                <span className="rounded-full bg-muted px-1.5 py-0.2 text-[9px] font-mono text-muted-foreground">
-                  {pendingRemindersCount}
-                </span>
-              ) : null}
             </button>
 
             {/* Sound Mute Toggle */}
@@ -861,34 +630,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <Volume2 className="size-4" />
               )}
             </button>
-
-            {/* Read-Only AdFlow Sync Status Pill */}
-            {isAdsManagementConnected ? (
-              <button
-                type="button"
-                onClick={() => setIsSettingsModalOpen(true)}
-                className="hidden xl:inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20 transition cursor-pointer"
-                title="Read-Only AdFlow Sync (Local task updates enabled)"
-              >
-                <span
-                  className={cn(
-                    "size-1.5 rounded-full bg-emerald-500",
-                    isSyncing ? "animate-spin" : "animate-pulse"
-                  )}
-                />
-                <span>{isSyncing ? "Syncing" : "AdFlow Sync"}</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setIsSettingsModalOpen(true)}
-                className="hidden xl:inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 border border-amber-500/25 px-2.5 py-1 text-[11px] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition cursor-pointer"
-                title="Standalone Local Mode"
-              >
-                <Unplug className="size-3 text-amber-500" />
-                <span>Local</span>
-              </button>
-            )}
 
             <NotificationCenter />
             <ThemeToggle />
@@ -921,18 +662,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         isOpen={isRoleTemplateModalOpen}
         onClose={() => setIsRoleTemplateModalOpen(false)}
       />
-      <PersonalNotepad
-        isOpen={isNotepadOpen}
-        onClose={() => setIsNotepadOpen(false)}
-      />
-      <RemindersPanel
-        isOpen={isRemindersOpen}
-        onClose={() => setIsRemindersOpen(false)}
-        onCountChange={(due, pending) => {
-          setDueRemindersCount(due);
-          setPendingRemindersCount(pending);
-        }}
-      />
+      {/* Background due-reminder alert listener when not on the Reminders view */}
+      {activeSection !== "reminders" && (
+        <RemindersPanel
+          isOpen={false}
+          asView={false}
+          onCountChange={(due, pending) => {
+            setDueRemindersCount(due);
+            setPendingRemindersCount(pending);
+          }}
+        />
+      )}
       <FeatureRequestModal
         isOpen={isFeedbackOpen}
         onClose={() => setIsFeedbackOpen(false)}

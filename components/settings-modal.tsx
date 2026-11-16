@@ -1,24 +1,11 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   X,
   Settings,
-  Database,
-  Radio,
-  Wifi,
-  WifiOff,
-  CheckCircle2,
-  AlertTriangle,
-  RotateCw,
-  Unplug,
-  Lock,
-  ShieldCheck,
-  Clock,
   User as UserIcon,
   Sliders,
-  Sparkles,
-  Activity,
   Layers,
   Kanban,
   Table2,
@@ -28,17 +15,14 @@ import {
   Minimize2,
   Maximize2,
   Check,
-  Plus,
   Trash2,
-  Palette,
   UserPlus,
   Shield,
-  UserX,
   LogOut,
+  Zap,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
-import { AdsSyncMode, ViewMode, DensityMode, Role, type User } from "@/lib/types";
-import { targetTimeZone } from "@/lib/supabase";
+import { ViewMode, Role, type User } from "@/lib/types";
 import { cn, getUserColor, getEmployeeCode, CURATED_COLOR_OPTIONS } from "@/lib/utils";
 import { Button } from "./ui/button";
 
@@ -47,71 +31,23 @@ export function SettingsModal() {
     isSettingsModalOpen,
     setIsSettingsModalOpen,
     isAdsManagementConnected,
-    setIsAdsManagementConnected,
     toggleAdsManagementConnection,
-    adsSyncMode,
-    setAdsSyncMode,
-    enforceCanonicalLock,
-    setEnforceCanonicalLock,
-    autoMaterializeRulesOnSync,
-    setAutoMaterializeRulesOnSync,
-    testAdsConnection,
-    pendingOfflineChangesCount,
-    clearPendingOfflineChanges,
-    syncPendingChangesToLive,
-    webhookConfig,
-    saveWebhookSettings,
-    testWebhookEndpoint,
-    refreshAll,
-    isSyncing,
-    lastSyncedAt,
     viewMode,
     setViewMode,
     density,
     setDensity,
     currentUser,
     users,
-    switchUser,
     logout,
     updateUserCapacity,
     setIsShortcutsModalOpen,
-    isManagerOrAdmin,
     isAdmin,
     createUser,
     updateUserColor,
-    updateUser,
     deleteUser,
   } = useTasks();
 
-  const [activeTab, setActiveTab] = useState<"ads" | "general" | "team">("ads");
-  const [isTesting, setIsTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    ok: boolean;
-    latencyMs: number;
-    message: string;
-    testedAt: Date;
-  } | null>(null);
-
-  // Outbound Webhook configuration state
-  const [webhookUrlInput, setWebhookUrlInput] = useState(webhookConfig.url || "");
-  const [webhookSecretInput, setWebhookSecretInput] = useState(webhookConfig.secret || "");
-  const [webhookEnabledInput, setWebhookEnabledInput] = useState(Boolean(webhookConfig.enabled));
-  const [webhookEventsInput, setWebhookEventsInput] = useState<string[]>(
-    webhookConfig.events || []
-  );
-  const [isSavingWebhook, setIsSavingWebhook] = useState(false);
-  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
-  const [webhookStatusMessage, setWebhookStatusMessage] = useState<{
-    ok: boolean;
-    message: string;
-  } | null>(null);
-
-  useEffect(() => {
-    setWebhookUrlInput(webhookConfig.url || "");
-    setWebhookSecretInput(webhookConfig.secret || "");
-    setWebhookEnabledInput(Boolean(webhookConfig.enabled));
-    setWebhookEventsInput(webhookConfig.events || []);
-  }, [webhookConfig]);
+  const [activeTab, setActiveTab] = useState<"general" | "team">("general");
 
   // Team Management state (Admin)
   const [isAddingMember, setIsAddingMember] = useState(false);
@@ -125,6 +61,8 @@ export function SettingsModal() {
   const [colorPickerUserId, setColorPickerUserId] = useState<string | null>(null);
   const [isSavingMember, setIsSavingMember] = useState(false);
   const [memberActionError, setMemberActionError] = useState<string | null>(null);
+
+  if (!isSettingsModalOpen) return null;
 
   const handleCreateMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,10 +98,10 @@ export function SettingsModal() {
         setNewMemberColor("#10b981");
         setNewMemberCapacity(6);
       } else {
-        setMemberActionError("Failed to provision profile in Adflow");
+        setMemberActionError("Failed to create team member");
       }
     } catch (err: any) {
-      setMemberActionError(err?.message || "Failed to provision member");
+      setMemberActionError(err?.message || "Failed to create member");
     } finally {
       setIsSavingMember(false);
     }
@@ -171,77 +109,24 @@ export function SettingsModal() {
 
   const handleDeleteMember = async (u: User) => {
     const ok = window.confirm(
-      `Deactivate member ${u.name} (${u.role.replace("_", " ")})?\n\nThis will soft-delete their profile in Adflow and hide them from active workflows.`
+      `Deactivate member ${u.name} (${u.role.replace("_", " ")})?`
     );
     if (!ok) return;
     await deleteUser(u.id);
   };
 
-  // Live clock in target timezone (Asia/Kolkata)
-  const [currentTimeStr, setCurrentTimeStr] = useState("");
-  useEffect(() => {
-    const updateTime = () => {
-      try {
-        const str = new Intl.DateTimeFormat("en-IN", {
-          timeZone: targetTimeZone,
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: true,
-        }).format(new Date());
-        setCurrentTimeStr(str);
-      } catch {
-        setCurrentTimeStr(new Date().toLocaleTimeString());
-      }
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  if (!isSettingsModalOpen) return null;
-
-  const handleRunTest = async () => {
-    setIsTesting(true);
-    try {
-      const res = await testAdsConnection();
-      setTestResult({
-        ...res,
-        testedAt: new Date(),
-      });
-    } finally {
-      setIsTesting(false);
-    }
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-foreground/30 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-3xl rounded-2xl border border-border bg-card shadow-float flex flex-col max-h-[90vh] overflow-hidden">
+      <div className="w-full max-w-2xl rounded-2xl border border-border bg-card shadow-float flex flex-col max-h-[88vh] overflow-hidden">
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20 shrink-0">
           <div className="flex items-center gap-2.5">
-            <div className="size-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shadow-xs">
-              <Settings className="size-5" />
+            <div className="size-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+              <Settings className="size-4" />
             </div>
-            <div>
-              <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-                <span>Dashboard Settings</span>
-                {isAdsManagementConnected ? (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/25 px-2 py-0.5 rounded-full">
-                    <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span>Ads Connected</span>
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-full">
-                    <Unplug className="size-3" />
-                    <span>Ads Disconnected</span>
-                  </span>
-                )}
-              </h2>
-              <p className="text-xs text-muted-foreground">
-                Sync, display, and team settings
-              </p>
-            </div>
+            <h2 className="text-sm font-bold text-foreground">
+              Dashboard Settings
+            </h2>
           </div>
 
           <button
@@ -255,27 +140,7 @@ export function SettingsModal() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-1 px-6 pt-3 border-b border-border bg-muted/10 shrink-0">
-          <button
-            type="button"
-            onClick={() => setActiveTab("ads")}
-            className={cn(
-              "flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer",
-              activeTab === "ads"
-                ? "border-primary text-primary"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            )}
-          >
-            <Radio className="size-4" />
-            <span>Ads Management Sync</span>
-            <span
-              className={cn(
-                "size-2 rounded-full",
-                isAdsManagementConnected ? "bg-emerald-500" : "bg-amber-500"
-              )}
-            />
-          </button>
-
+        <div className="flex items-center gap-1 px-6 pt-2 border-b border-border bg-muted/10 shrink-0">
           <button
             type="button"
             onClick={() => setActiveTab("general")}
@@ -286,8 +151,8 @@ export function SettingsModal() {
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
-            <Sliders className="size-4" />
-            <span>General & Display</span>
+            <Sliders className="size-3.5" />
+            <span>General & Sync</span>
           </button>
 
           <button
@@ -300,575 +165,68 @@ export function SettingsModal() {
                 : "border-transparent text-muted-foreground hover:text-foreground"
             )}
           >
-            <UserIcon className="size-4" />
+            <UserIcon className="size-3.5" />
             <span>Team & Profile</span>
           </button>
         </div>
 
         {/* Modal Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {/* TAB 1: ADS MANAGEMENT INTEGRATION */}
-          {activeTab === "ads" && (
+        <div className="flex-1 overflow-y-auto p-6 space-y-5">
+          {/* TAB 1: GENERAL & SYNC */}
+          {activeTab === "general" && (
             <div className="space-y-5">
-              {/* Master Connection Switch Banner */}
-              <div
-                className={cn(
-                  "p-4 sm:p-5 rounded-xl border transition-all duration-200",
-                  isAdsManagementConnected
-                    ? "bg-emerald-500/5 border-emerald-500/30 dark:bg-emerald-500/10"
-                    : "bg-amber-500/5 border-amber-500/30 dark:bg-amber-500/10"
-                )}
-              >
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="flex items-start gap-3.5">
-                    <div
-                      className={cn(
-                        "size-11 rounded-xl flex items-center justify-center shrink-0 border shadow-xs transition-colors",
-                        isAdsManagementConnected
-                          ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
-                          : "bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400"
-                      )}
-                    >
-                      {isAdsManagementConnected ? (
-                        <Radio className="size-6 animate-pulse" />
-                      ) : (
-                        <Unplug className="size-6" />
-                      )}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h3 className="text-sm font-bold text-foreground">
-                          Ads Management Connection
-                        </h3>
-                        <span
-                          className={cn(
-                            "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
-                            isAdsManagementConnected
-                              ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-                              : "bg-amber-500/20 text-amber-700 dark:text-amber-300"
-                          )}
-                        >
-                          {isAdsManagementConnected ? "Connected" : "Disconnected"}
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {isAdsManagementConnected
-                          ? "Read-Only AdFlow Sync (Local Task Updates Enabled) — AdFlow source data is never modified."
-                          : "AdFlow sync paused. Working in local standalone mode."}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Toggle Switch */}
-                  <div className="flex items-center gap-3 shrink-0 self-end sm:self-center">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={isAdsManagementConnected}
-                      onClick={toggleAdsManagementConnection}
-                      className={cn(
-                        "relative inline-flex h-7 w-13 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden focus:ring-2 focus:ring-primary focus:ring-offset-2",
-                        isAdsManagementConnected ? "bg-emerald-600" : "bg-muted-foreground/30"
-                      )}
-                    >
-                      <span className="sr-only">Toggle Ads Management connection</span>
-                      <span
-                        className={cn(
-                          "pointer-events-none inline-block size-6 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out",
-                          isAdsManagementConnected ? "translate-x-6" : "translate-x-0"
-                        )}
-                      />
-                    </button>
-                    <span className="text-xs font-semibold min-w-16">
-                      {isAdsManagementConnected ? "Enabled" : "Disabled"}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Local modifications warning when queued */}
-                {pendingOfflineChangesCount > 0 && (
-                  <div className="mt-4 pt-3 border-t border-amber-500/20 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-700 dark:text-amber-300">
-                    <span className="flex items-center gap-1.5">
-                      <AlertTriangle className="size-3.5 shrink-0" />
-                      <span>
-                        <strong>{pendingOfflineChangesCount} queued mutation(s)</strong> waiting to
-                        be replayed to the live Supabase pipeline.
-                      </span>
-                    </span>
-                    <div className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (!isAdsManagementConnected) {
-                            setIsAdsManagementConnected(true);
-                          } else {
-                            await syncPendingChangesToLive();
-                          }
-                        }}
-                        className="font-semibold underline hover:text-amber-800 dark:hover:text-amber-200 cursor-pointer"
-                      >
-                        {isAdsManagementConnected ? "Replay Queue Now" : "Reconnect & Replay Queue"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => clearPendingOfflineChanges()}
-                        className="text-muted-foreground hover:text-destructive underline cursor-pointer"
-                      >
-                        Discard
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Connection Diagnostics Card */}
-              <div className="rounded-xl border border-border bg-card p-4 space-y-3.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Database className="size-4 text-primary" />
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                      Pipeline Integration Details
-                    </h4>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleRunTest}
-                      disabled={isTesting}
-                      className="h-7 text-xs gap-1.5 border border-border"
-                    >
-                      <Activity className={cn("size-3", isTesting && "animate-spin")} />
-                      <span>{isTesting ? "Testing Ping..." : "Test Connection"}</span>
-                    </Button>
-
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => refreshAll()}
-                      disabled={!isAdsManagementConnected || isSyncing}
-                      className="h-7 text-xs gap-1.5 border border-border"
-                      title={
-                        isAdsManagementConnected
-                          ? "Force refresh all targets"
-                          : "Connect Ads Management first"
-                      }
-                    >
-                      <RotateCw className={cn("size-3", isSyncing && "animate-spin")} />
-                      <span>{isSyncing ? "Syncing..." : "Sync Now"}</span>
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Metrics Grid */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="p-3 rounded-lg bg-muted/40 border border-border/70 space-y-1">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block">
-                      Target Database
-                    </span>
-                    <span className="font-mono font-medium text-foreground truncate block">
-                      daily_team_targets
-                    </span>
-                    <span className="text-[10px] text-muted-foreground block truncate">
-                      qexjnswuvbyjenfrbwvj.supabase.co
-                    </span>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-muted/40 border border-border/70 space-y-1">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block">
-                      Sync Engine Status
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className={cn(
-                          "size-2 rounded-full",
-                          isAdsManagementConnected ? "bg-emerald-500 animate-pulse" : "bg-muted-foreground"
-                        )}
-                      />
-                      <span className="font-semibold text-foreground">
-                        {isAdsManagementConnected ? "Live Websocket" : "Paused / Offline"}
-                      </span>
-                    </div>
-                    <span className="text-[10px] text-muted-foreground block">
-                      {isAdsManagementConnected ? "Realtime + 60s Heartbeat" : "Channel closed"}
-                    </span>
-                  </div>
-
-                  <div className="p-3 rounded-lg bg-muted/40 border border-border/70 space-y-1">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block">
-                      Last Synchronized
-                    </span>
-                    <span className="font-medium text-foreground block">
-                      {lastSyncedAt
-                        ? lastSyncedAt.toLocaleTimeString("en-IN", {
-                            timeZone: targetTimeZone,
-                            hour: "2-digit",
-                            minute: "2-digit",
-                            second: "2-digit",
-                          })
-                        : "Never"}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground block">
-                      IST (Asia/Kolkata)
-                    </span>
-                  </div>
-                </div>
-
-                {/* Test Result Display if run */}
-                {testResult && (
+              {/* Single Control: AdFlow Tasks Sync Toggle */}
+              <div className="rounded-xl border border-border bg-card p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
                   <div
                     className={cn(
-                      "p-3 rounded-lg border text-xs flex items-center justify-between gap-2 animate-in fade-in duration-100",
-                      testResult.ok
-                        ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300"
-                        : "bg-destructive/10 border-destructive/25 text-destructive"
+                      "size-9 rounded-xl flex items-center justify-center border shrink-0",
+                      isAdsManagementConnected
+                        ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-500"
+                        : "bg-muted border-border text-muted-foreground"
                     )}
                   >
-                    <div className="flex items-center gap-2 min-w-0">
-                      {testResult.ok ? (
-                        <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                      ) : (
-                        <AlertTriangle className="size-4 shrink-0 text-destructive" />
-                      )}
-                      <span className="truncate">{testResult.message}</span>
-                    </div>
-                    <span className="font-mono text-[11px] font-bold shrink-0 bg-card/60 px-2 py-0.5 rounded border border-border">
-                      {testResult.latencyMs} ms
-                    </span>
+                    <Zap className="size-4" />
                   </div>
-                )}
-              </div>
-
-              {/* Sync Behavior & Pipeline Settings */}
-              <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                  Sync & Pipeline Preferences
-                </h4>
-
-                <div className="space-y-3.5 divide-y divide-border/60">
-                  {/* Sync Mode Selector */}
-                  <div className="pt-2 first:pt-0 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <div className="text-xs font-semibold text-foreground">
-                        Sync Frequency
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1 bg-muted/50 p-1 rounded-lg border border-border">
-                      {(
-                        [
-                          { id: "realtime", label: "Realtime" },
-                          { id: "interval", label: "60s Poll" },
-                          { id: "manual", label: "Manual" },
-                        ] as const
-                      ).map((m) => (
-                        <button
-                          key={m.id}
-                          type="button"
-                          onClick={() => setAdsSyncMode(m.id)}
-                          className={cn(
-                            "px-2.5 py-1 rounded-md text-[11px] font-medium transition cursor-pointer",
-                            adsSyncMode === m.id
-                              ? "bg-card text-foreground font-semibold shadow-xs"
-                              : "text-muted-foreground hover:text-foreground"
-                          )}
-                        >
-                          {m.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Canonical Adflow Protection Lock */}
-                  <div className="pt-3 flex items-center justify-between gap-4">
-                    <div className="space-y-0.5">
-                      <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                        <Lock className="size-3 text-primary" />
-                        <span>Lock Canonical AdFlow Task Titles</span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={enforceCanonicalLock}
-                      onClick={() => setEnforceCanonicalLock(!enforceCanonicalLock)}
-                      className={cn(
-                        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
-                        enforceCanonicalLock ? "bg-primary" : "bg-muted-foreground/30"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out",
-                          enforceCanonicalLock ? "translate-x-5" : "translate-x-0"
-                        )}
-                      />
-                    </button>
-                  </div>
-
-                  {/* Auto-Materialize Delegator Rules */}
-                  <div className="pt-3 flex items-center justify-between gap-4">
-                    <div className="space-y-0.5">
-                      <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                        <Sparkles className="size-3 text-primary" />
-                        <span>Auto-Run Delegator Rules Daily</span>
-                      </div>
-                    </div>
-
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={autoMaterializeRulesOnSync}
-                      onClick={() => setAutoMaterializeRulesOnSync(!autoMaterializeRulesOnSync)}
-                      className={cn(
-                        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
-                        autoMaterializeRulesOnSync ? "bg-primary" : "bg-muted-foreground/30"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out",
-                          autoMaterializeRulesOnSync ? "translate-x-5" : "translate-x-0"
-                        )}
-                      />
-                    </button>
+                  <div className="text-sm font-bold text-foreground">
+                    AdFlow Tasks Sync
                   </div>
                 </div>
-              </div>
 
-              {/* Outbound Webhooks & Automation Events */}
-              <div className="rounded-xl border border-border bg-card p-4 space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Radio className="size-4 text-primary" />
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                        Outbound Webhooks
-                      </h4>
-                      <span
-                        className={cn(
-                          "px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider",
-                          webhookEnabledInput
-                            ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                            : "bg-muted text-muted-foreground"
-                        )}
-                      >
-                        {webhookEnabledInput ? "Active" : "Disabled"}
-                      </span>
-                    </div>
-                  </div>
-
+                <div className="flex items-center gap-2.5 shrink-0">
+                  <span
+                    className={cn(
+                      "text-xs font-semibold",
+                      isAdsManagementConnected
+                        ? "text-emerald-500"
+                        : "text-muted-foreground"
+                    )}
+                  >
+                    {isAdsManagementConnected ? "On" : "Off"}
+                  </span>
                   <button
                     type="button"
                     role="switch"
-                    aria-checked={webhookEnabledInput}
-                    disabled={!isManagerOrAdmin}
-                    onClick={() => setWebhookEnabledInput((prev) => !prev)}
+                    aria-checked={isAdsManagementConnected}
+                    onClick={toggleAdsManagementConnection}
                     className={cn(
                       "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
-                      webhookEnabledInput ? "bg-primary" : "bg-muted-foreground/30",
-                      !isManagerOrAdmin && "opacity-50 cursor-not-allowed"
+                      isAdsManagementConnected
+                        ? "bg-emerald-500"
+                        : "bg-muted-foreground/30"
                     )}
                   >
+                    <span className="sr-only">Toggle AdFlow Tasks Sync</span>
                     <span
                       className={cn(
                         "pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out",
-                        webhookEnabledInput ? "translate-x-5" : "translate-x-0"
+                        isAdsManagementConnected ? "translate-x-5" : "translate-x-0"
                       )}
                     />
                   </button>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-semibold text-muted-foreground block">
-                      Target Endpoint URL (POST)
-                    </label>
-                    <input
-                      type="url"
-                      value={webhookUrlInput}
-                      disabled={!isManagerOrAdmin}
-                      onChange={(e) => setWebhookUrlInput(e.target.value)}
-                      placeholder="https://hooks.zapier.com/... or https://your-api.com/webhook"
-                      className="w-full h-8.5 rounded-lg border border-border bg-background px-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-semibold text-muted-foreground block">
-                      Signing Secret (Optional HMAC-SHA256)
-                    </label>
-                    <input
-                      type="password"
-                      value={webhookSecretInput}
-                      disabled={!isManagerOrAdmin}
-                      onChange={(e) => setWebhookSecretInput(e.target.value)}
-                      placeholder="whsec_..."
-                      className="w-full h-8.5 rounded-lg border border-border bg-background px-3 text-xs text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <span className="text-[11px] font-semibold text-muted-foreground block">
-                    Subscribed Pipeline Events
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      { id: "task.created", label: "Task Created" },
-                      { id: "task.completed", label: "Task Completed" },
-                      { id: "task.review_submitted", label: "Submitted for Review" },
-                      { id: "task.revision_requested", label: "Revision Requested" },
-                      { id: "task.archived", label: "Task Archived" },
-                      { id: "comment.created", label: "Comment Posted" },
-                    ].map((evt) => {
-                      const active = webhookEventsInput.includes(evt.id);
-                      return (
-                        <button
-                          key={evt.id}
-                          type="button"
-                          disabled={!isManagerOrAdmin}
-                          onClick={() => {
-                            setWebhookEventsInput((prev) =>
-                              prev.includes(evt.id)
-                                ? prev.filter((x) => x !== evt.id)
-                                : [...prev, evt.id]
-                            );
-                          }}
-                          className={cn(
-                            "px-2.5 py-1 rounded-lg border text-[11px] font-medium transition cursor-pointer",
-                            active
-                              ? "border-primary bg-primary/10 text-primary font-semibold"
-                              : "border-border bg-muted/30 text-muted-foreground hover:text-foreground"
-                          )}
-                        >
-                          {evt.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/60">
-                  <div className="text-[11px] text-muted-foreground">
-                    {webhookConfig.lastTriggeredAt ? (
-                      <span>
-                        Last delivery:{" "}
-                        <strong>
-                          {webhookConfig.lastStatus
-                            ? `HTTP ${webhookConfig.lastStatus}`
-                            : webhookConfig.lastError || "Dispatched"}
-                        </strong>{" "}
-                        at {new Date(webhookConfig.lastTriggeredAt).toLocaleTimeString()}
-                      </span>
-                    ) : (
-                      <span>No webhook deliveries recorded yet</span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={isTestingWebhook || !webhookUrlInput.trim()}
-                      onClick={async () => {
-                        setIsTestingWebhook(true);
-                        setWebhookStatusMessage(null);
-                        try {
-                          const res = await testWebhookEndpoint(webhookUrlInput.trim());
-                          setWebhookStatusMessage({
-                            ok: res.ok,
-                            message: res.ok
-                              ? `Webhook test ping delivered (HTTP ${res.status || 200} in ${res.latencyMs}ms)`
-                              : res.error || "Webhook test ping failed",
-                          });
-                        } finally {
-                          setIsTestingWebhook(false);
-                        }
-                      }}
-                      className="h-7 text-xs border border-border"
-                    >
-                      {isTestingWebhook ? "Sending Ping..." : "Send Test Ping"}
-                    </Button>
-
-                    {isManagerOrAdmin && (
-                      <Button
-                        type="button"
-                        variant="primary"
-                        size="sm"
-                        disabled={isSavingWebhook}
-                        onClick={async () => {
-                          setIsSavingWebhook(true);
-                          setWebhookStatusMessage(null);
-                          try {
-                            const ok = await saveWebhookSettings({
-                              url: webhookUrlInput.trim(),
-                              secret: webhookSecretInput.trim() || undefined,
-                              enabled: webhookEnabledInput,
-                              events: webhookEventsInput,
-                            });
-                            setWebhookStatusMessage({
-                              ok,
-                              message: ok
-                                ? "Webhook configuration saved."
-                                : "Failed to save webhook configuration.",
-                            });
-                          } finally {
-                            setIsSavingWebhook(false);
-                          }
-                        }}
-                        className="h-7 text-xs"
-                      >
-                        {isSavingWebhook ? "Saving..." : "Save Webhook"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {webhookStatusMessage && (
-                  <div
-                    className={cn(
-                      "p-2.5 rounded-lg border text-xs flex items-center gap-2",
-                      webhookStatusMessage.ok
-                        ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-700 dark:text-emerald-300"
-                        : "bg-destructive/10 border-destructive/25 text-destructive"
-                    )}
-                  >
-                    {webhookStatusMessage.ok ? (
-                      <CheckCircle2 className="size-3.5 shrink-0" />
-                    ) : (
-                      <AlertTriangle className="size-3.5 shrink-0" />
-                    )}
-                    <span>{webhookStatusMessage.message}</span>
-                  </div>
-                )}
               </div>
 
-              {/* Read-Only AdFlow Sync Status Indicator */}
-              <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/5 p-3.5 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <ShieldCheck className="size-4 text-emerald-500 shrink-0" />
-                  <div className="text-xs">
-                    <span className="font-bold text-foreground">
-                      Read-Only AdFlow Sync (Local Task Updates Enabled)
-                    </span>
-                    <span className="text-muted-foreground block text-[11px]">
-                      Upstream AdFlow data is strictly read-only and never modified. Status, stage, assignee, and checklist updates persist locally.
-                    </span>
-                  </div>
-                </div>
-                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 shrink-0">
-                  Protected
-                </span>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: GENERAL & DISPLAY */}
-          {activeTab === "general" && (
-            <div className="space-y-5">
               {/* Default View Mode */}
               <div className="rounded-xl border border-border bg-card p-4 space-y-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
@@ -879,9 +237,11 @@ export function SettingsModal() {
                     { id: "board", label: "Board", icon: Kanban },
                     { id: "table", label: "Table", icon: Table2 },
                     { id: "list", label: "Checklist", icon: ListTodo },
-                    { id: "analytics", label: "Analytics", icon: BarChart3 },
                     { id: "calendar", label: "Calendar", icon: Calendar },
                     { id: "timeline", label: "Timeline", icon: Layers },
+                    ...(isAdmin
+                      ? [{ id: "analytics", label: "Analytics", icon: BarChart3 }]
+                      : []),
                   ].map((v) => {
                     const Icon = v.icon;
                     const isSelected = viewMode === v.id;
@@ -941,35 +301,41 @@ export function SettingsModal() {
                 </div>
               </div>
 
-              {/* Timezone & Cutoff Clock */}
-              <div className="rounded-xl border border-border bg-card p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                    <Clock className="size-3.5 text-primary" />
-                    <span>Timezone: Asia/Kolkata (IST) · 8:00 PM Cutoff</span>
-                  </span>
-                  <div className="font-mono text-sm font-bold text-foreground">
-                    {currentTimeStr}
-                  </div>
-                </div>
+              {/* Keyboard Shortcuts Trigger */}
+              <div className="flex items-center justify-between p-3.5 rounded-xl border border-border bg-card text-xs">
+                <span className="font-medium text-foreground">Keyboard Shortcuts</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSettingsModalOpen(false);
+                    setIsShortcutsModalOpen(true);
+                  }}
+                  className="font-semibold text-primary hover:underline cursor-pointer"
+                >
+                  View Shortcuts (?)
+                </button>
               </div>
             </div>
           )}
 
-          {/* TAB 3: TEAM & PROFILE */}
+          {/* TAB 2: TEAM & PROFILE */}
           {activeTab === "team" && (
-            <div className="space-y-6">
+            <div className="space-y-5">
               {/* Current Active User Profile */}
               {(() => {
-                const currentEmpCode = currentUser.employeeCode || getEmployeeCode(currentUser.name);
-                const currentColor = getUserColor(currentEmpCode, currentUser.color);
+                const currentEmpCode =
+                  currentUser.employeeCode || getEmployeeCode(currentUser.name);
+                const currentColor = getUserColor(
+                  currentEmpCode,
+                  currentUser.color
+                );
 
                 return (
-                  <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+                  <div className="rounded-xl border border-border bg-card p-4 space-y-4">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <div
-                          className="size-12 rounded-xl border flex items-center justify-center font-bold text-base shadow-xs ring-1"
+                          className="size-10 rounded-xl border flex items-center justify-center font-bold text-sm shadow-xs ring-1"
                           style={{
                             backgroundColor: `${currentColor}20`,
                             color: currentColor,
@@ -980,7 +346,9 @@ export function SettingsModal() {
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <h3 className="text-sm font-bold text-foreground">{currentUser.name}</h3>
+                            <h3 className="text-sm font-bold text-foreground">
+                              {currentUser.name}
+                            </h3>
                             <span
                               className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded"
                               style={{
@@ -991,7 +359,9 @@ export function SettingsModal() {
                               {currentEmpCode}
                             </span>
                           </div>
-                          <div className="text-xs text-muted-foreground">{currentUser.email}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {currentUser.email}
+                          </div>
                         </div>
                       </div>
 
@@ -999,59 +369,15 @@ export function SettingsModal() {
                         <span className="px-2.5 py-1 rounded-md text-xs font-semibold uppercase tracking-wide bg-primary/15 text-primary border border-primary/20">
                           {currentUser.role.replace("_", " ")}
                         </span>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => {
-                            setIsSettingsModalOpen(false);
-                            logout();
-                          }}
-                          className="text-xs h-7 text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5 cursor-pointer ml-1"
-                        >
-                          <LogOut className="size-3" />
-                          <span>Sign Out</span>
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-3 border-t border-border text-xs">
-                      <div className="p-2.5 rounded-lg bg-muted/40 border border-border/60">
-                        <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
-                          Department
-                        </span>
-                        <span className="font-semibold text-foreground">{currentUser.department}</span>
-                      </div>
-
-                      <div className="p-2.5 rounded-lg bg-muted/40 border border-border/60">
-                        <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
-                          Daily Capacity Limit
-                        </span>
-                        <span className="font-semibold text-foreground">
-                          {currentUser.dailyCapacityUnits || 6} Units / day
-                        </span>
-                      </div>
-
-                      <div className="p-2.5 rounded-lg bg-muted/40 border border-border/60">
-                        <span className="text-[10px] uppercase font-semibold text-muted-foreground block">
-                          Assigned Color
-                        </span>
-                        <span className="font-semibold flex items-center gap-1.5">
-                          <span
-                            className="size-3 rounded-full border border-black/10 shrink-0"
-                            style={{ backgroundColor: currentColor }}
-                          />
-                          <span className="font-mono text-[11px]">{currentColor}</span>
-                        </span>
                       </div>
                     </div>
                   </div>
                 );
               })()}
 
-              {/* ADMIN TEAM MANAGEMENT (Adflow Aligned) */}
-              {isAdmin ? (
-                <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+              {/* ADMIN TEAM MANAGEMENT */}
+              {isAdmin && (
+                <div className="rounded-xl border border-border bg-card p-4 space-y-4">
                   <div className="flex items-center justify-between pb-3 border-b border-border">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-2">
                       <Shield className="size-3.5 text-primary" />
@@ -1065,7 +391,11 @@ export function SettingsModal() {
                       onClick={() => setIsAddingMember(!isAddingMember)}
                       className="text-xs h-7.5 gap-1.5"
                     >
-                      {isAddingMember ? <X className="size-3.5" /> : <UserPlus className="size-3.5" />}
+                      {isAddingMember ? (
+                        <X className="size-3.5" />
+                      ) : (
+                        <UserPlus className="size-3.5" />
+                      )}
                       <span>{isAddingMember ? "Cancel" : "Add Member"}</span>
                     </Button>
                   </div>
@@ -1076,11 +406,6 @@ export function SettingsModal() {
                       onSubmit={handleCreateMember}
                       className="p-4 rounded-xl border border-primary/25 bg-primary/5 space-y-3.5 animate-in fade-in duration-150"
                     >
-                      <div className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        <UserPlus className="size-3.5 text-primary" />
-                        <span>New Team Member (AdFlow Profile Schema)</span>
-                      </div>
-
                       {memberActionError && (
                         <div className="text-xs text-destructive bg-destructive/10 p-2 rounded-lg border border-destructive/20">
                           {memberActionError}
@@ -1100,7 +425,10 @@ export function SettingsModal() {
                             onChange={(e) => {
                               const val = e.target.value;
                               setNewMemberName(val);
-                              if (!newMemberCode || newMemberCode === getEmployeeCode(newMemberName)) {
+                              if (
+                                !newMemberCode ||
+                                newMemberCode === getEmployeeCode(newMemberName)
+                              ) {
                                 setNewMemberCode(getEmployeeCode(val));
                               }
                             }}
@@ -1124,15 +452,19 @@ export function SettingsModal() {
 
                         <div>
                           <label className="block text-[11px] font-semibold text-foreground mb-1">
-                            Role / Permission *
+                            Role *
                           </label>
                           <select
                             value={newMemberRole}
-                            onChange={(e) => setNewMemberRole(e.target.value as Role)}
+                            onChange={(e) =>
+                              setNewMemberRole(e.target.value as Role)
+                            }
                             className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
                           >
                             <option value="editor">Editor</option>
-                            <option value="content_creator">Content Creator</option>
+                            <option value="content_creator">
+                              Content Creator
+                            </option>
                             <option value="manager">Manager</option>
                             <option value="admin">Admin</option>
                             <option value="media_buyer">Media Buyer</option>
@@ -1147,16 +479,18 @@ export function SettingsModal() {
                           <input
                             type="password"
                             required
-                            placeholder="Set initial password for login"
+                            placeholder="Set password"
                             value={newMemberPassword}
-                            onChange={(e) => setNewMemberPassword(e.target.value)}
+                            onChange={(e) =>
+                              setNewMemberPassword(e.target.value)
+                            }
                             className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                           />
                         </div>
 
                         <div>
                           <label className="block text-[11px] font-semibold text-foreground mb-1">
-                            Daily Target Quota (units/day)
+                            Daily Quota (units/day)
                           </label>
                           <input
                             type="number"
@@ -1165,7 +499,10 @@ export function SettingsModal() {
                             value={newMemberCapacity}
                             onChange={(e) =>
                               setNewMemberCapacity(
-                                Math.max(1, Math.min(24, Number(e.target.value) || 1))
+                                Math.max(
+                                  1,
+                                  Math.min(24, Number(e.target.value) || 1)
+                                )
                               )
                             }
                             className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
@@ -1174,14 +511,16 @@ export function SettingsModal() {
 
                         <div>
                           <label className="block text-[11px] font-semibold text-foreground mb-1">
-                            Employee Code (for task IDs)
+                            Employee Code
                           </label>
                           <input
                             type="text"
                             maxLength={5}
                             placeholder="e.g. HIM"
                             value={newMemberCode}
-                            onChange={(e) => setNewMemberCode(e.target.value.toUpperCase())}
+                            onChange={(e) =>
+                              setNewMemberCode(e.target.value.toUpperCase())
+                            }
                             className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-mono uppercase text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                           />
                         </div>
@@ -1190,7 +529,7 @@ export function SettingsModal() {
                       {/* Color Palette Picker */}
                       <div>
                         <label className="block text-[11px] font-semibold text-foreground mb-1.5">
-                          Pick Member Color Tag
+                          Color Tag
                         </label>
                         <div className="flex flex-wrap items-center gap-1.5">
                           {CURATED_COLOR_OPTIONS.map((c) => {
@@ -1202,12 +541,16 @@ export function SettingsModal() {
                                 onClick={() => setNewMemberColor(c.hex)}
                                 className={cn(
                                   "size-6 rounded-full border flex items-center justify-center transition cursor-pointer hover:scale-110",
-                                  isChosen ? "ring-2 ring-primary ring-offset-2 scale-110 border-white" : "border-transparent"
+                                  isChosen
+                                    ? "ring-2 ring-primary ring-offset-2 scale-110 border-white"
+                                    : "border-transparent"
                                 )}
                                 style={{ backgroundColor: c.hex }}
-                                title={`${c.name} (${c.hex})`}
+                                title={c.name}
                               >
-                                {isChosen && <Check className="size-3 text-white drop-shadow" />}
+                                {isChosen && (
+                                  <Check className="size-3 text-white drop-shadow" />
+                                )}
                               </button>
                             );
                           })}
@@ -1231,229 +574,192 @@ export function SettingsModal() {
                           disabled={isSavingMember}
                           className="text-xs h-7.5 px-3"
                         >
-                          {isSavingMember ? "Provisioning..." : "Save Member"}
+                          {isSavingMember ? "Saving..." : "Save Member"}
                         </Button>
                       </div>
                     </form>
                   )}
 
-                  {/* Members Table */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">
-                      <span>{users.filter((u) => u.active !== false && !u.deletedAt).length} Active Team Members</span>
-                      <span>Click color swatch to customize user color</span>
-                    </div>
+                  {/* Members List */}
+                  <div className="divide-y divide-border border border-border rounded-xl overflow-hidden bg-card">
+                    {users
+                      .filter((u) => u.active !== false && !u.deletedAt)
+                      .map((u) => {
+                        const empCode =
+                          u.employeeCode || getEmployeeCode(u.name);
+                        const userColor = getUserColor(empCode, u.color);
+                        const isPickerOpen = colorPickerUserId === u.id;
+                        const isCurrent = u.id === currentUser.id;
 
-                    <div className="divide-y divide-border border border-border rounded-xl overflow-hidden bg-card">
-                      {users
-                        .filter((u) => u.active !== false && !u.deletedAt)
-                        .map((u) => {
-                          const empCode = u.employeeCode || getEmployeeCode(u.name);
-                          const userColor = getUserColor(empCode, u.color);
-                          const isPickerOpen = colorPickerUserId === u.id;
-                          const isCurrent = u.id === currentUser.id;
-
-                          return (
-                            <div
-                              key={u.id}
-                              className="p-3 flex flex-col gap-2 hover:bg-muted/30 transition text-xs"
-                            >
-                              <div className="flex items-center justify-between gap-3">
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                  <div
-                                    className="size-7 rounded-full font-bold text-[10px] flex items-center justify-center ring-2 shrink-0"
-                                    style={{
-                                      backgroundColor: `${userColor}20`,
-                                      color: userColor,
-                                      borderColor: `${userColor}50`,
-                                    }}
-                                  >
-                                    {u.avatar}
-                                  </div>
-                                  <div className="min-w-0">
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-semibold text-foreground truncate">
-                                        {u.name}
-                                      </span>
-                                      <span
-                                        className="font-mono text-[9px] font-bold px-1.5 py-0.2 rounded shrink-0"
-                                        style={{
-                                          backgroundColor: `${userColor}15`,
-                                          color: userColor,
-                                        }}
-                                      >
-                                        {empCode}
-                                      </span>
-                                      <span className="text-[9px] font-mono uppercase bg-muted px-1.5 py-0.2 rounded text-muted-foreground shrink-0">
-                                        {u.role.replace("_", " ")}
-                                      </span>
-                                    </div>
-                                    <div className="text-[11px] text-muted-foreground truncate">
-                                      {u.email}
-                                    </div>
-                                  </div>
+                        return (
+                          <div
+                            key={u.id}
+                            className="p-3 flex flex-col gap-2 hover:bg-muted/30 transition text-xs"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <div
+                                  className="size-7 rounded-full font-bold text-[10px] flex items-center justify-center ring-2 shrink-0"
+                                  style={{
+                                    backgroundColor: `${userColor}20`,
+                                    color: userColor,
+                                    borderColor: `${userColor}50`,
+                                  }}
+                                >
+                                  {u.avatar}
                                 </div>
-
-                                <div className="flex items-center gap-2 shrink-0">
-                                  {/* Color Swatch Trigger */}
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      setColorPickerUserId(isPickerOpen ? null : u.id)
-                                    }
-                                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border bg-card hover:bg-muted transition cursor-pointer"
-                                    title="Change user color code"
-                                  >
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-semibold text-foreground truncate">
+                                      {u.name}
+                                    </span>
                                     <span
-                                      className="size-3.5 rounded-full border border-black/10 shrink-0"
-                                      style={{ backgroundColor: userColor }}
-                                    />
-                                    <span className="font-mono text-[10px] text-muted-foreground">
-                                      {userColor}
-                                    </span>
-                                  </button>
-
-                                  {/* Daily Capacity Limit Stepper */}
-                                  <div
-                                    className="flex items-center gap-1 border border-border rounded-lg bg-card px-2 py-1 shadow-2xs"
-                                    title="Daily target capacity (units/day)"
-                                  >
-                                    <span className="text-[10px] text-muted-foreground mr-0.5">Quota:</span>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        updateUserCapacity(u.id, (u.dailyCapacityUnits || 6) - 1)
-                                      }
-                                      className="size-4.5 rounded hover:bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground hover:text-foreground transition cursor-pointer"
-                                      title="Decrease daily quota"
+                                      className="font-mono text-[9px] font-bold px-1.5 py-0.2 rounded shrink-0"
+                                      style={{
+                                        backgroundColor: `${userColor}15`,
+                                        color: userColor,
+                                      }}
                                     >
-                                      -
-                                    </button>
-                                    <span className="font-mono text-[11px] font-bold text-foreground w-4 text-center">
-                                      {u.dailyCapacityUnits || 6}
+                                      {empCode}
                                     </span>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        updateUserCapacity(u.id, (u.dailyCapacityUnits || 6) + 1)
-                                      }
-                                      className="size-4.5 rounded hover:bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground hover:text-foreground transition cursor-pointer"
-                                      title="Increase daily quota"
-                                    >
-                                      +
-                                    </button>
-                                    <span className="text-[10px] text-muted-foreground">u/day</span>
+                                    <span className="text-[9px] font-mono uppercase bg-muted px-1.5 py-0.2 rounded text-muted-foreground shrink-0">
+                                      {u.role.replace("_", " ")}
+                                    </span>
                                   </div>
-
-                                  {/* Soft Delete / Deactivate */}
-                                  {!isCurrent && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDeleteMember(u)}
-                                      className="size-7 rounded-lg text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 flex items-center justify-center transition cursor-pointer"
-                                      title={`Deactivate ${u.name} (Adflow Soft Delete)`}
-                                    >
-                                      <Trash2 className="size-3.5" />
-                                    </button>
-                                  )}
+                                  <div className="text-[11px] text-muted-foreground truncate">
+                                    {u.email}
+                                  </div>
                                 </div>
                               </div>
 
-                              {/* Color Picker Popover / Drawer */}
-                              {isPickerOpen && (
-                                <div className="pt-2 pb-1 border-t border-border/60 flex items-center gap-1.5 flex-wrap animate-in fade-in duration-100">
-                                  <span className="text-[10px] text-muted-foreground mr-1">
-                                    Assign color:
+                              <div className="flex items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setColorPickerUserId(
+                                      isPickerOpen ? null : u.id
+                                    )
+                                  }
+                                  className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border bg-card hover:bg-muted transition cursor-pointer"
+                                  title="Change user color"
+                                >
+                                  <span
+                                    className="size-3.5 rounded-full border border-black/10 shrink-0"
+                                    style={{ backgroundColor: userColor }}
+                                  />
+                                </button>
+
+                                <div className="flex items-center gap-1 border border-border rounded-lg bg-card px-2 py-1">
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateUserCapacity(
+                                        u.id,
+                                        (u.dailyCapacityUnits || 6) - 1
+                                      )
+                                    }
+                                    className="size-4.5 rounded hover:bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground hover:text-foreground transition cursor-pointer"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="font-mono text-[11px] font-bold text-foreground w-4 text-center">
+                                    {u.dailyCapacityUnits || 6}
                                   </span>
-                                  {CURATED_COLOR_OPTIONS.map((c) => {
-                                    const isSelected = userColor.toLowerCase() === c.hex.toLowerCase();
-                                    return (
-                                      <button
-                                        key={c.hex}
-                                        type="button"
-                                        onClick={async () => {
-                                          await updateUserColor(u.id, c.hex);
-                                          setColorPickerUserId(null);
-                                        }}
-                                        className={cn(
-                                          "size-5 rounded-full border transition cursor-pointer hover:scale-125 flex items-center justify-center",
-                                          isSelected
-                                            ? "ring-2 ring-primary ring-offset-1 scale-110"
-                                            : "border-transparent"
-                                        )}
-                                        style={{ backgroundColor: c.hex }}
-                                        title={`${c.name} (${c.hex})`}
-                                      >
-                                        {isSelected && (
-                                          <Check className="size-2.5 text-white drop-shadow" />
-                                        )}
-                                      </button>
-                                    );
-                                  })}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateUserCapacity(
+                                        u.id,
+                                        (u.dailyCapacityUnits || 6) + 1
+                                      )
+                                    }
+                                    className="size-4.5 rounded hover:bg-muted flex items-center justify-center text-xs font-bold text-muted-foreground hover:text-foreground transition cursor-pointer"
+                                  >
+                                    +
+                                  </button>
+                                  <span className="text-[10px] text-muted-foreground">
+                                    u/day
+                                  </span>
                                 </div>
-                              )}
+
+                                {!isCurrent && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteMember(u)}
+                                    className="size-7 rounded-lg text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 flex items-center justify-center transition cursor-pointer"
+                                    title={`Deactivate ${u.name}`}
+                                  >
+                                    <Trash2 className="size-3.5" />
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                          );
-                        })}
-                    </div>
+
+                            {isPickerOpen && (
+                              <div className="pt-2 pb-1 border-t border-border/60 flex items-center gap-1.5 flex-wrap animate-in fade-in duration-100">
+                                {CURATED_COLOR_OPTIONS.map((c) => {
+                                  const isSelected =
+                                    userColor.toLowerCase() ===
+                                    c.hex.toLowerCase();
+                                  return (
+                                    <button
+                                      key={c.hex}
+                                      type="button"
+                                      onClick={async () => {
+                                        await updateUserColor(u.id, c.hex);
+                                        setColorPickerUserId(null);
+                                      }}
+                                      className={cn(
+                                        "size-5 rounded-full border transition cursor-pointer hover:scale-125 flex items-center justify-center",
+                                        isSelected
+                                          ? "ring-2 ring-primary ring-offset-1 scale-110"
+                                          : "border-transparent"
+                                      )}
+                                      style={{ backgroundColor: c.hex }}
+                                      title={c.name}
+                                    >
+                                      {isSelected && (
+                                        <Check className="size-2.5 text-white drop-shadow" />
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                   </div>
                 </div>
-              ) : (
-                <div className="p-4 rounded-xl border border-border bg-muted/10 text-xs text-muted-foreground">
-                  Signed in as <strong className="text-foreground">{currentUser.name}</strong>. Team settings are managed by Admins.
-                </div>
               )}
-
-              {/* Keyboard Shortcuts Hint */}
-              <div className="flex items-center justify-between p-3 rounded-xl border border-border bg-muted/20 text-xs">
-                <span className="text-muted-foreground">Keyboard shortcuts</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsSettingsModalOpen(false);
-                    setIsShortcutsModalOpen(true);
-                  }}
-                  className="font-semibold text-primary hover:underline cursor-pointer"
-                >
-                  Press ?
-                </button>
-              </div>
             </div>
           )}
         </div>
 
         {/* Modal Footer */}
         <div className="flex items-center justify-between px-6 py-3.5 border-t border-border bg-muted/20 shrink-0 text-xs">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <span className="font-mono text-[11px] bg-card px-1.5 py-0.5 rounded border border-border">
-              Esc
-            </span>
-            <span>to close</span>
-          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => {
+              setIsSettingsModalOpen(false);
+              logout();
+            }}
+            className="text-xs h-8 text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5 cursor-pointer"
+          >
+            <LogOut className="size-3.5" />
+            <span>Sign Out</span>
+          </Button>
 
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                setIsSettingsModalOpen(false);
-                logout();
-              }}
-              className="text-xs h-8 text-destructive border-destructive/30 hover:bg-destructive/10 gap-1.5 cursor-pointer"
-            >
-              <LogOut className="size-3.5" />
-              <span>Sign Out</span>
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              onClick={() => setIsSettingsModalOpen(false)}
-              className="text-xs h-8 px-4"
-            >
-              Done
-            </Button>
-          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setIsSettingsModalOpen(false)}
+            className="text-xs h-8 px-4"
+          >
+            Done
+          </Button>
         </div>
       </div>
     </div>

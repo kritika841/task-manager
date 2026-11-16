@@ -54,6 +54,8 @@ interface TaskContextType {
   setSoundMuted: (muted: boolean) => void;
   toggleSound: () => void;
   playNotificationSound: (type?: "task" | "reminder") => void;
+  activeSection: "overview" | "notepad" | "reminders";
+  setActiveSection: (section: "overview" | "notepad" | "reminders") => void;
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
   boardLayout: BoardLayout;
@@ -233,9 +235,11 @@ const defaultFilter: FilterState = {
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
 const STORAGE_KEY_USER = "satmi-current-user-id-v2";
+const STORAGE_KEY_VIEW_MODE = "satmi-view-mode-v1";
+const STORAGE_KEY_ACTIVE_SECTION = "satmi-active-section-v1";
 const STORAGE_KEY_LAYOUT = "satmi-board-layout-v1";
 const STORAGE_KEY_DENSITY = "satmi-view-density-v1";
-const STORAGE_KEY_ADS_CONNECTED = "satmi-ads-mgmt-connected-v2";
+const STORAGE_KEY_ADS_CONNECTED = "satmi-adflow-sync-enabled-v1";
 const STORAGE_KEY_ADS_SYNC_MODE = "satmi-ads-sync-mode-v1";
 const STORAGE_KEY_ENFORCE_LOCK = "satmi-ads-enforce-lock-v1";
 const STORAGE_KEY_AUTO_RULES = "satmi-ads-auto-rules-v1";
@@ -261,7 +265,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
   const [hasLoadedInitialTasks, setHasLoadedInitialTasks] = useState<boolean>(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("board");
+  const [activeSection, setActiveSectionState] = useState<"overview" | "notepad" | "reminders">("overview");
+  const [viewMode, setViewModeState] = useState<ViewMode>("board");
   const [boardLayout, setBoardLayoutState] = useState<BoardLayout>("columns");
   const [density, setDensityState] = useState<DensityMode>("comfortable");
   const [filter, setFilterState] = useState<FilterState>(defaultFilter);
@@ -279,7 +284,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
-  const [isAdsManagementConnected, setIsAdsManagementConnectedState] = useState<boolean>(true);
+  const [isAdsManagementConnected, setIsAdsManagementConnectedState] = useState<boolean>(false);
   const [adsSyncMode, setAdsSyncModeState] = useState<AdsSyncMode>("realtime");
   const [enforceCanonicalLock, setEnforceCanonicalLockState] = useState<boolean>(true);
   const [autoMaterializeRulesOnSync, setAutoMaterializeRulesOnSyncState] = useState<boolean>(true);
@@ -358,15 +363,29 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     selectedTaskIdRef.current = selectedTaskId;
   }, [selectedTaskId]);
 
-  // Base visible tasks in current workspace mode (respects showArchived and showAdflowTasks)
+  const setViewMode = useCallback((mode: ViewMode) => {
+    setViewModeState(mode);
+    try {
+      localStorage.setItem(STORAGE_KEY_VIEW_MODE, mode);
+    } catch {}
+  }, []);
+
+  const setActiveSection = useCallback((section: "overview" | "notepad" | "reminders") => {
+    setActiveSectionState(section);
+    try {
+      localStorage.setItem(STORAGE_KEY_ACTIVE_SECTION, section);
+    } catch {}
+  }, []);
+
+  // Base visible tasks in current workspace mode (respects showArchived and AdFlow sync setting)
   const baseVisibleTasks = useMemo(() => {
     return tasks.filter((task) => {
       if (!filter.showArchived && task.isArchived) return false;
       if (filter.showArchived && !task.isArchived) return false;
-      if (!filter.showAdflowTasks && isTaskAdflow(task)) return false;
+      if (!isAdsManagementConnected && isTaskAdflow(task)) return false;
       return true;
     });
-  }, [tasks, filter.showArchived, filter.showAdflowTasks]);
+  }, [tasks, filter.showArchived, isAdsManagementConnected]);
 
   const openCreateModal = useCallback((preselectedUserId?: string, preselectedStatus?: TaskStatus) => {
     setCreateModalAssigneeId(preselectedUserId || null);
@@ -462,9 +481,31 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Initialize board layout and density from storage
+  // Initialize view mode, active section, board layout, density, and AdFlow sync from storage
   useEffect(() => {
     try {
+      const savedView = localStorage.getItem(STORAGE_KEY_VIEW_MODE) as ViewMode;
+      if (
+        savedView === "board" ||
+        savedView === "table" ||
+        savedView === "list" ||
+        savedView === "calendar" ||
+        savedView === "timeline" ||
+        savedView === "analytics"
+      ) {
+        setViewModeState(savedView);
+      }
+      const savedSection = localStorage.getItem(STORAGE_KEY_ACTIVE_SECTION) as
+        | "overview"
+        | "notepad"
+        | "reminders";
+      if (
+        savedSection === "overview" ||
+        savedSection === "notepad" ||
+        savedSection === "reminders"
+      ) {
+        setActiveSectionState(savedSection);
+      }
       const savedLayout = localStorage.getItem(STORAGE_KEY_LAYOUT) as BoardLayout;
       if (savedLayout === "columns" || savedLayout === "swimlanes" || savedLayout === "subcolumns") {
         setBoardLayoutState(savedLayout);
@@ -662,7 +703,12 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       const data = await res.json();
 
       if (data.users && Array.isArray(data.users)) {
-        setUsers(data.users);
+        setUsers((prev) => {
+          if (JSON.stringify(prev) === JSON.stringify(data.users)) {
+            return prev;
+          }
+          return data.users;
+        });
       }
 
       if (data.tasks && Array.isArray(data.tasks)) {
@@ -786,8 +832,14 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentUserId, fetchNotifications]);
 
-  // Authenticate user session with Supabase Auth & persistent session
+  const hasCompletedInitialAuthRef = useRef<boolean>(false);
+
+  // Authenticate user session once on initial load (prevents remounting/jitter on task polls)
   useEffect(() => {
+    if (hasCompletedInitialAuthRef.current) {
+      return;
+    }
+
     async function checkAuthSession() {
       const syncServerCookie = (userId: string) => {
         fetch("/api/auth", {
@@ -810,6 +862,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
               if (matched && matched.active !== false && !matched.deletedAt) {
                 setCurrentUserId(matched.id);
                 setIsAuthenticated(true);
+                hasCompletedInitialAuthRef.current = true;
                 setIsAuthLoading(false);
                 return;
               }
@@ -826,6 +879,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
             setCurrentUserId(matched.id);
             setIsAuthenticated(true);
             syncServerCookie(matched.id);
+            hasCompletedInitialAuthRef.current = true;
             setIsAuthLoading(false);
             return;
           }
@@ -842,6 +896,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
                 setCurrentUserId(matched.id);
                 setIsAuthenticated(true);
                 syncServerCookie(matched.id);
+                hasCompletedInitialAuthRef.current = true;
                 setIsAuthLoading(false);
                 return;
               }
@@ -871,6 +926,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
               localStorage.setItem("satmi-auth-user", JSON.stringify(defaultAdmin));
               localStorage.setItem(STORAGE_KEY_USER, defaultAdmin.id);
             } catch {}
+            hasCompletedInitialAuthRef.current = true;
             setIsAuthLoading(false);
             return;
           }
@@ -878,9 +934,11 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
         // No active verified session
         setIsAuthenticated(false);
+        hasCompletedInitialAuthRef.current = true;
       } catch (err) {
         console.error("Auth session check error:", err);
         setIsAuthenticated(false);
+        hasCompletedInitialAuthRef.current = true;
       } finally {
         setIsAuthLoading(false);
       }
@@ -889,6 +947,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     if (users.length > 0) {
       checkAuthSession();
     } else if (hasLoadedInitialTasks) {
+      hasCompletedInitialAuthRef.current = true;
       setIsAuthLoading(false);
     }
   }, [users, hasLoadedInitialTasks]);
@@ -1229,7 +1288,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     setViewMode,
   ]);
 
-  // Realtime Supabase Channel + Safe Fallback Heartbeat (only when Ads Management is Connected)
+  // Background Heartbeat (only when AdFlow Sync is enabled)
   useEffect(() => {
     if (!isAdsManagementConnected) {
       return;
@@ -1239,56 +1298,17 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    const channel = supabase
-      .channel("task-manager-live-sync-v3")
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_team_targets" },
-        () => {
-          fetchTasks(false);
-          fetchNotifications();
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "notifications" },
-        () => {
-          fetchNotifications();
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "daily_task_rules" },
-        () => {
-          fetchDelegatorRules();
-          fetchTasks(false);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "audit_logs" },
-        () => {
-          fetchTasks(false);
-        }
-      )
-      .subscribe();
-
-    // 60-second fallback heartbeat (only runs if tab is active and ads connection is active)
-    let interval: NodeJS.Timeout | null = null;
-    if (adsSyncMode === "realtime" || adsSyncMode === "interval") {
-      interval = setInterval(() => {
-        if (typeof document !== "undefined" && !document.hidden) {
-          fetchTasks(false);
-          fetchNotifications();
-        }
-      }, 60000);
-    }
+    const interval = setInterval(() => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        fetchTasks(false);
+        fetchNotifications();
+      }
+    }, 60000);
 
     return () => {
-      supabase.removeChannel(channel);
-      if (interval) clearInterval(interval);
+      clearInterval(interval);
     };
-  }, [isAdsManagementConnected, adsSyncMode, fetchTasks, fetchDelegatorRules, fetchNotifications]);
+  }, [isAdsManagementConnected, adsSyncMode, fetchTasks, fetchNotifications]);
 
   const currentUser = useMemo(() => {
     return (
@@ -1452,16 +1472,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         templateRole: data.templateRole,
       };
 
-      // If disconnected from Ads Management, queue mutation locally for replay on reconnect
-      if (!isAdsManagementConnected) {
-        enqueueOfflineMutation({
-          type: "create",
-          taskId: tempId,
-          payload: createPayload,
-        });
-        return optimisticTask;
-      }
-
       try {
         const res = await fetch("/api/tasks", {
           method: "POST",
@@ -1481,7 +1491,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         return null;
       }
     },
-    [currentUserId, users, fetchTasks, isAdsManagementConnected, enqueueOfflineMutation]
+    [currentUserId, users, fetchTasks]
   );
 
   // 2. Update Task
@@ -1594,16 +1604,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         templateRole: updates.templateRole,
       };
 
-      // Async backend call or offline queue
-      if (!isAdsManagementConnected) {
-        enqueueOfflineMutation({
-          type: "update",
-          taskId,
-          payload: patchPayload,
-        });
-        return;
-      }
-
       try {
         await fetch("/api/tasks", {
           method: "PATCH",
@@ -1617,7 +1617,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         console.error("updateTask sync error:", err);
       }
     },
-    [currentUserId, users, tasks, isAdsManagementConnected, enqueueOfflineMutation]
+    [currentUserId, users, tasks]
   );
 
   // 3. Delete Task (Soft-delete / Archive: ensures pipeline targets are never permanently dropped)
@@ -1636,15 +1636,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         setSelectedTaskId(null);
       }
 
-      if (!isAdsManagementConnected) {
-        enqueueOfflineMutation({
-          type: "delete",
-          taskId,
-          payload: { actorId: currentUserId },
-        });
-        return;
-      }
-
       try {
         await fetch(
           `/api/tasks?id=${encodeURIComponent(taskId)}&actorId=${encodeURIComponent(
@@ -1656,7 +1647,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         console.error("deleteTask sync error:", err);
       }
     },
-    [selectedTaskId, currentUserId, isAdsManagementConnected, enqueueOfflineMutation]
+    [selectedTaskId, currentUserId]
   );
 
   // Restore Task from Archive
@@ -1669,19 +1660,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
             : t
         )
       );
-
-      if (!isAdsManagementConnected) {
-        enqueueOfflineMutation({
-          type: "restore",
-          taskId,
-          payload: {
-            restore: true,
-            isArchived: false,
-            actorId: currentUserId,
-          },
-        });
-        return;
-      }
 
       try {
         await fetch("/api/tasks", {
@@ -1698,7 +1676,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         console.error("restoreTask sync error:", err);
       }
     },
-    [currentUserId, isAdsManagementConnected, enqueueOfflineMutation]
+    [currentUserId]
   );
 
   // 4. Toggle Subtask (Supports both custom functional steps and unit checklist)
@@ -1760,19 +1738,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         })
       );
 
-      if (!isAdsManagementConnected) {
-        enqueueOfflineMutation({
-          type: "subtask",
-          taskId,
-          payload: {
-            completedQuantity: nextCompletedCount,
-            customSubtasks: nextCustomSubtasks,
-            actorId: currentUserId,
-          },
-        });
-        return;
-      }
-
       try {
         await fetch("/api/tasks", {
           method: "PATCH",
@@ -1788,7 +1753,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         console.error("toggleSubtask sync error:", err);
       }
     },
-    [currentUserId, isAdsManagementConnected, enqueueOfflineMutation]
+    [currentUserId]
   );
 
   // Add custom subtask checklist item
@@ -1885,18 +1850,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         })
       );
 
-      if (!isAdsManagementConnected) {
-        enqueueOfflineMutation({
-          type: "progress",
-          taskId,
-          payload: {
-            completedQuantity: finalCount,
-            actorId: currentUserId,
-          },
-        });
-        return;
-      }
-
       try {
         await fetch("/api/tasks", {
           method: "PATCH",
@@ -1911,7 +1864,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         console.error("updateTaskProgress sync error:", err);
       }
     },
-    [currentUserId, isAdsManagementConnected, enqueueOfflineMutation]
+    [currentUserId]
   );
 
   // 6. Approval Actions
@@ -2719,6 +2672,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         setSoundMuted,
         toggleSound,
         playNotificationSound,
+        activeSection,
+        setActiveSection,
         viewMode,
         setViewMode,
         boardLayout,

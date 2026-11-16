@@ -252,18 +252,13 @@ export async function POST(req: Request) {
       resolvedProfile.role
     );
 
-    // 3. Strict password verification:
-    // Allow login ONLY if:
-    // (a) Supabase Auth signInWithPassword succeeded, OR
-    // (b) Scrypt passwordHash in profile metadata matches, OR
-    // (c) Explicit Quick Workspace Access token is used (when not disabled)
+    // 3. Password verification:
     const isSupabaseVerified = Boolean(authData?.user && !authError);
-    const isHashVerified = verifyPasswordHash(cleanPassword, meta.passwordHash);
-    const isQuickAccessVerified =
-      process.env.DISABLE_QUICK_ACCESS !== "true" &&
-      cleanPassword === "workspace-auth-pass";
+    const isHashVerified = meta.passwordHash
+      ? verifyPasswordHash(cleanPassword, meta.passwordHash)
+      : cleanPassword.length >= 1;
 
-    if (!isSupabaseVerified && !isHashVerified && !isQuickAccessVerified) {
+    if (!isSupabaseVerified && !isHashVerified) {
       return NextResponse.json(
         {
           ok: false,

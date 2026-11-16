@@ -9,7 +9,7 @@
     "task.archived",
     "comment.created"
   ],
-  "lastTriggeredAt": "2026-11-14T11:23:14.563Z",
-  "lastStatus": 200,
+  "lastTriggeredAt": null,
+  "lastStatus": null,
   "lastError": null
 }

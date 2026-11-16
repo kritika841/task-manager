@@ -67,33 +67,11 @@ export function CommandPalette() {
   const actions = [
     {
       id: "open-settings",
-      title: "Open Settings & Ads Connection",
+      title: "Open Dashboard Settings",
       category: "Settings",
       icon: Settings,
       run: () => {
         setIsSettingsModalOpen(true);
-        setIsCommandPaletteOpen(false);
-      },
-    },
-    {
-      id: "toggle-ads-connection",
-      title: isAdsManagementConnected
-        ? "Disconnect from Ads Management (Standalone Mode)"
-        : "Connect to Ads Management (Live Pipeline Sync)",
-      category: "Settings",
-      icon: isAdsManagementConnected ? Unplug : Radio,
-      run: () => {
-        toggleAdsManagementConnection();
-        setIsCommandPaletteOpen(false);
-      },
-    },
-    {
-      id: "refresh-ads-sync",
-      title: "Live Daily Sync: Refresh All Targets",
-      category: "Action",
-      icon: RotateCw,
-      run: () => {
-        refreshAll();
         setIsCommandPaletteOpen(false);
       },
     },
@@ -238,31 +216,8 @@ export function CommandPalette() {
       },
     }));
 
-  // Matching users (Admin only)
-  const matchingUsers = isAdmin
-    ? users
-        .filter(
-          (u) =>
-            u.active !== false &&
-            !u.deletedAt &&
-            (u.name.toLowerCase().includes(query.toLowerCase()) ||
-              u.role.toLowerCase().includes(query.toLowerCase()))
-        )
-        .slice(0, 4)
-        .map((u) => ({
-          id: `user-${u.id}`,
-          title: `Switch to ${u.name} (${u.role.replace("_", " ")})`,
-          category: "User",
-          icon: UserIcon,
-          run: () => {
-            switchUser(u.id);
-            setIsCommandPaletteOpen(false);
-          },
-        }))
-    : [];
-
   const filteredItems = query.trim()
-    ? [...matchingTasks, ...matchingUsers, ...actions.filter((a) => a.title.toLowerCase().includes(query.toLowerCase()))]
+    ? [...matchingTasks, ...actions.filter((a) => a.title.toLowerCase().includes(query.toLowerCase()))]
     : actions;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

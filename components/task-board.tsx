@@ -612,43 +612,34 @@ export function TaskBoard() {
 
   return (
     <div className="space-y-3">
-      {/* Board Top Toolbar: Layout Switcher, Read-Only AdFlow Sync Indicator & Quick Actions */}
+      {/* Board Top Toolbar: Layout Switcher */}
       <div className="flex flex-wrap items-center justify-between gap-2 pb-1">
         <div className="flex items-center gap-2 flex-wrap">
-          <label className="flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-foreground select-none rounded-lg border border-border bg-card px-2.5 py-1 hover:bg-muted transition shadow-2xs">
-            <input
-              type="checkbox"
-              checked={filteredTasks.length > 0 && selectedTaskIds.length === filteredTasks.length}
-              onChange={(e) => selectAllFilteredTasks(e.target.checked)}
-              className="rounded border-border text-primary focus:ring-primary size-3.5 cursor-pointer"
-            />
-            <span>Select ({selectedTaskIds.length}/{filteredTasks.length})</span>
-          </label>
-
-          <button
-            type="button"
-            onClick={() => openCreateModal(currentUserId)}
-            className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 text-xs font-semibold transition cursor-pointer shadow-2xs"
-            title="Assign a new task to yourself"
-          >
-            <Plus className="size-3.5" />
-            <span>Self Task</span>
-          </button>
-
-          {filteredTasks.some((t) => Boolean(t.adId) || t.id.startsWith("ad-")) && (
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
-              <span className="size-1.5 rounded-full bg-emerald-500" />
-              <span>Read-Only AdFlow Sync (Local Task Updates Enabled)</span>
-            </span>
+          {filteredTasks.length > 0 && (
+            <label className="flex items-center gap-1.5 cursor-pointer text-xs font-medium text-muted-foreground hover:text-foreground select-none rounded-lg border border-border bg-card px-2.5 py-1 transition">
+              <input
+                type="checkbox"
+                checked={
+                  filteredTasks.length > 0 &&
+                  selectedTaskIds.length === filteredTasks.length
+                }
+                onChange={(e) => selectAllFilteredTasks(e.target.checked)}
+                className="rounded border-border text-primary focus:ring-primary size-3.5 cursor-pointer"
+              />
+              <span>
+                Select ({selectedTaskIds.length}/{filteredTasks.length})
+              </span>
+            </label>
           )}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          {boardLayout === "swimlanes" && (
+          {boardLayout === "swimlanes" && activeMembers.length > 0 && (
             <button
               type="button"
               onClick={() => {
-                const anyCollapsed = Object.values(collapsedSwimlanes).some(Boolean);
+                const anyCollapsed =
+                  Object.values(collapsedSwimlanes).some(Boolean);
                 if (anyCollapsed) {
                   setCollapsedSwimlanes({});
                 } else {
@@ -661,21 +652,20 @@ export function TaskBoard() {
               }}
               className="rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition cursor-pointer"
             >
-              {Object.values(collapsedSwimlanes).some(Boolean) ? "Expand All" : "Collapse All"}
+              {Object.values(collapsedSwimlanes).some(Boolean)
+                ? "Expand All"
+                : "Collapse All"}
             </button>
           )}
 
-          {/* Active Role Template Selector */}
-          <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs shadow-2xs">
-              <Sparkles className="size-3 text-primary" />
-              <span className="text-[11px] text-muted-foreground hidden sm:inline">Role:</span>
+          {boardLayout === "subcolumns" && (
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs">
               <select
                 value={activeTemplateId || ""}
                 onChange={(e) => setActiveTemplateId(e.target.value || null)}
                 className="bg-transparent text-xs font-semibold text-foreground border-none outline-none cursor-pointer pr-1"
               >
-                <option value="">Auto / All Roles</option>
+                <option value="">All Roles</option>
                 {templates.map((tpl) => (
                   <option key={tpl.id} value={tpl.id}>
                     {tpl.name}
@@ -683,17 +673,7 @@ export function TaskBoard() {
                 ))}
               </select>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setIsRoleTemplateModalOpen(true)}
-              className="flex items-center gap-1 rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/20 text-primary px-2.5 py-1 text-xs font-semibold transition cursor-pointer shadow-2xs"
-              title="Role Templates"
-            >
-              <Layers className="size-3.5" />
-              <span>Templates</span>
-            </button>
-          </div>
+          )}
 
           <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
             <button

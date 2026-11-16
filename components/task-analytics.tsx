@@ -202,99 +202,67 @@ export function TaskAnalytics() {
 
   return (
     <div className="space-y-6">
-      {/* Header with Admin Badge & View Tabs */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/80 pb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
-              Executive Analytics & Work Logs
-            </h2>
-            <span className="flex items-center gap-1 rounded-full bg-primary/15 border border-primary/25 px-2 py-0.5 text-[10px] font-bold text-primary uppercase">
-              <ShieldCheck className="size-3" />
-              <span>Admin Visibility Only</span>
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Verified team performance records, allocation audit timestamps, and completed deliverable streams.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={exportTasksToCSV}
-            className="text-xs h-8 gap-1.5 shadow-2xs font-semibold cursor-pointer"
+      {/* Header & Sub-Tabs */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-2.5">
+        <div className="flex items-center gap-1 text-xs overflow-x-auto scrollbar-none">
+          <button
+            type="button"
+            onClick={() => setActiveTab("overview")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition cursor-pointer shrink-0",
+              activeTab === "overview"
+                ? "bg-primary/15 text-primary font-semibold border border-primary/25"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+            )}
           >
-            <Download className="size-3.5" />
-            <span>Export CSV</span>
-          </Button>
+            <BarChart2 className="size-3.5" />
+            <span>Overview</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("allocations")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition cursor-pointer shrink-0",
+              activeTab === "allocations"
+                ? "bg-primary/15 text-primary font-semibold border border-primary/25"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+            )}
+          >
+            <Clock className="size-3.5" />
+            <span>Allocations</span>
+            <span className="text-[10px] font-mono px-1 rounded bg-muted/80">
+              {tasksToAnalyze.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("work_done")}
+            className={cn(
+              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition cursor-pointer shrink-0",
+              activeTab === "work_done"
+                ? "bg-primary/15 text-primary font-semibold border border-primary/25"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+            )}
+          >
+            <History className="size-3.5" />
+            <span>Audit Log</span>
+            <span className="text-[10px] font-mono px-1 rounded bg-muted/80">
+              {auditLogs.length}
+            </span>
+          </button>
         </div>
-      </div>
 
-      {/* Internal Analytics Navigation Tabs */}
-      <div className="flex items-center gap-1 border-b border-border/60 pb-2 text-xs overflow-x-auto scrollbar-none">
-        <button
-          type="button"
-          onClick={() => setActiveTab("overview")}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition cursor-pointer shrink-0",
-            activeTab === "overview"
-              ? "bg-primary/15 text-primary font-semibold border border-primary/25"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-          )}
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={exportTasksToCSV}
+          className="text-xs h-8 gap-1.5 shadow-2xs font-semibold cursor-pointer"
         >
-          <BarChart2 className="size-3.5" />
-          <span>KPIs & Capacity</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("allocations")}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition cursor-pointer shrink-0",
-            activeTab === "allocations"
-              ? "bg-primary/15 text-primary font-semibold border border-primary/25"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-          )}
-        >
-          <Clock className="size-3.5" />
-          <span>Allocation History ("What Allocated When")</span>
-          <span className="text-[10px] font-mono px-1 rounded bg-muted/80">
-            {tasksToAnalyze.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("work_done")}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition cursor-pointer shrink-0",
-            activeTab === "work_done"
-              ? "bg-primary/15 text-primary font-semibold border border-primary/25"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-          )}
-        >
-          <History className="size-3.5" />
-          <span>Work Done & Audit Trail</span>
-          <span className="text-[10px] font-mono px-1 rounded bg-muted/80">
-            {auditLogs.length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("permissions")}
-          className={cn(
-            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition cursor-pointer shrink-0",
-            activeTab === "permissions"
-              ? "bg-primary/15 text-primary font-semibold border border-primary/25"
-              : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-          )}
-        >
-          <Lock className="size-3.5" />
-          <span>Role Permissions Matrix</span>
-        </button>
+          <Download className="size-3.5" />
+          <span>Export CSV</span>
+        </Button>
       </div>
 
       {/* ======================================================== */}
@@ -413,15 +381,10 @@ export function TaskAnalytics() {
           {/* Team Member Workload Breakdown */}
           <div className="panel p-5 sm:p-6">
             <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                  <Users className="size-4 text-primary" />
-                  <span>Team Workload & Capacity Utilization</span>
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Live breakdown of assigned target units vs daily capacity limits.
-                </p>
-              </div>
+              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Users className="size-4 text-primary" />
+                <span>Team Workload & Capacity</span>
+              </h2>
             </div>
 
             <div className="overflow-x-auto">
@@ -554,15 +517,10 @@ export function TaskAnalytics() {
       {activeTab === "allocations" && (
         <div className="panel p-5 sm:p-6 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-border">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Clock className="size-4 text-primary" />
-                <span>Task Allocation & Assignment History</span>
-              </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Exact log of what tasks were allocated, to whom, and at what timestamp.
-              </p>
-            </div>
+            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <Clock className="size-4 text-primary" />
+              <span>Task Allocations</span>
+            </h2>
 
             {/* Filters */}
             <div className="flex items-center gap-2">
@@ -705,15 +663,10 @@ export function TaskAnalytics() {
       {activeTab === "work_done" && (
         <div className="panel p-5 sm:p-6 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-border">
-            <div>
-              <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <History className="size-4 text-primary" />
-                <span>Work Completed & Activity Audit Trail</span>
-              </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Immutable event stream of completed targets, unit increments, review submissions, and approvals.
-              </p>
-            </div>
+            <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+              <History className="size-4 text-primary" />
+              <span>Audit Trail</span>
+            </h2>
 
             <div className="flex items-center gap-2">
               <select

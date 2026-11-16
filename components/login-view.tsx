@@ -153,50 +153,6 @@ export function LoginView({ onLogin }: LoginViewProps) {
               )}
             </Button>
           </form>
-
-          {/* Quick Team Sign-In (1-Click Access) */}
-          <div className="mt-5 pt-4 border-t border-border">
-            <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2.5 text-center">
-              Quick Workspace Access
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {[
-                { name: "Kritika", email: "kritika@satmi.in", role: "Admin", code: "KRI", color: "#14b8a6" },
-                { name: "Ishika", email: "ishika@satmi.in", role: "Manager", code: "ISH", color: "#6366f1" },
-                { name: "Kunal", email: "kunal@satmi.in", role: "Editor", code: "KUN", color: "#0ea5e9" },
-                { name: "Nikhil", email: "nikhil@satmi.in", role: "Editor", code: "NIK", color: "#10b981" },
-                { name: "Himik", email: "himik@satmi.in", role: "Creator", code: "HIM", color: "#f59e0b" },
-                { name: "Priya", email: "priya@satmi.in", role: "Creator", code: "PRI", color: "#ec4899" },
-              ].map((member) => (
-                <button
-                  key={member.email}
-                  type="button"
-                  disabled={isLoading}
-                  onClick={() => onLogin(member.email, "workspace-auth-pass")}
-                  className="flex items-center gap-2 p-1.5 rounded-lg border border-border/80 bg-muted/20 hover:bg-muted/60 hover:border-primary/40 transition text-left cursor-pointer group"
-                >
-                  <div
-                    className="size-5 rounded-full text-[9px] font-bold flex items-center justify-center shrink-0 ring-1"
-                    style={{
-                      backgroundColor: `${member.color}20`,
-                      color: member.color,
-                      borderColor: `${member.color}40`,
-                    }}
-                  >
-                    {member.code.slice(0, 2)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="text-[11px] font-semibold text-foreground truncate group-hover:text-primary transition-colors">
-                      {member.name}
-                    </div>
-                    <div className="text-[9px] text-muted-foreground truncate">
-                      {member.role}
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>

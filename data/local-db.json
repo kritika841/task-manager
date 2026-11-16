@@ -9,7 +9,7 @@
       "active": true,
       "deleted_at": null,
       "created_at": "2026-10-01T00:00:00.000Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
+      "updated_at": "2026-11-16T00:00:00.000Z"
     },
     {
       "id": "360a1a7a-258a-4591-aee1-7bce60eaee4b",
@@ -20,7 +20,7 @@
       "active": true,
       "deleted_at": null,
       "created_at": "2026-10-01T00:00:00.000Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
+      "updated_at": "2026-11-16T00:00:00.000Z"
     },
     {
       "id": "022c1a7a-258a-4591-aee1-7bce60eaee02",
@@ -31,7 +31,7 @@
       "active": true,
       "deleted_at": null,
       "created_at": "2026-10-01T00:00:00.000Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
+      "updated_at": "2026-11-16T00:00:00.000Z"
     },
     {
       "id": "033c1a7a-258a-4591-aee1-7bce60eaee03",
@@ -42,194 +42,15 @@
       "active": true,
       "deleted_at": null,
       "created_at": "2026-10-01T00:00:00.000Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
+      "updated_at": "2026-11-16T00:00:00.000Z"
     }
   ],
-  "daily_team_targets": [
-    {
-      "id": "6445364a-7871-4826-8794-589f284d15b9",
-      "user_id": "360a1a7a-258a-4591-aee1-7bce60eaee4b",
-      "assigned_by": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "target_date": "2026-11-14",
-      "task_name": "Quarterly Operations Review & QA Checklist",
-      "target_quantity": 4,
-      "completed_quantity": 2,
-      "manual_completed_quantity": 2,
-      "auto_completed_quantity": 0,
-      "notes": "{\"__meta__\":true,\"desc\":\"Verify all daily targets, review workflow deliverables, and audit team capacity.\",\"statusOverride\":\"in_progress\",\"priority\":\"medium\",\"estimatedHours\":3,\"actualHours\":1.5,\"isArchived\":false}",
-      "carried_from_target_id": null,
-      "created_at": "2026-11-14T11:16:38.538Z",
-      "updated_at": "2026-11-14T11:22:46.443Z"
-    },
-    {
-      "id": "7555364a-7871-4826-8794-589f284d15c0",
-      "user_id": "022c1a7a-258a-4591-aee1-7bce60eaee02",
-      "assigned_by": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "target_date": "2026-11-14",
-      "task_name": "Campaign Performance Audit & Weekly Reporting",
-      "target_quantity": 2,
-      "completed_quantity": 0,
-      "manual_completed_quantity": 0,
-      "auto_completed_quantity": 0,
-      "notes": "{\"__meta__\":true,\"desc\":\"Prepare weekly ROAS breakdown and creative velocity metrics for leadership.\",\"statusOverride\":\"todo\",\"priority\":\"medium\",\"estimatedHours\":2}",
-      "carried_from_target_id": null,
-      "created_at": "2026-11-14T11:16:38.538Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
-    },
-    {
-      "id": "8665364a-7871-4826-8794-589f284d15c1",
-      "user_id": "033c1a7a-258a-4591-aee1-7bce60eaee03",
-      "assigned_by": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "target_date": "2026-11-14",
-      "task_name": "Brand Storyboard & Hook Variations Pack",
-      "target_quantity": 3,
-      "completed_quantity": 3,
-      "manual_completed_quantity": 3,
-      "auto_completed_quantity": 0,
-      "notes": "{\"__meta__\":true,\"desc\":\"Three high-converting hook variations ready for final manager approval.\",\"deliverableUrl\":\"https://drive.google.com/file/d/satmi-hooks-pack\",\"statusOverride\":\"in_review\",\"priority\":\"high\",\"estimatedHours\":2.5,\"actualHours\":2.5}",
-      "carried_from_target_id": null,
-      "created_at": "2026-11-14T11:16:38.538Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
-    },
-    {
-      "id": "9775364a-7871-4826-8794-589f284d15c2",
-      "user_id": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "assigned_by": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "target_date": "2026-11-14",
-      "task_name": "Executive Sprint Planning & Resource Allocation",
-      "target_quantity": 1,
-      "completed_quantity": 1,
-      "manual_completed_quantity": 1,
-      "auto_completed_quantity": 0,
-      "notes": "{\"__meta__\":true,\"desc\":\"Finalize daily capacity targets and SLA thresholds.\",\"statusOverride\":\"completed\",\"priority\":\"medium\",\"estimatedHours\":1,\"actualHours\":1}",
-      "carried_from_target_id": null,
-      "created_at": "2026-11-14T11:16:38.538Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
-    },
-    {
-      "id": "a885364a-7871-4826-8794-589f284d15c3",
-      "user_id": "360a1a7a-258a-4591-aee1-7bce60eaee4b",
-      "assigned_by": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "target_date": "2026-11-14",
-      "task_name": "Ad video edits",
-      "target_quantity": 5,
-      "completed_quantity": 3,
-      "manual_completed_quantity": 3,
-      "auto_completed_quantity": 0,
-      "notes": "Canonical AdFlow daily video editing quota.",
-      "carried_from_target_id": null,
-      "created_at": "2026-11-14T11:16:38.538Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
-    },
-    {
-      "id": "122e2aa5-b0bf-415d-b98d-883517c47e57",
-      "user_id": "033c1a7a-258a-4591-aee1-7bce60eaee03",
-      "assigned_by": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "target_date": "2026-11-14",
-      "task_name": "Script writing",
-      "target_quantity": 4,
-      "completed_quantity": 0,
-      "manual_completed_quantity": 0,
-      "auto_completed_quantity": 0,
-      "notes": "Daily creative script writing target",
-      "carried_from_target_id": null,
-      "created_at": "2026-11-14T11:16:38.538Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
-    }
-  ],
-  "ads": [
-    {
-      "id": "ad01364a-7871-4826-8794-589f284d15d1",
-      "name": "SATMI Festive Glow Serum — Hook A",
-      "status": "editing",
-      "production_stage": "editing",
-      "editor_id": "360a1a7a-258a-4591-aee1-7bce60eaee4b",
-      "creator_id": "033c1a7a-258a-4591-aee1-7bce60eaee03",
-      "editing_started_at": "2026-11-14T11:16:38.538Z",
-      "shoot_completed_at": "2026-11-14T11:16:38.538Z",
-      "submitted_at": null,
-      "approved_at": null,
-      "drive_url": "https://drive.google.com/drive/folders/satmi-ad-01",
-      "deadline": "2026-11-14",
-      "notes": "Primary 9:16 vertical reel creative for Meta campaign.",
-      "deleted_at": null,
-      "created_at": "2026-11-14T11:16:38.538Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
-    },
-    {
-      "id": "ad02364a-7871-4826-8794-589f284d15d2",
-      "name": "SATMI Founder Story — Testimonial Cut",
-      "status": "pending_review",
-      "production_stage": "creator_review",
-      "editor_id": "360a1a7a-258a-4591-aee1-7bce60eaee4b",
-      "creator_id": "033c1a7a-258a-4591-aee1-7bce60eaee03",
-      "editing_started_at": "2026-11-14T11:16:38.538Z",
-      "shoot_completed_at": "2026-11-14T11:16:38.538Z",
-      "submitted_at": "2026-11-14T11:16:38.538Z",
-      "approved_at": null,
-      "drive_url": "https://drive.google.com/drive/folders/satmi-ad-02",
-      "deadline": "2026-11-14",
-      "notes": "Awaiting final review sign-off.",
-      "deleted_at": null,
-      "created_at": "2026-11-14T11:16:38.538Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
-    }
-  ],
+  "daily_team_targets": [],
+  "ads": [],
   "ad_overrides": {},
-  "audit_logs": [
-    {
-      "id": "log-seed-01",
-      "actor_id": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "action": "created_task",
-      "target_type": "daily_team_target",
-      "target_id": "6445364a-7871-4826-8794-589f284d15b9",
-      "metadata": {
-        "taskName": "Quarterly Operations Review & QA Checklist",
-        "targetQuantity": 4,
-        "targetDate": "2026-11-14"
-      },
-      "created_at": "2026-11-14T11:16:38.538Z"
-    }
-  ],
-  "notifications": [
-    {
-      "id": "notif-seed-01",
-      "user_id": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "title": "Deliverable Submitted for Review",
-      "body": "Priya submitted Brand Storyboard & Hook Variations Pack for review.",
-      "read_at": null,
-      "ad_id": null,
-      "created_at": "2026-11-14T11:16:38.538Z"
-    }
-  ],
-  "daily_task_rules": [
-    {
-      "id": "rule-seed-01",
-      "user_id": "360a1a7a-258a-4591-aee1-7bce60eaee4b",
-      "task_name": "Ad video edits",
-      "target_quantity": 5,
-      "notes": "Daily AdFlow editing quota",
-      "active": true,
-      "starts_on": "2026-10-01",
-      "ends_on": null,
-      "created_by": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "created_at": "2026-11-14T11:16:38.538Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
-    },
-    {
-      "id": "rule-seed-02",
-      "user_id": "033c1a7a-258a-4591-aee1-7bce60eaee03",
-      "task_name": "Script writing",
-      "target_quantity": 4,
-      "notes": "Daily creative script writing target",
-      "active": true,
-      "starts_on": "2026-10-01",
-      "ends_on": null,
-      "created_by": "011c1a7a-258a-4591-aee1-7bce60eaee01",
-      "created_at": "2026-11-14T11:16:38.538Z",
-      "updated_at": "2026-11-14T11:16:38.538Z"
-    }
-  ],
+  "audit_logs": [],
+  "notifications": [],
+  "daily_task_rules": [],
   "auth_users": [],
   "personal_notes": [],
   "reminders": [],
