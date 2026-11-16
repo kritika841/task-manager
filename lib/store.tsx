@@ -133,7 +133,12 @@ interface TaskContextType {
   toggleReaction: (taskId: string, commentId: string, emoji: string) => Promise<void>;
   // Approval Workflow
   approveTask: (taskId: string) => Promise<void>;
-  requestRevision: (taskId: string, reason: string, notes?: string) => Promise<void>;
+  requestRevision: (
+    taskId: string,
+    reason: string,
+    notes?: string,
+    revisionTarget?: "creator" | "editor"
+  ) => Promise<void>;
   submitForReview: (taskId: string, deliverableUrl: string, asset?: DeliverableAsset) => Promise<void>;
   // Media Assets
   attachDeliverableAsset: (taskId: string, asset: DeliverableAsset) => Promise<void>;
@@ -2007,25 +2012,39 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
       await updateTask(taskId, {
         status: "completed",
+        productionStage: "approved",
         isRevisionRequested: false,
         revisionReason: undefined,
         revisionNotes: undefined,
         completedQuantity: task.targetQuantity,
       });
+      await fetchTasks(false);
     },
-    [tasks, updateTask]
+    [tasks, updateTask, fetchTasks]
   );
 
   const requestRevision = useCallback(
-    async (taskId: string, reason: string, notes?: string) => {
+    async (
+      taskId: string,
+      reason: string,
+      notes?: string,
+      revisionTarget?: "creator" | "editor"
+    ) => {
+      const targetStage =
+        revisionTarget === "creator" ||
+        reason.toLowerCase().includes("creator")
+          ? "creator_changes_requested"
+          : "changes_requested";
       await updateTask(taskId, {
         status: "in_progress",
+        productionStage: targetStage,
         isRevisionRequested: true,
         revisionReason: reason,
         revisionNotes: notes,
       });
+      await fetchTasks(false);
     },
-    [updateTask]
+    [updateTask, fetchTasks]
   );
 
   const submitForReview = useCallback(

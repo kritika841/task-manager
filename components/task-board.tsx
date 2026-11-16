@@ -27,9 +27,13 @@ import {
   Sparkles,
   History,
 } from "lucide-react";
-import { Task, TaskStatus, User } from "@/lib/types";
+import { Task, TaskStatus, User, RoleTemplate } from "@/lib/types";
 import { useTasks } from "@/lib/store";
 import { dateInTargetTimeZone } from "@/lib/supabase";
+import {
+  ADFLOW_PRODUCTION_STAGES,
+  ADFLOW_STATUSES_BY_COLUMN,
+} from "@/lib/adflow-bridge";
 import { StatusBadge, PriorityBadge } from "./ui/badge";
 import { ProgressBar } from "./ui/progress-bar";
 import { Button } from "./ui/button";
@@ -114,6 +118,10 @@ export function TaskBoard() {
   const [showPastCompleted, setShowPastCompleted] = useState<Record<string, boolean>>({});
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
+  const [activeStageFilter, setActiveStageFilter] = useState<string | null>(null);
+  const [cardRevisionTaskId, setCardRevisionTaskId] = useState<string | null>(null);
+  const [cardRevisionTarget, setCardRevisionTarget] = useState<"creator" | "editor">("editor");
+  const [cardRevisionNote, setCardRevisionNote] = useState("");
   const draggedTaskIdRef = React.useRef<string | null>(null);
 
   const togglePast = (key: string) => {
@@ -178,7 +186,8 @@ export function TaskBoard() {
     e: React.DragEvent,
     columnId: TaskStatus,
     targetUserId?: string,
-    targetSubColumnId?: string
+    targetSubColumnId?: string,
+    targetProductionStage?: string
   ) => {
     e.preventDefault();
     e.stopPropagation();
@@ -193,7 +202,8 @@ export function TaskBoard() {
         if (
           taskObj.status === columnId &&
           (!targetUserId || taskObj.assigneeId === targetUserId) &&
-          (!targetSubColumnId || taskObj.subColumnId === targetSubColumnId)
+          (!targetSubColumnId || taskObj.subColumnId === targetSubColumnId) &&
+          (!targetProductionStage || taskObj.productionStage === targetProductionStage)
         ) {
           return;
         }
@@ -205,6 +215,14 @@ export function TaskBoard() {
         if (targetSubColumnId !== undefined) {
           updates.subColumnId = targetSubColumnId;
           updates.parentColumnId = columnId;
+        }
+        if (targetProductionStage) {
+          updates.productionStage = targetProductionStage;
+        } else if (
+          targetSubColumnId &&
+          ADFLOW_PRODUCTION_STAGES.some((s) => s.id === targetSubColumnId)
+        ) {
+          updates.productionStage = targetSubColumnId;
         }
         updateTask(taskId, updates);
       }
@@ -412,35 +430,124 @@ export function TaskBoard() {
           </div>
         )}
 
-        {/* Manager Approval Actions on In Review Tasks */}
-        {task.status === "in_review" && isManagerOrAdmin && (
+        {/* Manager Approval & Revision Actions on In Review / Creative Tasks */}
+        {(task.status === "in_review" || task.adId || task.creativeName) && isManagerOrAdmin && (
           <div
-            className="flex items-center gap-1.5 mb-2.5 p-1.5 rounded-lg border border-primary/20 bg-primary/5"
+            className="mb-2.5 p-1.5 rounded-lg border border-primary/20 bg-primary/5 space-y-1.5"
             onClick={(e) => e.stopPropagation()}
           >
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              onClick={() => approveTask(task.id)}
-              className="h-6 text-[10px] gap-1 flex-1 bg-success hover:bg-success/90 text-white"
-            >
-              <Check className="size-3" />
-              <span>Approve</span>
-            </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                const reason = prompt("Enter revision reason (e.g. Audio sync, hook pacing, color grading):");
-                if (reason) requestRevision(task.id, reason);
-              }}
-              className="h-6 text-[10px] gap-1 flex-1 border-warning/30 text-warning hover:bg-warning/10"
-            >
-              <RotateCcw className="size-3" />
-              <span>Revisions</span>
-            </Button>
+            <div className="flex items-center gap-1.5">
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => approveTask(task.id)}
+                disabled={task.status === "completed" && task.productionStage === "approved"}
+                className="h-6 text-[10px] gap-1 flex-1 bg-success hover:bg-success/90 text-white cursor-pointer"
+              >
+                <Check className="size-3" />
+                <span>{task.status === "completed" ? "Approved" : "Approve"}</span>
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => {
+                  if (cardRevisionTaskId === task.id) {
+                    setCardRevisionTaskId(null);
+                  } else {
+                    setCardRevisionTaskId(task.id);
+                    setCardRevisionTarget("editor");
+                    setCardRevisionNote("");
+                  }
+                }}
+                className="h-6 text-[10px] gap-1 flex-1 border-warning/30 text-warning hover:bg-warning/10 cursor-pointer"
+              >
+                <RotateCcw className="size-3" />
+                <span>Revisions</span>
+              </Button>
+            </div>
+
+            {cardRevisionTaskId === task.id && (
+              <div className="pt-1.5 border-t border-border/50 space-y-1.5 text-[10px]">
+                <div className="grid grid-cols-2 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setCardRevisionTarget("editor")}
+                    className={cn(
+                      "px-1.5 py-1 rounded border font-semibold transition cursor-pointer",
+                      cardRevisionTarget === "editor"
+                        ? "bg-amber-500/20 text-amber-500 border-amber-500/50"
+                        : "bg-card text-muted-foreground border-border"
+                    )}
+                  >
+                    To Editor
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCardRevisionTarget("creator")}
+                    className={cn(
+                      "px-1.5 py-1 rounded border font-semibold transition cursor-pointer",
+                      cardRevisionTarget === "creator"
+                        ? "bg-amber-500/20 text-amber-500 border-amber-500/50"
+                        : "bg-card text-muted-foreground border-border"
+                    )}
+                  >
+                    To Creator
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  placeholder={`Note for ${cardRevisionTarget === "creator" ? "Content Creator" : "Video Editor"}...`}
+                  value={cardRevisionNote}
+                  onChange={(e) => setCardRevisionNote(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && cardRevisionNote.trim()) {
+                      e.preventDefault();
+                      requestRevision(
+                        task.id,
+                        cardRevisionTarget === "creator"
+                          ? "Creator Changes Requested"
+                          : "Editor Changes Requested",
+                        cardRevisionNote.trim(),
+                        cardRevisionTarget
+                      );
+                      setCardRevisionTaskId(null);
+                      setCardRevisionNote("");
+                    }
+                  }}
+                  className="w-full rounded border border-border bg-card px-2 py-1 text-[10px] text-foreground outline-none focus:border-primary"
+                />
+                <div className="flex items-center justify-end gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setCardRevisionTaskId(null)}
+                    className="px-2 py-0.5 rounded text-[10px] text-muted-foreground hover:bg-muted cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const note = cardRevisionNote.trim() || "Changes requested from Task Manager";
+                      requestRevision(
+                        task.id,
+                        cardRevisionTarget === "creator"
+                          ? "Creator Changes Requested"
+                          : "Editor Changes Requested",
+                        note,
+                        cardRevisionTarget
+                      );
+                      setCardRevisionTaskId(null);
+                      setCardRevisionNote("");
+                    }}
+                    className="px-2 py-0.5 rounded bg-amber-500 text-white font-semibold text-[10px] hover:bg-amber-600 cursor-pointer"
+                  >
+                    Send to {cardRevisionTarget === "creator" ? "Creator" : "Editor"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -619,7 +726,11 @@ export function TaskBoard() {
                   )}
                 />
                 <span>
-                  {task.status === "in_progress"
+                  {task.productionStage
+                    ? ADFLOW_PRODUCTION_STAGES.find((s) => s.id === task.productionStage)
+                        ?.shortLabel ||
+                      task.productionStage.replace(/_/g, " ")
+                    : task.status === "in_progress"
                     ? "In Progress"
                     : task.status === "in_review"
                     ? "In Review"
@@ -632,21 +743,70 @@ export function TaskBoard() {
                 <ChevronDown className="size-2.5 opacity-60 ml-0.5" />
               </div>
 
-              {/* Native transparent select for 1-click updates */}
+              {/* Native transparent select for 1-click updates (5 Main Statuses + All 10 AdFlow Statuses) */}
               <select
-                value={task.status}
+                value={task.productionStage ? `adflow:${task.productionStage}` : task.status}
                 onChange={(e) => {
                   e.stopPropagation();
-                  updateTask(task.id, { status: e.target.value as TaskStatus });
+                  const val = e.target.value;
+                  if (val.startsWith("adflow:")) {
+                    const stgId = val.replace("adflow:", "");
+                    const stgDef = ADFLOW_PRODUCTION_STAGES.find((s) => s.id === stgId);
+                    updateTask(task.id, {
+                      status: stgDef ? stgDef.taskStatus : task.status,
+                      productionStage: stgId,
+                      isRevisionRequested:
+                        stgId === "creator_changes_requested" || stgId === "changes_requested",
+                    });
+                  } else {
+                    updateTask(task.id, { status: val as TaskStatus });
+                  }
                 }}
                 className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-xs"
-                title="Change status"
+                title="Change status or AdFlow production stage"
               >
-                <option value="backlog">Backlog</option>
-                <option value="todo">To Do</option>
-                <option value="in_progress">In Progress</option>
-                <option value="in_review">In Review</option>
-                <option value="completed">Done</option>
+                <optgroup label="Main Board Statuses (5)">
+                  <option value="backlog">Backlog</option>
+                  <option value="todo">To Do</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="in_review">In Review</option>
+                  <option value="completed">Done</option>
+                </optgroup>
+                <optgroup label="Backlog · AdFlow Statuses">
+                  {ADFLOW_STATUSES_BY_COLUMN.backlog.map((s) => (
+                    <option key={s.id} value={`adflow:${s.id}`}>
+                      {s.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="To Do · AdFlow Statuses">
+                  {ADFLOW_STATUSES_BY_COLUMN.todo.map((s) => (
+                    <option key={s.id} value={`adflow:${s.id}`}>
+                      {s.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="In Progress · AdFlow Statuses">
+                  {ADFLOW_STATUSES_BY_COLUMN.in_progress.map((s) => (
+                    <option key={s.id} value={`adflow:${s.id}`}>
+                      {s.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="In Review · AdFlow Statuses">
+                  {ADFLOW_STATUSES_BY_COLUMN.in_review.map((s) => (
+                    <option key={s.id} value={`adflow:${s.id}`}>
+                      {s.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Done · AdFlow Statuses">
+                  {ADFLOW_STATUSES_BY_COLUMN.completed.map((s) => (
+                    <option key={s.id} value={`adflow:${s.id}`}>
+                      {s.label}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </div>
 
@@ -755,11 +915,11 @@ export function TaskBoard() {
           {boardLayout === "subcolumns" && (
             <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs">
               <select
-                value={activeTemplateId || ""}
+                value={activeTemplateId || "adflow-pipeline"}
                 onChange={(e) => setActiveTemplateId(e.target.value || null)}
                 className="bg-transparent text-xs font-semibold text-foreground border-none outline-none cursor-pointer pr-1"
               >
-                <option value="">All Roles</option>
+                <option value="adflow-pipeline">AdFlow 10-Status Pipeline</option>
                 {templates.map((tpl) => (
                   <option key={tpl.id} value={tpl.id}>
                     {tpl.name}
@@ -820,7 +980,11 @@ export function TaskBoard() {
       {boardLayout === "columns" && (
         <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
           {COLUMNS.map((column) => {
-            const columnTasks = filteredTasks.filter((t) => t.status === column.id);
+            const allColumnTasks = filteredTasks.filter((t) => t.status === column.id);
+            const columnTasks = activeStageFilter &&
+              ADFLOW_STATUSES_BY_COLUMN[column.id].some((s) => s.id === activeStageFilter)
+              ? allColumnTasks.filter((t) => t.productionStage === activeStageFilter)
+              : allColumnTasks;
             const isHovered = dragOverColumn === column.id;
             const isColAllSelected =
               columnTasks.length > 0 &&
@@ -843,54 +1007,104 @@ export function TaskBoard() {
                     : "border-border/70 dark:border-zinc-800/80"
                 )}
               >
-                {/* Notion Column Header - STICKY STATUSES */}
-                <div className="sticky top-12 z-20 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md flex items-center justify-between pb-2.5 pt-1.5 mb-2 -mt-1 -mx-2 px-2 border-b border-border/60 rounded-t-xl shadow-2xs">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={isColAllSelected}
-                      onChange={(e) =>
-                        selectTasks(columnTasks.map((t) => t.id), e.target.checked)
-                      }
-                      className="rounded border-border text-primary focus:ring-primary size-3.5 cursor-pointer opacity-50 hover:opacity-100"
-                      title={`Bulk select all ${columnTasks.length} tasks in ${column.label}`}
-                    />
-                    <div
-                      className={cn(
-                        "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tracking-wide whitespace-nowrap",
-                        column.pillBg
-                      )}
-                    >
-                      <span className={cn("size-2 rounded-full shrink-0", column.dotColor)} />
-                      <span>{column.label}</span>
-                      <span className="text-[10px] font-mono opacity-80 ml-0.5">
-                        {columnTasks.length}
-                      </span>
+                {/* Notion Column Header - STICKY STATUSES + ALL ADFLOW STATUSES */}
+                <div className="sticky top-12 z-20 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md pb-2 pt-1.5 mb-2 -mt-1 -mx-2 px-2 border-b border-border/60 rounded-t-xl shadow-2xs space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={isColAllSelected}
+                        onChange={(e) =>
+                          selectTasks(columnTasks.map((t) => t.id), e.target.checked)
+                        }
+                        className="rounded border-border text-primary focus:ring-primary size-3.5 cursor-pointer opacity-50 hover:opacity-100"
+                        title={`Bulk select all ${columnTasks.length} tasks in ${column.label}`}
+                      />
+                      <div
+                        className={cn(
+                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold tracking-wide whitespace-nowrap",
+                          column.pillBg
+                        )}
+                      >
+                        <span className={cn("size-2 rounded-full shrink-0", column.dotColor)} />
+                        <span>{column.label}</span>
+                        <span className="text-[10px] font-mono opacity-80 ml-0.5">
+                          {columnTasks.length}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      {column.id === "completed" &&
+                        columnTasks.length > 0 &&
+                        !filter.showArchived && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await archiveCompletedTasks();
+                            }}
+                            className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 px-2 py-0.5 rounded-md transition cursor-pointer"
+                            title="Move all Done tasks out of active Overview into Done History / Archive"
+                          >
+                            Clear Done
+                          </button>
+                        )}
+                      <button
+                        type="button"
+                        onClick={() => openCreateModal(undefined, column.id)}
+                        className="text-muted-foreground/60 hover:text-foreground transition p-1 rounded-md hover:bg-muted/50 cursor-pointer"
+                        title={`Add task to ${column.label}`}
+                      >
+                        <Plus className="size-3.5" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1">
-                    {column.id === "completed" &&
-                      columnTasks.length > 0 &&
-                      !filter.showArchived && (
+
+                  {/* AdFlow Statuses mapped inside this column (Drop Targets & Quick Filters) */}
+                  <div className="flex flex-wrap gap-1 pt-0.5">
+                    {ADFLOW_STATUSES_BY_COLUMN[column.id].map((stg) => {
+                      const stageCount = allColumnTasks.filter(
+                        (t) => t.productionStage === stg.id
+                      ).length;
+                      const isStageSelected = activeStageFilter === stg.id;
+                      const isStageDragOver = dragOverColumn === `stage-${stg.id}`;
+
+                      return (
                         <button
+                          key={stg.id}
                           type="button"
-                          onClick={async () => {
-                            await archiveCompletedTasks();
+                          onClick={() =>
+                            setActiveStageFilter((prev) => (prev === stg.id ? null : stg.id))
+                          }
+                          onDragOver={(e) => handleDragOver(e, `stage-${stg.id}`)}
+                          onDragLeave={(e) => {
+                            if (e.currentTarget === e.target) setDragOverColumn(null);
                           }}
-                          className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 px-2 py-0.5 rounded-md transition cursor-pointer"
-                          title="Move all Done tasks out of active Overview into Done History / Archive"
+                          onDrop={(e) =>
+                            handleDrop(e, column.id, undefined, undefined, stg.id)
+                          }
+                          className={cn(
+                            "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-medium border transition cursor-pointer select-none",
+                            isStageDragOver
+                              ? "border-primary bg-primary/20 text-primary ring-1 ring-primary"
+                              : isStageSelected
+                              ? "bg-primary/15 text-primary border-primary/40 font-bold"
+                              : "bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted hover:text-foreground"
+                          )}
+                          title={`${stg.label} — Drag a card here to set AdFlow status to "${stg.label}", or click to filter`}
                         >
-                          Clear Done
+                          <span
+                            className="size-1.5 rounded-full shrink-0"
+                            style={{ backgroundColor: stg.color }}
+                          />
+                          <span>{stg.shortLabel}</span>
+                          {stageCount > 0 && (
+                            <span className="font-mono text-[9px] opacity-80 ml-0.5">
+                              {stageCount}
+                            </span>
+                          )}
                         </button>
-                      )}
-                    <button
-                      type="button"
-                      onClick={() => openCreateModal(undefined, column.id)}
-                      className="text-muted-foreground/60 hover:text-foreground transition p-1 rounded-md hover:bg-muted/50 cursor-pointer"
-                      title={`Add task to ${column.label}`}
-                    >
-                      <Plus className="size-3.5" />
-                    </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -926,14 +1140,30 @@ export function TaskBoard() {
 
       {/* 2. ROLE WORKFLOW SUB-COLUMNS LAYOUT */}
       {boardLayout === "subcolumns" && (() => {
-        const activeTpl = templates.find((t) => t.id === activeTemplateId) || templates[0];
-        if (!activeTpl) {
-          return (
-            <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-              No workflow template available. Click "Templates" to create one.
-            </div>
-          );
-        }
+        const adflowBuiltInTemplate: RoleTemplate = {
+          id: "adflow-pipeline",
+          name: "AdFlow 10-Status Pipeline",
+          role: "content_creator",
+          description: "All 10 AdFlow creative statuses mapped into the 5 main board statuses.",
+          createdAt: "",
+          updatedAt: "",
+          parentColumns: COLUMNS.map((col) => ({
+            id: col.id,
+            label: col.label,
+            subColumns: ADFLOW_STATUSES_BY_COLUMN[col.id].map((stg, idx) => ({
+              id: stg.id,
+              label: stg.label,
+              parentStatus: col.id,
+              color: stg.color,
+              order: idx + 1,
+            })),
+          })),
+        };
+
+        const activeTpl =
+          !activeTemplateId || activeTemplateId === "adflow-pipeline"
+            ? adflowBuiltInTemplate
+            : templates.find((t) => t.id === activeTemplateId) || adflowBuiltInTemplate;
 
         return (
           <div className="space-y-3">
@@ -943,7 +1173,9 @@ export function TaskBoard() {
                 <Layers className="size-3.5 text-primary" />
                 <span className="text-xs font-bold text-foreground">{activeTpl.name}</span>
                 <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-primary/20 text-primary">
-                  {activeTpl.role.replace("_", " ")}
+                  {activeTpl.id === "adflow-pipeline"
+                    ? "10 AdFlow Statuses"
+                    : activeTpl.role.replace("_", " ")}
                 </span>
               </div>
 
@@ -993,8 +1225,13 @@ export function TaskBoard() {
                     {/* Sub-Columns List under this Parent Stage */}
                     <div className="space-y-3 flex-1">
                       {parent.subColumns.map((subCol) => {
-                        const subTasks = parentTasks.filter(
-                          (t) => t.subColumnId === subCol.id || (!t.subColumnId && parent.subColumns[0]?.id === subCol.id)
+                        const isAdflowSub = activeTpl.id === "adflow-pipeline";
+                        const subTasks = parentTasks.filter((t) =>
+                          isAdflowSub
+                            ? t.productionStage === subCol.id ||
+                              (!t.productionStage && parent.subColumns[0]?.id === subCol.id)
+                            : t.subColumnId === subCol.id ||
+                              (!t.subColumnId && parent.subColumns[0]?.id === subCol.id)
                         );
                         const isHovered = dragOverColumn === subCol.id;
 
@@ -1005,7 +1242,15 @@ export function TaskBoard() {
                             onDragLeave={(e) => {
                               if (e.currentTarget === e.target) setDragOverColumn(null);
                             }}
-                            onDrop={(e) => handleDrop(e, parent.id, undefined, subCol.id)}
+                            onDrop={(e) =>
+                              handleDrop(
+                                e,
+                                parent.id,
+                                undefined,
+                                isAdflowSub ? undefined : subCol.id,
+                                isAdflowSub ? subCol.id : undefined
+                              )
+                            }
                             className={cn(
                               "rounded-lg border p-2.5 bg-card/90 transition-all flex flex-col space-y-2",
                               isHovered

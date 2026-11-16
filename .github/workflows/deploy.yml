@@ -45,13 +45,16 @@ jobs:
         run: |
           SSH="ssh -i ~/.ssh/id_deploy -p ${{ secrets.VPS_PORT || 22 }}"
           TARGET="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
-          $SSH $TARGET "mkdir -p $APP_DIR"
-          # public/uploads and .env* live on the server and are never overwritten
+          $SSH $TARGET "mkdir -p $APP_DIR/data"
+          # public/uploads, data, and .env* live on the server and are never overwritten
           rsync -az --delete -e "$SSH" \
             --exclude 'public/uploads/' \
+            --exclude 'data/' \
             --exclude '.env*' --exclude 'node_modules/' \
-            .next public data package.json package-lock.json next.config.ts ecosystem.config.cjs \
+            .next public package.json package-lock.json next.config.ts ecosystem.config.cjs \
             $TARGET:$APP_DIR/
+          # Seed data files only if they do not exist on VPS yet
+          rsync -az --ignore-existing -e "$SSH" data/ $TARGET:$APP_DIR/data/
 
       - name: Install deps and (re)start with PM2
         run: |

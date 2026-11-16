@@ -10,6 +10,9 @@ import {
   generateNextCreativeIds,
   getAdFlowHeaders,
   legacyAdStatusForStage,
+  mapAdFlowStageToTaskStatus,
+  mapTaskStatusToDefaultAdFlowStage,
+  syncTaskUpdateToAdFlow,
 } from "@/lib/adflow-bridge";
 import {
   Task,
@@ -469,20 +472,9 @@ export async function GET(req: Request) {
       const liveAdStatus = matchedAd?.status;
 
       if (matchedAd) {
-        const stg = String(matchedAd.production_stage || "").toLowerCase();
-        const stRaw = String(matchedAd.status || "").toLowerCase();
-        if (stg === "approved" || stRaw === "approved") {
-          status = "completed";
-        } else if (stg === "creator_review" || stg === "final_review" || stRaw === "pending_review") {
-          status = "in_review";
-        } else if (
-          stg === "editing" ||
-          stg === "shoot_complete" ||
-          stg === "changes_requested" ||
-          stg === "creator_changes_requested"
-        ) {
-          status = "in_progress";
-        }
+        status = mapAdFlowStageToTaskStatus(matchedAd.production_stage, matchedAd.status);
+      } else if (parsedNotes.productionStage) {
+        status = mapAdFlowStageToTaskStatus(parsedNotes.productionStage);
       }
 
       const tags: string[] =
@@ -684,7 +676,7 @@ export async function GET(req: Request) {
         defaultSubColumnId = "cc-video-shoots";
         defaultTemplateRole = "content_creator";
       } else if (stage === "script_writing") {
-        defaultStatus = "todo";
+        defaultStatus = "backlog";
         stageLabel = "Script in Progress";
         defaultSubColumnId = "cc-script-draft";
         defaultTemplateRole = "content_creator";
@@ -919,14 +911,26 @@ export async function POST(req: Request) {
     const dbSnapshot = loadLocalDb();
     const assigneeProfile = dbSnapshot.profiles.find((p) => p.id === userId);
     const assigneeRole = String(assigneeProfile?.role || "").toLowerCase();
+    const taskLower = taskName.toLowerCase();
     const isCreativeTask =
-      Boolean(body.generateCreativeId) ||
-      isCanonicalAdflowTask(taskName) ||
-      assigneeRole === "content_creator" ||
-      (Array.isArray(body.tags) &&
-        body.tags.some((t: string) =>
-          ["adflow", "creative", "video ads"].includes(String(t).toLowerCase())
-        ));
+      body.generateCreativeId !== false &&
+      (Boolean(body.generateCreativeId) ||
+        isCanonicalAdflowTask(taskName) ||
+        assigneeRole === "content_creator" ||
+        assigneeRole === "editor" ||
+        taskLower.includes("script") ||
+        taskLower.includes("shoot") ||
+        taskLower.includes("creative") ||
+        taskLower.includes("edit") ||
+        taskLower.includes("video") ||
+        taskLower.includes("ad ") ||
+        taskLower.includes("ads") ||
+        (Array.isArray(body.tags) &&
+          body.tags.some((t: string) =>
+            ["adflow", "creative", "video ads", "production"].includes(
+              String(t).toLowerCase()
+            )
+          )));
 
     let generatedCreativeIds: string[] = [];
     if (isCreativeTask) {
@@ -1055,6 +1059,7 @@ export async function PATCH(req: Request) {
       id,
       status,
       productionStage,
+      revisionTarget,
       priority,
       project,
       tags,
@@ -1149,53 +1154,55 @@ export async function PATCH(req: Request) {
         currentOverride.productionStage = productionStage;
         const stg = String(productionStage).toLowerCase();
         if (!status) {
+          currentOverride.status = mapAdFlowStageToTaskStatus(stg);
           if (stg === "approved") {
-            currentOverride.status = "completed";
             currentOverride.isRevisionRequested = false;
             currentOverride.completedQuantity = effectiveTargetQty;
           } else if (
-            stg === "creator_review" ||
-            stg === "pending_review" ||
-            stg === "final_review"
+            stg === "creator_changes_requested" ||
+            stg === "changes_requested"
           ) {
-            currentOverride.status = "in_review";
-          } else if (
-            stg === "editing" ||
-            stg === "shoot_complete" ||
-            stg === "shooting"
-          ) {
-            currentOverride.status = "in_progress";
+            currentOverride.isRevisionRequested = true;
           } else if (
             stg === "ready_for_edit" ||
             stg === "ready_to_shoot" ||
-            stg === "ready_for_shoot"
+            stg === "script_writing" ||
+            stg === "backlog"
           ) {
-            currentOverride.status = "todo";
-            currentOverride.completedQuantity = 0;
-          } else if (stg === "backlog") {
-            currentOverride.status = "backlog";
             currentOverride.completedQuantity = 0;
           }
         }
       }
 
-      if (status) {
+      if (isRevisionRequested === true) {
+        const resolvedRevStage =
+          productionStage === "creator_changes_requested" ||
+          revisionTarget === "creator" ||
+          String(revisionReason || "").toLowerCase().includes("creator")
+            ? "creator_changes_requested"
+            : "changes_requested";
+        currentOverride.productionStage = resolvedRevStage;
+        currentOverride.status = "in_progress";
+        currentOverride.isRevisionRequested = true;
+      }
+
+      if (status && !isRevisionRequested) {
         currentOverride.status = status;
+        if (productionStage === undefined) {
+          currentOverride.productionStage = mapTaskStatusToDefaultAdFlowStage(
+            status,
+            undefined,
+            isRevisionRequested,
+            revisionTarget
+          );
+        }
         if (status === "in_progress") {
-          if (productionStage === undefined) currentOverride.productionStage = "editing";
           if (!currentOverride.completedQuantity && effectiveTargetQty > 1) {
             currentOverride.completedQuantity = 1;
           }
-        } else if (status === "todo") {
-          if (productionStage === undefined) currentOverride.productionStage = "ready_for_edit";
+        } else if (status === "todo" || status === "backlog") {
           currentOverride.completedQuantity = 0;
-        } else if (status === "backlog") {
-          if (productionStage === undefined) currentOverride.productionStage = "backlog";
-          currentOverride.completedQuantity = 0;
-        } else if (status === "in_review") {
-          if (productionStage === undefined) currentOverride.productionStage = "creator_review";
         } else if (status === "completed") {
-          if (productionStage === undefined) currentOverride.productionStage = "approved";
           currentOverride.isRevisionRequested = false;
           currentOverride.completedQuantity = effectiveTargetQty;
         }
@@ -1260,54 +1267,26 @@ export async function PATCH(req: Request) {
       db.ad_overrides[realAdId] = currentOverride;
       saveLocalDb(db);
 
-      // Sync stage / revision / approval changes to AdFlow (`ads` table)
+      // Sync stage / revision / approval changes to AdFlow (`ads`, `review_actions`, `activity_logs`, cache)
       if (
-        currentOverride.productionStage ||
+        productionStage !== undefined ||
         status !== undefined ||
         isRevisionRequested !== undefined ||
         deliverableUrl !== undefined
       ) {
         try {
-          const targetProdStage =
-            currentOverride.productionStage ||
-            (isRevisionRequested
-              ? "changes_requested"
-              : nextAdStatus === "completed"
-              ? "approved"
-              : nextAdStatus === "in_review"
-              ? "final_review"
-              : nextAdStatus === "in_progress"
-              ? "editing"
-              : "ready_for_edit");
-
-          const adPatch: Record<string, any> = {
-            production_stage: targetProdStage,
-            status: legacyAdStatusForStage(targetProdStage),
-            approval_stage:
-              targetProdStage === "approved"
-                ? "complete"
-                : targetProdStage === "final_review"
-                ? "admin_final"
-                : "manager_review",
-            updated_at: new Date().toISOString(),
-            workflow_status_changed_at: new Date().toISOString(),
-          };
-          if (targetProdStage === "approved") {
-            adPatch.approved_at = new Date().toISOString();
-            adPatch.final_approved_at = new Date().toISOString();
-          }
-          if (deliverableUrl) {
-            adPatch.drive_url = deliverableUrl;
-          }
-
-          await fetch(
-            `${ADFLOW_SUPABASE_URL}/rest/v1/ads?id=eq.${encodeURIComponent(realAdId)}`,
-            {
-              method: "PATCH",
-              headers: getAdFlowHeaders(),
-              body: JSON.stringify(adPatch),
-            }
-          );
+          await syncTaskUpdateToAdFlow({
+            adId: realAdId,
+            productionStage: currentOverride.productionStage,
+            taskStatus: nextAdStatus,
+            isRevisionRequested,
+            revisionTarget,
+            revisionReason,
+            revisionNotes,
+            deliverableUrl,
+            actorId: verifiedActorId,
+            actorName,
+          });
         } catch (err) {
           console.warn("Could not sync ad-* update to AdFlow:", err);
         }
@@ -1435,37 +1414,50 @@ export async function PATCH(req: Request) {
 
     if (productionStage !== undefined && !status) {
       const stg = String(productionStage).toLowerCase();
+      currentNotesMeta.statusOverride = mapAdFlowStageToTaskStatus(stg);
       if (stg === "approved") {
-        currentNotesMeta.statusOverride = "completed";
         currentNotesMeta.isRevisionRequested = false;
         updates.completed_quantity = currentTargetQty;
         updates.manual_completed_quantity = Math.max(0, currentTargetQty - autoQty);
       } else if (
-        stg === "creator_review" ||
-        stg === "pending_review" ||
-        stg === "final_review"
+        stg === "creator_changes_requested" ||
+        stg === "changes_requested"
       ) {
-        currentNotesMeta.statusOverride = "in_review";
-      } else if (
-        stg === "editing" ||
-        stg === "shoot_complete" ||
-        stg === "shooting"
-      ) {
-        currentNotesMeta.statusOverride = "in_progress";
+        currentNotesMeta.isRevisionRequested = true;
       } else if (
         stg === "ready_for_edit" ||
         stg === "ready_to_shoot" ||
-        stg === "ready_for_shoot"
+        stg === "script_writing" ||
+        stg === "backlog"
       ) {
-        currentNotesMeta.statusOverride = "todo";
-      } else if (stg === "backlog") {
-        currentNotesMeta.statusOverride = "backlog";
+        updates.completed_quantity = autoQty;
+        updates.manual_completed_quantity = 0;
       }
     }
 
+    if (isRevisionRequested === true) {
+      const resolvedRevStage =
+        productionStage === "creator_changes_requested" ||
+        revisionTarget === "creator" ||
+        String(revisionReason || "").toLowerCase().includes("creator")
+          ? "creator_changes_requested"
+          : "changes_requested";
+      currentNotesMeta.productionStage = resolvedRevStage;
+      currentNotesMeta.statusOverride = "in_progress";
+      currentNotesMeta.isRevisionRequested = true;
+    }
+
     // Handle status changes
-    if (status) {
+    if (status && !isRevisionRequested) {
       currentNotesMeta.statusOverride = status;
+      if (productionStage === undefined) {
+        currentNotesMeta.productionStage = mapTaskStatusToDefaultAdFlowStage(
+          status,
+          undefined,
+          isRevisionRequested,
+          revisionTarget
+        );
+      }
 
       if (status === "in_review") {
         auditAction = "submitted_for_review";
@@ -1573,49 +1565,24 @@ export async function PATCH(req: Request) {
     // If this task is linked to an AdFlow creative (by adId or creativeName), sync stage/status to AdFlow
     if (
       (currentNotesMeta.adId || currentNotesMeta.creativeName) &&
-      (productionStage !== undefined || status !== undefined || isRevisionRequested !== undefined)
+      (productionStage !== undefined ||
+        status !== undefined ||
+        isRevisionRequested !== undefined ||
+        deliverableUrl !== undefined)
     ) {
       try {
-        const targetStage =
-          currentNotesMeta.productionStage ||
-          (isRevisionRequested
-            ? "changes_requested"
-            : nextTargetStatus === "completed"
-            ? "approved"
-            : nextTargetStatus === "in_review"
-            ? "final_review"
-            : nextTargetStatus === "in_progress"
-            ? "editing"
-            : "script_writing");
-
-        const adPatch: Record<string, any> = {
-          production_stage: targetStage,
-          status: legacyAdStatusForStage(targetStage),
-          approval_stage:
-            targetStage === "approved"
-              ? "complete"
-              : targetStage === "final_review"
-              ? "admin_final"
-              : "manager_review",
-          updated_at: new Date().toISOString(),
-          workflow_status_changed_at: new Date().toISOString(),
-        };
-        if (targetStage === "approved") {
-          adPatch.approved_at = new Date().toISOString();
-          adPatch.final_approved_at = new Date().toISOString();
-        }
-        if (deliverableUrl) {
-          adPatch.drive_url = deliverableUrl;
-        }
-
-        const filterQuery = currentNotesMeta.adId
-          ? `id=eq.${encodeURIComponent(currentNotesMeta.adId)}`
-          : `name=ilike.${encodeURIComponent(currentNotesMeta.creativeName!)}&deleted_at=is.null`;
-
-        await fetch(`${ADFLOW_SUPABASE_URL}/rest/v1/ads?${filterQuery}`, {
-          method: "PATCH",
-          headers: getAdFlowHeaders(),
-          body: JSON.stringify(adPatch),
+        await syncTaskUpdateToAdFlow({
+          adId: currentNotesMeta.adId,
+          creativeName: currentNotesMeta.creativeName,
+          productionStage: currentNotesMeta.productionStage,
+          taskStatus: nextTargetStatus,
+          isRevisionRequested,
+          revisionTarget,
+          revisionReason,
+          revisionNotes,
+          deliverableUrl,
+          actorId: verifiedActorId,
+          actorName,
         });
       } catch (err) {
         console.warn("Could not sync linked target task to AdFlow:", err);

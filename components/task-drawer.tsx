@@ -74,6 +74,7 @@ export function TaskDrawer() {
 
   const [revisionReasonInput, setRevisionReasonInput] = useState("");
   const [revisionNotesInput, setRevisionNotesInput] = useState("");
+  const [revisionTargetInput, setRevisionTargetInput] = useState<"creator" | "editor">("editor");
   const [isRevisionOpen, setIsRevisionOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "checklist" | "activity">("overview");
   const [descMode, setDescMode] = useState<"edit" | "preview">("edit");
@@ -104,8 +105,18 @@ export function TaskDrawer() {
 
   const handleRevisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!revisionReasonInput.trim()) return;
-    await requestRevision(task.id, revisionReasonInput.trim(), revisionNotesInput.trim() || undefined);
+    if (!revisionReasonInput.trim() && !revisionNotesInput.trim()) return;
+    const reasonText =
+      revisionReasonInput.trim() ||
+      (revisionTargetInput === "creator"
+        ? "Creator Changes Requested"
+        : "Editor Changes Requested");
+    await requestRevision(
+      task.id,
+      reasonText,
+      revisionNotesInput.trim() || undefined,
+      revisionTargetInput
+    );
     setIsRevisionOpen(false);
     setRevisionReasonInput("");
     setRevisionNotesInput("");
@@ -393,34 +404,80 @@ export function TaskDrawer() {
 
                 {/* Core Properties Grid */}
                 <div className="rounded-xl border border-border bg-muted/20 p-3.5 space-y-3 text-xs">
-                  {/* Status Pill Selector */}
+                  {/* Status Pill Selector (5 Main Statuses + All 10 AdFlow Statuses) */}
                   <div className="grid grid-cols-3 items-start gap-2">
                     <span className="text-muted-foreground font-medium flex items-center gap-1.5 pt-1">
                       <Clock className="size-3.5" />
                       <span>Status</span>
                     </span>
-                    <div className="col-span-2 flex flex-wrap gap-1">
-                      {[
-                        { id: "backlog", label: "Backlog", activeStyle: "bg-muted text-foreground border-border" },
-                        { id: "todo", label: "To Do", activeStyle: "bg-zinc-500/20 text-zinc-200 border-zinc-500/40" },
-                        { id: "in_progress", label: "In Progress", activeStyle: "bg-blue-500/20 text-blue-400 border-blue-500/40" },
-                        { id: "in_review", label: "In Review", activeStyle: "bg-amber-500/20 text-amber-400 border-amber-500/40" },
-                        { id: "completed", label: "Done", activeStyle: "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" },
-                      ].map((st) => (
-                        <button
-                          key={st.id}
-                          type="button"
-                          onClick={() => updateTask(task.id, { status: st.id as TaskStatus })}
-                          className={cn(
-                            "px-2 py-0.5 rounded-md text-[11px] font-semibold border transition cursor-pointer select-none",
-                            task.status === st.id
-                              ? `${st.activeStyle} ring-1 ring-primary/30 font-bold shadow-xs`
-                              : "border-transparent text-muted-foreground/80 hover:bg-muted/60 hover:text-foreground"
-                          )}
-                        >
-                          {st.label}
-                        </button>
-                      ))}
+                    <div className="col-span-2 space-y-2">
+                      <div className="flex flex-wrap gap-1">
+                        {[
+                          { id: "backlog", label: "Backlog", activeStyle: "bg-muted text-foreground border-border" },
+                          { id: "todo", label: "To Do", activeStyle: "bg-zinc-500/20 text-zinc-200 border-zinc-500/40" },
+                          { id: "in_progress", label: "In Progress", activeStyle: "bg-blue-500/20 text-blue-400 border-blue-500/40" },
+                          { id: "in_review", label: "In Review", activeStyle: "bg-amber-500/20 text-amber-400 border-amber-500/40" },
+                          { id: "completed", label: "Done", activeStyle: "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" },
+                        ].map((st) => (
+                          <button
+                            key={st.id}
+                            type="button"
+                            onClick={() => updateTask(task.id, { status: st.id as TaskStatus })}
+                            className={cn(
+                              "px-2 py-0.5 rounded-md text-[11px] font-semibold border transition cursor-pointer select-none",
+                              task.status === st.id
+                                ? `${st.activeStyle} ring-1 ring-primary/30 font-bold shadow-xs`
+                                : "border-transparent text-muted-foreground/80 hover:bg-muted/60 hover:text-foreground"
+                            )}
+                          >
+                            {st.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* All 10 AdFlow Statuses mapped into the 5 main statuses */}
+                      <div className="pt-1.5 border-t border-border/50 space-y-1">
+                        <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
+                          AdFlow Pipeline Statuses (10 Stages)
+                        </span>
+                        <div className="flex flex-wrap gap-1">
+                          {ADFLOW_PRODUCTION_STAGES.map((stg) => {
+                            const isStageActive = task.productionStage === stg.id;
+                            return (
+                              <button
+                                key={stg.id}
+                                type="button"
+                                disabled={adflowBusy}
+                                onClick={async () => {
+                                  if (task.adId || task.id.startsWith("ad-")) {
+                                    await executeAdFlowControl("update_stage", {
+                                      productionStage: stg.id,
+                                    });
+                                  } else {
+                                    await updateTask(task.id, {
+                                      status: stg.taskStatus,
+                                      productionStage: stg.id,
+                                    });
+                                  }
+                                }}
+                                className={cn(
+                                  "px-2 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer select-none flex items-center gap-1",
+                                  isStageActive
+                                    ? "bg-primary/20 text-primary border-primary/50 ring-1 ring-primary/30 font-bold shadow-2xs"
+                                    : "border-border/50 bg-card/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                )}
+                                title={`Move to ${stg.label} (${stg.taskStatus.replace("_", " ")})`}
+                              >
+                                <span
+                                  className="size-1.5 rounded-full shrink-0"
+                                  style={{ backgroundColor: stg.color }}
+                                />
+                                <span>{stg.shortLabel}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -989,23 +1046,41 @@ export function TaskDrawer() {
                     {/* Revision Form */}
                     {isRevisionOpen && (
                       <form onSubmit={handleRevisionSubmit} className="pt-2 border-t border-border/60 space-y-2">
-                        <div>
-                          <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
-                            Revision Reason
-                          </label>
-                          <Select
-                            value={revisionReasonInput}
-                            onChange={(e) => setRevisionReasonInput(e.target.value)}
-                            className="text-xs h-8 bg-card"
-                          >
-                            <option value="">Select reason...</option>
-                            <option value="Audio / Voiceover Issue">Audio / Voiceover Issue</option>
-                            <option value="Color Grading / Visual Glitch">Color Grading / Visual Glitch</option>
-                            <option value="Pacing or Cut Needs Improvement">Pacing or Cut Needs Improvement</option>
-                            <option value="Incorrect Asset / Missing Footage">Incorrect Asset / Missing Footage</option>
-                            <option value="Brand Identity Guideline Mismatch">Brand Identity Guideline Mismatch</option>
-                            <option value="Other Changes Needed">Other Changes Needed</option>
-                          </Select>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                              Send Changes To
+                            </label>
+                            <Select
+                              value={revisionTargetInput}
+                              onChange={(e) =>
+                                setRevisionTargetInput(e.target.value as "creator" | "editor")
+                              }
+                              className="text-xs h-8 bg-card w-full"
+                            >
+                              <option value="editor">Video Editor (Changes: Editor)</option>
+                              <option value="creator">Content Creator (Changes: Creator)</option>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                              Revision Reason
+                            </label>
+                            <Select
+                              value={revisionReasonInput}
+                              onChange={(e) => setRevisionReasonInput(e.target.value)}
+                              className="text-xs h-8 bg-card w-full"
+                            >
+                              <option value="">Select reason...</option>
+                              <option value="Hook / Script Reshoot Needed">Hook / Script Reshoot Needed</option>
+                              <option value="Audio / Voiceover Issue">Audio / Voiceover Issue</option>
+                              <option value="Color Grading / Visual Glitch">Color Grading / Visual Glitch</option>
+                              <option value="Pacing or Cut Needs Improvement">Pacing or Cut Needs Improvement</option>
+                              <option value="Incorrect Asset / Missing Footage">Incorrect Asset / Missing Footage</option>
+                              <option value="Brand Identity Guideline Mismatch">Brand Identity Guideline Mismatch</option>
+                              <option value="Other Changes Needed">Other Changes Needed</option>
+                            </Select>
+                          </div>
                         </div>
                         <div>
                           <Textarea
@@ -1032,7 +1107,7 @@ export function TaskDrawer() {
                             size="sm"
                             className="text-xs h-7 text-warning"
                           >
-                            Send Request
+                            Send to {revisionTargetInput === "creator" ? "Creator" : "Editor"}
                           </Button>
                         </div>
                       </form>
