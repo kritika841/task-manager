@@ -25,6 +25,7 @@ import {
   Archive,
   ExternalLink,
   Sparkles,
+  History,
 } from "lucide-react";
 import { Task, TaskStatus, User } from "@/lib/types";
 import { useTasks } from "@/lib/store";
@@ -103,6 +104,9 @@ export function TaskBoard() {
     activeTemplateId,
     setActiveTemplateId,
     setIsRoleTemplateModalOpen,
+    archiveCompletedTasks,
+    filter,
+    setFilter,
   } = useTasks();
 
   const [expandedTaskIds, setExpandedTaskIds] = useState<Record<string, boolean>>({});
@@ -489,6 +493,99 @@ export function TaskBoard() {
             )}
           </div>
 
+          {/* Individual Per-Task Stage History (Card-Only) */}
+          {(() => {
+            const historyList =
+              task.stageHistory && task.stageHistory.length > 0
+                ? task.stageHistory
+                : [
+                    {
+                      stage: task.status,
+                      label:
+                        task.status === "completed"
+                          ? "Done"
+                          : task.status === "in_review"
+                            ? "In Review"
+                            : task.status === "in_progress"
+                              ? "In Progress"
+                              : task.status === "todo"
+                                ? "To Do"
+                                : "Backlog",
+                      timestamp: task.createdAt,
+                    },
+                  ];
+
+            return (
+              <div
+                className="pt-1.5 border-t border-border/30 space-y-1"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={(e) => toggleExpand(e, task.id)}
+                  className="flex w-full items-center justify-between gap-1 text-[10px] text-muted-foreground hover:text-foreground transition cursor-pointer group/hist"
+                  title="Click to toggle full stage history timestamps"
+                >
+                  <div className="flex items-center gap-1 min-w-0 flex-wrap">
+                    <History className="size-3 shrink-0 text-primary/80" />
+                    <span className="font-semibold text-foreground/80 shrink-0">
+                      Stages ({historyList.length}):
+                    </span>
+                    <span className="truncate font-mono text-[9.5px] text-muted-foreground">
+                      {historyList.map((h) => h.label).join(" → ")}
+                    </span>
+                  </div>
+                  <ChevronDown
+                    className={cn(
+                      "size-3 shrink-0 opacity-60 transition-transform",
+                      isExpanded && "rotate-180"
+                    )}
+                  />
+                </button>
+
+                {isExpanded && (
+                  <div className="rounded-lg border border-border/60 bg-muted/30 p-2 space-y-1 text-[10px] animate-in fade-in duration-100">
+                    {historyList.map((entry, idx) => (
+                      <div
+                        key={`${task.id}-hist-${idx}`}
+                        className="flex items-center justify-between gap-2"
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className={cn(
+                              "size-1.5 rounded-full shrink-0",
+                              idx === historyList.length - 1
+                                ? "bg-primary"
+                                : "bg-muted-foreground/50"
+                            )}
+                          />
+                          <span
+                            className={cn(
+                              "truncate",
+                              idx === historyList.length - 1
+                                ? "font-semibold text-foreground"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            {entry.label}
+                          </span>
+                        </div>
+                        <span className="font-mono text-[9px] text-muted-foreground shrink-0">
+                          {new Date(entry.timestamp).toLocaleTimeString([], {
+                            month: "short",
+                            day: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* Interactive Notion Status Pill & Member Quick Advance */}
           <div className="flex items-center justify-between gap-1.5 pt-1.5 border-t border-border/30" onClick={(e) => e.stopPropagation()}>
             <div className="relative inline-flex items-center">
@@ -602,12 +699,9 @@ export function TaskBoard() {
     );
   };
 
-  // Distinct active members who have tasks or active team roles
+  // All active team members synced from AdFlow
   const activeMembers = users.filter(
-    (u) =>
-      u.active !== false &&
-      !u.deletedAt &&
-      (filteredTasks.some((t) => t.assigneeId === u.id) || u.role === "editor" || u.role === "content_creator")
+    (u) => u.active !== false && !u.deletedAt
   );
 
   return (
@@ -774,14 +868,30 @@ export function TaskBoard() {
                       </span>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => openCreateModal(undefined, column.id)}
-                    className="text-muted-foreground/60 hover:text-foreground transition p-1 rounded-md hover:bg-muted/50 cursor-pointer"
-                    title={`Add task to ${column.label}`}
-                  >
-                    <Plus className="size-3.5" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    {column.id === "completed" &&
+                      columnTasks.length > 0 &&
+                      !filter.showArchived && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await archiveCompletedTasks();
+                          }}
+                          className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/25 px-2 py-0.5 rounded-md transition cursor-pointer"
+                          title="Move all Done tasks out of active Overview into Done History / Archive"
+                        >
+                          Clear Done
+                        </button>
+                      )}
+                    <button
+                      type="button"
+                      onClick={() => openCreateModal(undefined, column.id)}
+                      className="text-muted-foreground/60 hover:text-foreground transition p-1 rounded-md hover:bg-muted/50 cursor-pointer"
+                      title={`Add task to ${column.label}`}
+                    >
+                      <Plus className="size-3.5" />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Column Cards */}

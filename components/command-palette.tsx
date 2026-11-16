@@ -156,16 +156,6 @@ export function CommandPalette() {
       },
     },
     {
-      id: "view-timeline",
-      title: "Switch to Timeline (Gantt) View",
-      category: "Navigation",
-      icon: Layers,
-      run: () => {
-        setViewMode("timeline");
-        setIsCommandPaletteOpen(false);
-      },
-    },
-    {
       id: "filter-my-tasks",
       title: "Filter: My Tasks Only",
       category: "Filter",
@@ -237,8 +227,14 @@ export function CommandPalette() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-24 p-4 bg-foreground/30 backdrop-blur-sm animate-in fade-in duration-100">
-      <div className="w-full max-w-xl rounded-2xl border border-border bg-card shadow-float overflow-hidden flex flex-col">
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center pt-24 p-4 bg-foreground/30 backdrop-blur-sm animate-in fade-in duration-100"
+      onClick={() => setIsCommandPaletteOpen(false)}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-xl rounded-2xl border border-border bg-card shadow-float overflow-hidden flex flex-col"
+      >
         {/* Search Input Bar */}
         <div className="flex items-center px-4 border-b border-border">
           <Search className="size-4 text-muted-foreground shrink-0 mr-2.5" />

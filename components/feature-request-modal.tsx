@@ -241,20 +241,33 @@ export function FeatureRequestModal({
   const openCount = requests.filter((r) => r.status === "open").length;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/25 backdrop-blur-xs p-4">
-      <div className="w-full max-w-lg rounded-xl border border-border bg-card text-card-foreground shadow-float overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/30 backdrop-blur-sm p-4 sm:p-6 animate-in fade-in duration-150"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-xl rounded-2xl border border-border bg-card text-card-foreground shadow-float overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+      >
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-          <div className="flex items-center gap-2">
-            <Sparkles className="size-4 text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">
-              Developer Feedback & Feature Requests
-            </h2>
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex size-8 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
+              <Sparkles className="size-4" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-foreground">
+                Developer Feedback & Feature Requests
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Delivered to Developer Inbox & emailed from support@satmi.in
+              </p>
+            </div>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground transition cursor-pointer"
+            className="size-8 rounded-xl border border-border text-muted-foreground hover:bg-muted hover:text-foreground flex items-center justify-center transition cursor-pointer"
           >
             <X className="size-4" />
           </button>

@@ -11,6 +11,7 @@ import {
   AuditLogEntry,
   DeliverableAsset,
   TaskTimeTracking,
+  StageHistoryEntry,
 } from "@/lib/types";
 import { getAllCommentsMap } from "@/lib/comments-store";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
@@ -53,6 +54,29 @@ function getDailyCapacity(role: string): number {
   }
 }
 
+function formatStageLabel(
+  status: TaskStatus,
+  subColumnId?: string,
+  productionStage?: string
+): string {
+  const baseMap: Record<TaskStatus, string> = {
+    backlog: "Backlog",
+    todo: "To Do",
+    in_progress: "In Progress",
+    in_review: "In Review",
+    completed: "Done",
+  };
+  const base = baseMap[status] || status;
+  if (productionStage) {
+    return `${base} (${productionStage.replace(/_/g, " ")})`;
+  }
+  if (subColumnId) {
+    const cleanSub = subColumnId.replace(/^(dev|cc|ed|mb|mgr|adm|sub)-/, "").replace(/-/g, " ");
+    return `${base} · ${cleanSub}`;
+  }
+  return base;
+}
+
 interface ParsedNotes {
   description: string;
   priority?: TaskPriority;
@@ -77,6 +101,8 @@ interface ParsedNotes {
   subColumnId?: string;
   parentColumnId?: TaskStatus;
   templateRole?: Role;
+  stageHistory?: StageHistoryEntry[];
+  completedAt?: string;
 }
 
 function parseNotes(raw: string | null): ParsedNotes {
@@ -108,6 +134,8 @@ function parseNotes(raw: string | null): ParsedNotes {
         subColumnId: parsed.subColumnId,
         parentColumnId: parsed.parentColumnId,
         templateRole: parsed.templateRole,
+        stageHistory: Array.isArray(parsed.stageHistory) ? parsed.stageHistory : undefined,
+        completedAt: parsed.completedAt,
       };
     }
   } catch {}
@@ -137,7 +165,9 @@ function stringifyNotes(meta: ParsedNotes): string {
     meta.archivedBy ||
     meta.subColumnId ||
     meta.parentColumnId ||
-    meta.templateRole;
+    meta.templateRole ||
+    (meta.stageHistory && meta.stageHistory.length > 0) ||
+    meta.completedAt;
 
   if (!hasExtra) {
     return meta.description || "";
@@ -168,6 +198,8 @@ function stringifyNotes(meta: ParsedNotes): string {
     subColumnId: meta.subColumnId,
     parentColumnId: meta.parentColumnId,
     templateRole: meta.templateRole,
+    stageHistory: meta.stageHistory,
+    completedAt: meta.completedAt,
   });
 }
 
@@ -382,6 +414,17 @@ export async function GET(req: Request) {
       }
 
       const taskComments = allComments[row.id] || [];
+      const fallbackStageHistory: StageHistoryEntry[] = [
+        {
+          stage: status,
+          label: formatStageLabel(status, parsedNotes.subColumnId),
+          timestamp: row.created_at || new Date().toISOString(),
+        },
+      ];
+      const stageHistory =
+        parsedNotes.stageHistory && parsedNotes.stageHistory.length > 0
+          ? parsedNotes.stageHistory
+          : fallbackStageHistory;
 
       return {
         id: row.id,
@@ -424,6 +467,10 @@ export async function GET(req: Request) {
         subColumnId: parsedNotes.subColumnId,
         parentColumnId: parsedNotes.parentColumnId || status,
         templateRole: parsedNotes.templateRole,
+        stageHistory,
+        completedAt:
+          parsedNotes.completedAt ||
+          (status === "completed" ? row.updated_at || row.created_at : undefined),
       };
     });
 
@@ -602,6 +649,23 @@ export async function GET(req: Request) {
           override.subColumnId !== undefined ? override.subColumnId : defaultSubColumnId,
         parentColumnId: override.parentColumnId || status,
         templateRole: override.templateRole || defaultTemplateRole,
+        stageHistory:
+          Array.isArray(override.stageHistory) && override.stageHistory.length > 0
+            ? override.stageHistory
+            : [
+                {
+                  stage: status,
+                  label: formatStageLabel(
+                    status,
+                    override.subColumnId !== undefined ? override.subColumnId : defaultSubColumnId,
+                    override.productionStage || ad.production_stage
+                  ),
+                  timestamp: ad.created_at || new Date().toISOString(),
+                },
+              ],
+        completedAt:
+          override.completedAt ||
+          (status === "completed" ? override.updatedAt || ad.updated_at : undefined),
       };
     });
 
@@ -662,82 +726,114 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Assignee is required" }, { status: 400 });
     }
 
-    const notesMeta: ParsedNotes = {
-      description: body.description || "",
-      priority: body.priority || "medium",
-      project: body.project,
-      tags: Array.isArray(body.tags) ? body.tags : undefined,
-      deliverableUrl: body.deliverableUrl,
-      deliverableAsset: body.deliverableAsset,
-      blockedByTaskIds: body.blockedByTaskIds,
-      statusOverride: body.status || "todo",
-      customSubtasks: body.customSubtasks,
-      startDate: body.startDate,
-      dueTime: body.dueTime,
-      estimatedHours: body.estimatedHours,
-      subColumnId: body.subColumnId,
-      parentColumnId: body.parentColumnId || body.status,
-      templateRole: body.templateRole,
+    const actorName = await getActorName(assignedBy);
+    const nowIso = new Date().toISOString();
+    const initialStatus: TaskStatus = body.status || "todo";
+    const initialStageEntry: StageHistoryEntry = {
+      stage: initialStatus,
+      label: formatStageLabel(initialStatus, body.subColumnId),
+      timestamp: nowIso,
+      actorName,
     };
 
-    const initialCompleted = body.status === "completed" ? targetQuantity : 0;
+    // If targetQuantity > 1 (e.g. 4 units), split into N individual 1-unit tasks for the user!
+    const splitUnitsCount = targetQuantity > 1 ? targetQuantity : 1;
+    const createdRows: any[] = [];
 
-    // Insert into daily_team_targets (local DB via resilientSupabaseFetch)
-    const { data: newRow, error } = await supabaseAdmin
-      .from("daily_team_targets")
-      .insert({
-        user_id: userId,
-        target_date: targetDate,
-        task_name: taskName,
-        target_quantity: targetQuantity,
-        completed_quantity: initialCompleted,
-        manual_completed_quantity: initialCompleted,
-        auto_completed_quantity: 0,
-        notes: stringifyNotes(notesMeta),
-        assigned_by: assignedBy,
-      })
-      .select()
-      .single();
+    for (let i = 1; i <= splitUnitsCount; i++) {
+      const unitTaskName =
+        splitUnitsCount > 1 ? `${taskName} (${i}/${splitUnitsCount})` : taskName;
 
-    if (error) {
-      console.error("Insert target error:", error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      const notesMeta: ParsedNotes = {
+        description: body.description || "",
+        priority: body.priority || "medium",
+        project: body.project,
+        tags: Array.isArray(body.tags) ? body.tags : undefined,
+        deliverableUrl: body.deliverableUrl,
+        deliverableAsset: body.deliverableAsset,
+        blockedByTaskIds: body.blockedByTaskIds,
+        statusOverride: initialStatus,
+        customSubtasks: body.customSubtasks,
+        startDate: body.startDate,
+        dueTime: body.dueTime,
+        estimatedHours: body.estimatedHours,
+        subColumnId: body.subColumnId,
+        parentColumnId: body.parentColumnId || initialStatus,
+        templateRole: body.templateRole,
+        stageHistory: [initialStageEntry],
+        completedAt: initialStatus === "completed" ? nowIso : undefined,
+      };
+
+      const initialCompleted = initialStatus === "completed" ? 1 : 0;
+
+      const { data: newRow, error } = await supabaseAdmin
+        .from("daily_team_targets")
+        .insert({
+          user_id: userId,
+          target_date: targetDate,
+          task_name: unitTaskName,
+          target_quantity: 1,
+          completed_quantity: initialCompleted,
+          manual_completed_quantity: initialCompleted,
+          auto_completed_quantity: 0,
+          notes: stringifyNotes(notesMeta),
+          assigned_by: assignedBy,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Insert target error:", error);
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      createdRows.push(newRow);
+
+      // Insert audit log per task
+      await supabaseAdmin.from("audit_logs").insert({
+        actor_id: assignedBy,
+        action: "created_task",
+        target_type: "daily_team_target",
+        target_id: newRow.id,
+        metadata: {
+          taskName: unitTaskName,
+          targetQuantity: 1,
+          targetDate,
+          assigneeId: userId,
+          priority: body.priority || "medium",
+        },
+      });
     }
 
-    const actorName = await getActorName(assignedBy);
+    const firstRow = createdRows[0];
 
     // Deliver notification to targeted assignee
     await sendTargetedNotification(
       userId,
-      `New Task Assigned: ${taskName}`,
-      `${actorName} assigned "${taskName}" (${targetQuantity} units) due on ${targetDate}.`
+      splitUnitsCount > 1
+        ? `${splitUnitsCount} Tasks Assigned: ${taskName}`
+        : `New Task Assigned: ${taskName}`,
+      splitUnitsCount > 1
+        ? `${actorName} assigned "${taskName}" (${splitUnitsCount} units split into ${splitUnitsCount} individual tasks) due on ${targetDate}.`
+        : `${actorName} assigned "${taskName}" due on ${targetDate}.`
     );
 
-    // Insert audit log
-    await supabaseAdmin.from("audit_logs").insert({
-      actor_id: assignedBy,
-      action: "created_task",
-      target_type: "daily_team_target",
-      target_id: newRow.id,
-      metadata: {
-        taskName,
-        targetQuantity,
-        targetDate,
-        assigneeId: userId,
-        priority: body.priority || "medium",
-      },
-    });
-
     dispatchWebhookEvent("task.created", {
-      taskId: newRow.id,
+      taskId: firstRow.id,
       taskName,
       targetQuantity,
+      splitCount: splitUnitsCount,
       targetDate,
       assigneeId: userId,
       createdBy: actorName,
     }).catch(() => {});
 
-    return NextResponse.json({ ok: true, target: newRow });
+    return NextResponse.json({
+      ok: true,
+      target: firstRow,
+      targets: createdRows,
+      splitCount: splitUnitsCount,
+    });
   } catch (error: any) {
     console.error("POST /api/tasks error:", error);
     return NextResponse.json({ error: error.message || "Failed to create task" }, { status: 500 });
@@ -837,6 +933,10 @@ export async function PATCH(req: Request) {
       const effectiveTargetQty = currentOverride.targetQuantity || 1;
       const prevAdCompletedQty = Number(currentOverride.completedQuantity || 0);
 
+      const prevAdStatus: TaskStatus = currentOverride.status || "todo";
+      const prevAdSubCol = currentOverride.subColumnId;
+      const prevAdProdStage = currentOverride.productionStage || existingAd?.production_stage;
+
       if (productionStage !== undefined) {
         currentOverride.productionStage = productionStage;
         const stg = String(productionStage).toLowerCase();
@@ -914,6 +1014,40 @@ export async function PATCH(req: Request) {
         }
       }
 
+      const nextAdStatus: TaskStatus = currentOverride.status || prevAdStatus;
+      if (nextAdStatus === "completed") {
+        currentOverride.completedAt = currentOverride.completedAt || new Date().toISOString();
+      } else {
+        currentOverride.completedAt = undefined;
+      }
+
+      if (
+        nextAdStatus !== prevAdStatus ||
+        (subColumnId !== undefined && subColumnId !== prevAdSubCol) ||
+        (productionStage !== undefined && productionStage !== prevAdProdStage)
+      ) {
+        const existingHist: StageHistoryEntry[] = Array.isArray(currentOverride.stageHistory)
+          ? [...currentOverride.stageHistory]
+          : [
+              {
+                stage: prevAdStatus,
+                label: formatStageLabel(prevAdStatus, prevAdSubCol, prevAdProdStage),
+                timestamp: existingAd?.created_at || new Date().toISOString(),
+              },
+            ];
+        existingHist.push({
+          stage: nextAdStatus,
+          label: formatStageLabel(
+            nextAdStatus,
+            currentOverride.subColumnId,
+            currentOverride.productionStage
+          ),
+          timestamp: new Date().toISOString(),
+          actorName,
+        });
+        currentOverride.stageHistory = existingHist;
+      }
+
       currentOverride.updatedAt = new Date().toISOString();
       db.ad_overrides[realAdId] = currentOverride;
       saveLocalDb(db);
@@ -959,6 +1093,14 @@ export async function PATCH(req: Request) {
     }
 
     const currentNotesMeta = parseNotes(existing.notes);
+    const prevTargetStatus: TaskStatus =
+      currentNotesMeta.statusOverride ||
+      (Number(existing.completed_quantity) >= Number(existing.target_quantity || 1)
+        ? "completed"
+        : Number(existing.completed_quantity) > 0
+        ? "in_progress"
+        : "todo");
+    const prevTargetSubCol = currentNotesMeta.subColumnId;
     if (description !== undefined) currentNotesMeta.description = description;
     if (priority !== undefined) currentNotesMeta.priority = priority;
     if (project !== undefined) currentNotesMeta.project = project;
@@ -1116,6 +1258,37 @@ export async function PATCH(req: Request) {
           }
         }
       }
+    }
+
+    const nextTargetStatus: TaskStatus = currentNotesMeta.statusOverride || prevTargetStatus;
+    if (nextTargetStatus === "completed") {
+      currentNotesMeta.completedAt = currentNotesMeta.completedAt || new Date().toISOString();
+    } else {
+      currentNotesMeta.completedAt = undefined;
+    }
+
+    if (
+      nextTargetStatus !== prevTargetStatus ||
+      (subColumnId !== undefined && subColumnId !== prevTargetSubCol)
+    ) {
+      const existingHist: StageHistoryEntry[] =
+        Array.isArray(currentNotesMeta.stageHistory) &&
+        currentNotesMeta.stageHistory.length > 0
+          ? [...currentNotesMeta.stageHistory]
+          : [
+              {
+                stage: prevTargetStatus,
+                label: formatStageLabel(prevTargetStatus, prevTargetSubCol),
+                timestamp: existing.created_at || new Date().toISOString(),
+              },
+            ];
+      existingHist.push({
+        stage: nextTargetStatus,
+        label: formatStageLabel(nextTargetStatus, currentNotesMeta.subColumnId),
+        timestamp: new Date().toISOString(),
+        actorName,
+      });
+      currentNotesMeta.stageHistory = existingHist;
     }
 
     updates.notes = stringifyNotes(currentNotesMeta);

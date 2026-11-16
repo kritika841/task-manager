@@ -2,10 +2,10 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 const supabaseUrl =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  "https://qexjnswuvbyjenfrbwvj.supabase.co";
+  "https://ads.satmi.in";
 const supabaseAnonKey =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFleGpuc3d1dmJ5amVuZnJid3ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM1ODUyOTEsImV4cCI6MjA5OTE2MTI5MX0.XX3-wmCGYy1W2dEEOg62T3XcHoztuprllQKO7N8CmV4";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkZmxvdy12cHMiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTc4MzU4NTI5MSwiZXhwIjoyMDk5MTYxMjkxfQ.PNmYQFpq0Yu7QwCq08JAivVQ9WCS3rWzT09CwPs8xZg";
 
 // Browser client for realtime subscriptions
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);

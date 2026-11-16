@@ -127,11 +127,16 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Server-side role check: only admins can provision users
+    // Server-side role check: admins and developers have full member provisioning permissions
     const auth = await resolveRequestActor(req, body.actorId);
-    if (auth.authenticated && auth.actor && auth.actor.role !== "admin") {
+    if (
+      auth.authenticated &&
+      auth.actor &&
+      auth.actor.role !== "admin" &&
+      auth.actor.role !== "developer"
+    ) {
       return NextResponse.json(
-        { error: "Forbidden: Only workspace Admins can provision team members." },
+        { error: "Forbidden: Only workspace Admins or Developers can provision team members." },
         { status: 403 }
       );
     }
@@ -286,10 +291,11 @@ export async function PATCH(req: Request) {
       auth.authenticated &&
       auth.actor &&
       auth.actor.role !== "admin" &&
+      auth.actor.role !== "developer" &&
       auth.actor.id !== id
     ) {
       return NextResponse.json(
-        { error: "Forbidden: Only Admins can modify other team members." },
+        { error: "Forbidden: Only Admins or Developers can modify other team members." },
         { status: 403 }
       );
     }
@@ -384,9 +390,14 @@ export async function DELETE(req: Request) {
     }
 
     const auth = await resolveRequestActor(req, actorId);
-    if (auth.authenticated && auth.actor && auth.actor.role !== "admin") {
+    if (
+      auth.authenticated &&
+      auth.actor &&
+      auth.actor.role !== "admin" &&
+      auth.actor.role !== "developer"
+    ) {
       return NextResponse.json(
-        { error: "Forbidden: Only Admins can deactivate team members." },
+        { error: "Forbidden: Only Admins or Developers can deactivate team members." },
         { status: 403 }
       );
     }

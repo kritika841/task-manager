@@ -23,6 +23,8 @@ import {
   VolumeX,
   Sparkles,
   LayoutDashboard,
+  CheckCircle2,
+  MessageSquarePlus,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
 import { isSoundMuted, toggleSoundMuted } from "@/lib/sound";
@@ -129,6 +131,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     filter.status === "in_review"
       ? filteredTasks.length
       : baseVisibleTasks.filter((t) => t.status === "in_review").length;
+  const completedCount = tasks.filter(
+    (t) => !t.isArchived && t.status === "completed"
+  ).length;
   const archivedCount = tasks.filter((t) => t.isArchived).length;
 
   return (
@@ -179,25 +184,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
         </div>
 
-        {/* Sidebar Navigation: Overview, Workspace Tools, Filters */}
+        {/* Sidebar Navigation: Overview (with nested Filters submenu), Workspace Tools, Feedback */}
         <div className="flex-1 overflow-y-auto px-3 py-3.5 space-y-5">
-          {/* 1. Overview */}
+          {/* 1. Overview & Indented Overview Filters Submenu */}
           <div>
             <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Overview
             </div>
-            <nav className="space-y-0.5">
+            <nav className="space-y-1">
               <button
                 type="button"
                 onClick={() => {
                   setActiveSection("overview");
+                  setFilter({
+                    onlyMyTasks: false,
+                    status: "all",
+                    showArchived: false,
+                    showCompletedHistory: false,
+                  });
                   setMobileMenuOpen(false);
                 }}
                 className={cn(
                   "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  activeSection === "overview"
+                  activeSection === "overview" &&
+                    !filter.onlyMyTasks &&
+                    filter.status === "all" &&
+                    !filter.showArchived &&
+                    !filter.showCompletedHistory
                     ? "bg-accent text-accent-foreground font-semibold"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                    : activeSection === "overview"
+                      ? "bg-muted/60 text-foreground font-semibold"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 )}
               >
                 <div className="flex items-center gap-2.5">
@@ -208,6 +225,148 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   {filteredTasks.length}
                 </span>
               </button>
+
+              {/* Indented Overview Submenu (Overview Filters) */}
+              <div className="ml-4 pl-2.5 border-l-2 border-border/70 space-y-0.5 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSection("overview");
+                    setFilter({
+                      onlyMyTasks: !filter.onlyMyTasks,
+                      assigneeId: "all",
+                    });
+                    setMobileMenuOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
+                    filter.onlyMyTasks
+                      ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <UserCheck className="size-3.5 shrink-0" />
+                    <span>My Tasks</span>
+                  </div>
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 py-0.2 text-[10px] font-mono font-medium",
+                      filter.onlyMyTasks
+                        ? "bg-primary-foreground/20 text-primary-foreground"
+                        : "bg-muted text-muted-foreground"
+                    )}
+                  >
+                    {myTasksCount}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSection("overview");
+                    setFilter({
+                      status: filter.status === "in_review" ? "all" : "in_review",
+                      showCompletedHistory: false,
+                    });
+                    setMobileMenuOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
+                    filter.status === "in_review"
+                      ? "bg-warning text-warning-foreground font-semibold shadow-xs"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <Clock className="size-3.5 shrink-0 text-warning" />
+                    <span>Needs Review</span>
+                  </div>
+                  {inReviewCount > 0 && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.2 text-[10px] font-mono font-semibold",
+                        filter.status === "in_review"
+                          ? "bg-warning-foreground/20 text-warning-foreground"
+                          : "bg-warning/15 text-warning"
+                      )}
+                    >
+                      {inReviewCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSection("overview");
+                    setFilter({
+                      showCompletedHistory: !filter.showCompletedHistory,
+                      status: "all",
+                      showArchived: false,
+                    });
+                    setMobileMenuOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
+                    filter.showCompletedHistory
+                      ? "bg-emerald-500 text-white font-semibold shadow-xs"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="size-3.5 shrink-0 text-emerald-500" />
+                    <span>Done History</span>
+                  </div>
+                  {completedCount > 0 && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.2 text-[10px] font-mono font-semibold",
+                        filter.showCompletedHistory
+                          ? "bg-white/20 text-white"
+                          : "bg-emerald-500/15 text-emerald-500"
+                      )}
+                    >
+                      {completedCount}
+                    </span>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSection("overview");
+                    setFilter({
+                      showArchived: !filter.showArchived,
+                      showCompletedHistory: false,
+                    });
+                    setMobileMenuOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
+                    filter.showArchived
+                      ? "bg-amber-500 text-white font-semibold shadow-xs"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <div className="flex items-center gap-2">
+                    <Archive className="size-3.5 shrink-0 text-amber-500" />
+                    <span>Archived</span>
+                  </div>
+                  {archivedCount > 0 && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.2 text-[10px] font-mono font-semibold",
+                        filter.showArchived
+                          ? "bg-white/20 text-white"
+                          : "bg-amber-500/15 text-amber-500"
+                      )}
+                    >
+                      {archivedCount}
+                    </span>
+                  )}
+                </button>
+              </div>
             </nav>
           </div>
 
@@ -308,108 +467,43 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
               </button>
             </nav>
-          </div>
 
-          {/* 3. Filters */}
-          <div>
-            <div className="px-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Filters
-            </div>
-            <nav className="space-y-0.5">
+            {/* Feedback to Developer / Request Feature — directly beneath Workspace Tools */}
+            <div className="mt-2 pt-2 border-t border-border/60 space-y-1">
               <button
                 type="button"
                 onClick={() => {
-                  setActiveSection("overview");
-                  setFilter({
-                    onlyMyTasks: !filter.onlyMyTasks,
-                    assigneeId: "all",
-                  });
+                  setFeedbackInitialTab("submit");
+                  setIsFeedbackOpen(true);
                   setMobileMenuOpen(false);
                 }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  filter.onlyMyTasks
-                    ? "bg-primary text-primary-foreground font-semibold shadow-xs"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
+                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer text-muted-foreground hover:bg-primary/10 hover:text-primary group"
               >
                 <div className="flex items-center gap-2.5">
-                  <UserCheck className="size-4 shrink-0" />
-                  <span>My Tasks</span>
+                  <MessageSquarePlus className="size-4 shrink-0 text-primary" />
+                  <span>Feedback / Request Feature</span>
                 </div>
-                <span
-                  className={cn(
-                    "rounded-full px-2 py-0.2 text-[10px] font-mono font-medium",
-                    filter.onlyMyTasks
-                      ? "bg-primary-foreground/20 text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  )}
+                <Sparkles className="size-3 text-primary/70 opacity-70 group-hover:opacity-100" />
+              </button>
+
+              {isAdminOrDeveloper && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFeedbackInitialTab("manage");
+                    setIsFeedbackOpen(true);
+                    setMobileMenuOpen(false);
+                  }}
+                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer text-primary bg-primary/5 hover:bg-primary/15"
+                  title="Open Developer Feedback & Feature Request Inbox"
                 >
-                  {myTasksCount}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSection("overview");
-                  setFilter({
-                    status: filter.status === "in_review" ? "all" : "in_review",
-                  });
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  filter.status === "in_review"
-                    ? "bg-warning text-warning-foreground font-semibold shadow-xs"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Clock className="size-4 shrink-0 text-warning" />
-                  <span>Needs Review</span>
-                </div>
-                {inReviewCount > 0 && (
-                  <span className="rounded-full bg-warning/15 px-2 py-0.2 text-[10px] font-mono font-semibold text-warning">
-                    {inReviewCount}
+                  <span>Developer Feedback Inbox</span>
+                  <span className="rounded bg-primary/15 px-1.5 py-0.2 text-[9px] font-mono uppercase">
+                    Dev
                   </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveSection("overview");
-                  setFilter({
-                    showArchived: !filter.showArchived,
-                  });
-                  setMobileMenuOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
-                  filter.showArchived
-                    ? "bg-amber-500 text-white font-semibold shadow-xs"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                )}
-              >
-                <div className="flex items-center gap-2.5">
-                  <Archive className="size-4 shrink-0 text-amber-500" />
-                  <span>Archived</span>
-                </div>
-                {archivedCount > 0 && (
-                  <span
-                    className={cn(
-                      "rounded-full px-2 py-0.2 text-[10px] font-mono font-semibold",
-                      filter.showArchived
-                        ? "bg-white/20 text-white"
-                        : "bg-amber-500/15 text-amber-500"
-                    )}
-                  >
-                    {archivedCount}
-                  </span>
-                )}
-              </button>
-            </nav>
+                </button>
+              )}
+            </div>
           </div>
         </div>
 

@@ -104,8 +104,14 @@ Color Grading Reel,medium,6,2026-10-16,https://drive.google.com/sample2`;
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-foreground/20 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-card border border-border rounded-2xl max-w-lg w-full shadow-float p-5 space-y-4">
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-foreground/30 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-150"
+      onClick={onClose}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-card border border-border rounded-2xl max-w-xl w-full shadow-float p-6 space-y-4"
+      >
         <div className="flex items-center justify-between border-b border-border/60 pb-3">
           <div className="flex items-center gap-2">
             <Upload className="size-4 text-primary" />

@@ -634,35 +634,26 @@ export const DEFAULT_ROLE_TEMPLATES: RoleTemplate[] = [
 
 let memoryTemplatesCache: RoleTemplate[] | null = null;
 
-function mergeWithDefaultTemplates(loaded: RoleTemplate[]): RoleTemplate[] {
-  const existingIds = new Set(loaded.map((t) => t.id));
-  const missingDefaults = DEFAULT_ROLE_TEMPLATES.filter((d) => !existingIds.has(d.id));
-  return missingDefaults.length > 0 ? [...loaded, ...missingDefaults] : loaded;
-}
-
 export async function getTemplates(): Promise<RoleTemplate[]> {
-  if (memoryTemplatesCache && memoryTemplatesCache.length > 0) {
-    return memoryTemplatesCache;
-  }
   try {
     await mkdir(DATA_DIR, { recursive: true });
     const content = await readFile(TEMPLATES_FILE, "utf-8");
     const parsed = JSON.parse(content);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      const merged = mergeWithDefaultTemplates(parsed);
-      memoryTemplatesCache = merged;
-      if (merged.length !== parsed.length) {
-        await writeFile(TEMPLATES_FILE, JSON.stringify(merged, null, 2), "utf-8").catch(() => {});
-      }
-      return merged;
+    if (Array.isArray(parsed)) {
+      memoryTemplatesCache = parsed;
+      return parsed;
     }
   } catch {}
 
-  // Initialize with rich defaults
-  memoryTemplatesCache = DEFAULT_ROLE_TEMPLATES;
+  if (memoryTemplatesCache !== null) {
+    return memoryTemplatesCache;
+  }
+
+  // Initialize with empty array if file is missing or unreadable
+  memoryTemplatesCache = [];
   try {
     await mkdir(DATA_DIR, { recursive: true });
-    await writeFile(TEMPLATES_FILE, JSON.stringify(DEFAULT_ROLE_TEMPLATES, null, 2), "utf-8");
+    await writeFile(TEMPLATES_FILE, JSON.stringify([], null, 2), "utf-8");
   } catch (err) {
     console.warn("Could not save initial templates file:", err);
   }

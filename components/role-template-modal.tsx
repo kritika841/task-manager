@@ -308,8 +308,14 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
   if (!effectiveIsOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-background/80 backdrop-blur-md animate-in fade-in duration-150">
-      <div className="relative flex flex-col w-full max-w-5xl h-[86vh] max-h-[800px] rounded-2xl border border-border bg-card text-card-foreground shadow-2xl overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-background/80 backdrop-blur-md animate-in fade-in duration-150"
+      onClick={handleCloseModal}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative flex flex-col w-full max-w-5xl h-[86vh] max-h-[800px] rounded-2xl border border-border bg-card text-card-foreground shadow-2xl overflow-hidden"
+      >
         {/* Compact Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-muted/20">
           <div className="flex items-center gap-2.5">

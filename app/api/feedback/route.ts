@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase";
 import { loadLocalDb, saveLocalDb } from "@/lib/local-supabase-fallback";
 import { resolveRequestActor } from "@/lib/auth-server";
 import { Role, TaskPriority } from "@/lib/types";
+import { sendFeedbackEmail } from "@/lib/email";
 
 export interface FeatureRequestRecord {
   id: string;
@@ -122,9 +124,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Ensure profiles are synced from AdFlow before resolving user emails
+    const { data: liveProfiles } = await supabaseAdmin.from("profiles").select("*");
     const caller = await resolveCaller(req, body.authorId || body.userId || body.actorId);
     const db = loadLocalDb();
-    const profiles = Array.isArray(db.profiles) ? db.profiles : [];
+    const profiles =
+      Array.isArray(liveProfiles) && liveProfiles.length > 0
+        ? liveProfiles
+        : Array.isArray(db.profiles)
+          ? db.profiles
+          : [];
     if (!Array.isArray(db.feature_requests)) {
       db.feature_requests = [];
     }
@@ -182,11 +191,26 @@ export async function POST(req: NextRequest) {
 
     saveLocalDb(db);
 
+    // Send email from support@satmi.in to the Developer user email with Kartavya in CC (dynamically resolved from users)
+    const emailRes = await sendFeedbackEmail({
+      type: item.type,
+      title: item.title,
+      details: item.details,
+      priority: item.priority,
+      authorName: item.authorName,
+      authorRole: item.authorRole,
+      profiles,
+    });
+
     return NextResponse.json(
       {
         ok: true,
         request: item,
         feedback: item,
+        emailSent: emailRes.ok,
+        emailFrom: emailRes.from,
+        emailTo: emailRes.to,
+        emailCc: emailRes.cc,
       },
       { status: 201 }
     );

@@ -44,6 +44,7 @@ export function SettingsModal() {
     isAdmin,
     createUser,
     updateUserColor,
+    updateUser,
     deleteUser,
   } = useTasks();
 
@@ -116,8 +117,14 @@ export function SettingsModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-foreground/30 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-2xl rounded-2xl border border-border bg-card shadow-float flex flex-col max-h-[88vh] overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-foreground/30 backdrop-blur-sm animate-in fade-in duration-150"
+      onClick={() => setIsSettingsModalOpen(false)}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-2xl rounded-2xl border border-border bg-card shadow-float flex flex-col max-h-[88vh] overflow-hidden"
+      >
         {/* Modal Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-muted/20 shrink-0">
           <div className="flex items-center gap-2.5">
@@ -238,7 +245,6 @@ export function SettingsModal() {
                     { id: "table", label: "Table", icon: Table2 },
                     { id: "list", label: "Checklist", icon: ListTodo },
                     { id: "calendar", label: "Calendar", icon: Calendar },
-                    { id: "timeline", label: "Timeline", icon: Layers },
                     ...(isAdmin
                       ? [{ id: "analytics", label: "Analytics", icon: BarChart3 }]
                       : []),
@@ -461,12 +467,15 @@ export function SettingsModal() {
                             }
                             className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer"
                           >
+                            <option value="developer">
+                              Developer (Task Delegation & Admin)
+                            </option>
+                            <option value="admin">Admin</option>
+                            <option value="manager">Manager</option>
                             <option value="editor">Editor</option>
                             <option value="content_creator">
                               Content Creator
                             </option>
-                            <option value="manager">Manager</option>
-                            <option value="admin">Admin</option>
                             <option value="media_buyer">Media Buyer</option>
                             <option value="member">Member</option>
                           </select>
@@ -622,9 +631,28 @@ export function SettingsModal() {
                                     >
                                       {empCode}
                                     </span>
-                                    <span className="text-[9px] font-mono uppercase bg-muted px-1.5 py-0.2 rounded text-muted-foreground shrink-0">
-                                      {u.role.replace("_", " ")}
-                                    </span>
+                                    <select
+                                      value={u.role}
+                                      onChange={(e) =>
+                                        updateUser(u.id, {
+                                          role: e.target.value as Role,
+                                        })
+                                      }
+                                      className="text-[10px] font-mono uppercase bg-muted hover:bg-muted/80 border border-border px-1.5 py-0.5 rounded text-foreground shrink-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary"
+                                      title="Change role in Task Manager dashboard"
+                                    >
+                                      <option value="developer">DEVELOPER</option>
+                                      <option value="admin">ADMIN</option>
+                                      <option value="manager">MANAGER</option>
+                                      <option value="editor">EDITOR</option>
+                                      <option value="content_creator">
+                                        CONTENT CREATOR
+                                      </option>
+                                      <option value="media_buyer">
+                                        MEDIA BUYER
+                                      </option>
+                                      <option value="member">MEMBER</option>
+                                    </select>
                                   </div>
                                   <div className="text-[11px] text-muted-foreground truncate">
                                     {u.email}

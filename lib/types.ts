@@ -54,6 +54,13 @@ export interface TaskTimeTracking {
   totalSeconds: number;
 }
 
+export interface StageHistoryEntry {
+  stage: string;
+  label: string;
+  timestamp: string;
+  actorName?: string;
+}
+
 export interface Task {
   id: string; // Target UUID in daily_team_targets
   taskNumber: string; // Friendly reference e.g. "DT-4E3B"
@@ -104,6 +111,9 @@ export interface Task {
   subColumnId?: string;
   parentColumnId?: TaskStatus;
   templateRole?: Role;
+  // Individual Stage History & Completion Timestamp:
+  stageHistory?: StageHistoryEntry[];
+  completedAt?: string;
 }
 
 export interface SubColumnDef {
@@ -161,7 +171,7 @@ export interface DailyTaskRule {
   updatedAt?: string;
 }
 
-export type ViewMode = 'board' | 'table' | 'list' | 'calendar' | 'timeline' | 'analytics';
+export type ViewMode = 'board' | 'table' | 'list' | 'calendar' | 'analytics';
 export type BoardLayout = 'columns' | 'subcolumns' | 'swimlanes';
 export type DensityMode = 'comfortable' | 'compact';
 
@@ -173,7 +183,7 @@ export interface OfflineMutation {
   createdAt: string;
 }
 
-export type DateRangePreset = 'all' | 'today' | 'yesterday' | 'this_week' | 'next_7_days' | 'overdue';
+export type DateRangePreset = 'all' | 'today' | 'yesterday' | 'this_week' | 'next_7_days' | 'overdue' | 'custom';
 export type SavedFilterPreset = 'all' | 'pending_review' | 'overdue_carried' | 'high_urgent' | 'my_active';
 
 export interface FilterState {
@@ -184,8 +194,11 @@ export interface FilterState {
   project: string; // 'all' or specific project
   onlyMyTasks: boolean;
   showArchived?: boolean; // Toggle to view soft-deleted / archived pipeline targets
+  showCompletedHistory?: boolean; // Toggle to view completed tasks moved out of active overview
   showAdflowTasks?: boolean; // Toggle to view AdFlow creative tasks (default: false)
   targetDate?: string;
+  dateFrom?: string;
+  dateTo?: string;
   datePreset?: DateRangePreset;
   savedPreset?: SavedFilterPreset;
 }

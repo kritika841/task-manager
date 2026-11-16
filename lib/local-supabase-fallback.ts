@@ -8,6 +8,8 @@ const LOCAL_DB_FILE = path ? path.join(DATA_DIR, "local-db.json") : "";
 
 export interface LocalDbSchema {
   profiles: Record<string, any>[];
+  profile_overrides?: Record<string, Record<string, any>>;
+  local_profiles?: Record<string, any>[];
   daily_team_targets: Record<string, any>[];
   ads: Record<string, any>[];
   ad_overrides: Record<string, Record<string, any>>;
@@ -32,71 +34,110 @@ function todayIST(): string {
 }
 
 function createInitialSeed(): LocalDbSchema {
-  const now = new Date().toISOString();
-
   return {
     profiles: [
       {
-        id: "011c1a7a-258a-4591-aee1-7bce60eaee01",
+        id: "4a206a68-c5a4-4d12-be76-90468ea3df44",
         name: "Kritika",
         email: "kritika@satmi.in",
         role: "admin",
-        avatar_url: JSON.stringify({
-          employeeCode: "KRI",
-          color: "#2563eb",
-          dailyCapacityUnits: 10,
-        }),
+        avatar_url: null,
         active: true,
         deleted_at: null,
-        created_at: "2026-10-01T00:00:00.000Z",
-        updated_at: now,
+        created_at: "2026-07-15T10:23:43.168482+00:00",
+        updated_at: "2026-07-23T05:25:01.091308+00:00",
+      },
+      {
+        id: "20ec7ea7-6033-4109-bfc6-6a3c1c09df17",
+        name: "Kartavya",
+        email: "kartavya@satmi.in",
+        role: "admin",
+        avatar_url: null,
+        active: true,
+        deleted_at: null,
+        created_at: "2026-07-15T12:30:30.797432+00:00",
+        updated_at: "2026-10-07T10:06:21.64587+00:00",
       },
       {
         id: "360a1a7a-258a-4591-aee1-7bce60eaee4b",
         name: "Himik",
         email: "himik@satmi.in",
-        role: "editor",
-        avatar_url: JSON.stringify({
-          employeeCode: "HIM",
-          color: "#10b981",
-          dailyCapacityUnits: 6,
-        }),
+        role: "content_creator",
+        avatar_url: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ-hnT6iGEfDt9tn9wl66uxAi27H8xHb3IQ3tZQTtgAFA&s",
         active: true,
         deleted_at: null,
-        created_at: "2026-10-01T00:00:00.000Z",
-        updated_at: now,
+        created_at: "2026-07-16T10:02:08.551518+00:00",
+        updated_at: "2026-10-15T05:01:56.276033+00:00",
       },
       {
-        id: "022c1a7a-258a-4591-aee1-7bce60eaee02",
+        id: "3c8db14b-0e23-40e7-8fab-2c9b7664e588",
         name: "Nikhil",
         email: "nikhil@satmi.in",
-        role: "manager",
-        avatar_url: JSON.stringify({
-          employeeCode: "NIK",
-          color: "#8b5cf6",
-          dailyCapacityUnits: 8,
-        }),
+        role: "editor",
+        avatar_url: null,
         active: true,
         deleted_at: null,
-        created_at: "2026-10-01T00:00:00.000Z",
-        updated_at: now,
+        created_at: "2026-07-15T11:02:41.763669+00:00",
+        updated_at: "2026-07-18T06:55:01.144475+00:00",
       },
       {
-        id: "033c1a7a-258a-4591-aee1-7bce60eaee03",
+        id: "2444c7f2-b531-497b-959b-e47d492ea542",
         name: "Priya",
         email: "priya@satmi.in",
         role: "content_creator",
-        avatar_url: JSON.stringify({
-          employeeCode: "PRI",
-          color: "#f59e0b",
-          dailyCapacityUnits: 4,
-        }),
+        avatar_url: null,
         active: true,
         deleted_at: null,
-        created_at: "2026-10-01T00:00:00.000Z",
-        updated_at: now,
+        created_at: "2026-07-21T11:21:47.765453+00:00",
+        updated_at: "2026-07-21T11:21:48.09883+00:00",
+      },
+      {
+        id: "4e3bdd23-8b64-4bcd-a790-ca7b17024e82",
+        name: "Kunal",
+        email: "kunal@satmi.in",
+        role: "editor",
+        avatar_url: null,
+        active: true,
+        deleted_at: null,
+        created_at: "2026-07-16T10:14:23.630349+00:00",
+        updated_at: "2026-07-18T07:56:14.166739+00:00",
+      },
+      {
+        id: "6154c289-84bb-4d0d-8543-70bcaf418b9b",
+        name: "Tamanna",
+        email: "tamanna@satmi.in",
+        role: "content_creator",
+        avatar_url: null,
+        active: true,
+        deleted_at: null,
+        created_at: "2026-07-16T10:17:33.21603+00:00",
+        updated_at: "2026-07-18T07:01:05.291949+00:00",
+      },
+      {
+        id: "1927e832-b695-475d-922a-8ea4040fb50e",
+        name: "Yash",
+        email: "yash@satmi.in",
+        role: "content_creator",
+        avatar_url: null,
+        active: true,
+        deleted_at: null,
+        created_at: "2026-09-22T07:06:54.076006+00:00",
+        updated_at: "2026-09-22T07:06:54.31323+00:00",
+      },
+      {
+        id: "eaf203fc-569b-4735-a7c8-99a3566dc4c3",
+        name: "ishika",
+        email: "ishika@satmi.in",
+        role: "manager",
+        avatar_url: "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR5Mt77nt88UPEkTYmjtTHZhgtYHhF2JVCOQo_KK999T12BRh2vnl37sqe8&s=10",
+        active: true,
+        deleted_at: null,
+        created_at: "2026-07-15T10:57:36.918884+00:00",
+        updated_at: "2026-10-15T05:11:15.632381+00:00",
       },
     ],
+    profile_overrides: {},
+    local_profiles: [],
     daily_team_targets: [],
     ads: [],
     ad_overrides: {},
@@ -129,6 +170,11 @@ export function loadLocalDb(): LocalDbSchema {
     }
     return {
       profiles: parsed.profiles || [],
+      profile_overrides:
+        parsed.profile_overrides && typeof parsed.profile_overrides === "object"
+          ? parsed.profile_overrides
+          : {},
+      local_profiles: Array.isArray(parsed.local_profiles) ? parsed.local_profiles : [],
       daily_team_targets: parsed.daily_team_targets || [],
       ads: parsed.ads || [],
       ad_overrides:
@@ -390,29 +436,34 @@ function handleLocalSupabaseRequest(urlStr: string, init?: RequestInit): Respons
       });
       let createdCount = 0;
       for (const rule of activeRules) {
-        const exists = db.daily_team_targets.some(
-          (t) =>
-            t.user_id === rule.user_id &&
-            t.target_date === startDate &&
-            t.task_name === rule.task_name
-        );
-        if (!exists) {
-          db.daily_team_targets.push({
-            id: crypto.randomUUID(),
-            user_id: rule.user_id,
-            assigned_by: rule.created_by || rule.user_id,
-            target_date: startDate,
-            task_name: rule.task_name,
-            target_quantity: rule.target_quantity || 1,
-            completed_quantity: 0,
-            manual_completed_quantity: 0,
-            auto_completed_quantity: 0,
-            notes: rule.notes || null,
-            carried_from_target_id: null,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-          });
-          createdCount++;
+        const qty = Math.max(1, Number(rule.target_quantity) || 1);
+        for (let i = 1; i <= qty; i++) {
+          const splitTaskName =
+            qty > 1 ? `${rule.task_name} (${i}/${qty})` : rule.task_name;
+          const exists = db.daily_team_targets.some(
+            (t) =>
+              t.user_id === rule.user_id &&
+              t.target_date === startDate &&
+              (t.task_name === splitTaskName || t.task_name === rule.task_name)
+          );
+          if (!exists) {
+            db.daily_team_targets.push({
+              id: crypto.randomUUID(),
+              user_id: rule.user_id,
+              assigned_by: rule.created_by || rule.user_id,
+              target_date: startDate,
+              task_name: splitTaskName,
+              target_quantity: 1,
+              completed_quantity: 0,
+              manual_completed_quantity: 0,
+              auto_completed_quantity: 0,
+              notes: rule.notes || null,
+              carried_from_target_id: null,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            });
+            createdCount++;
+          }
         }
       }
       if (createdCount > 0) saveLocalDb(db);
@@ -507,6 +558,24 @@ function handleLocalSupabaseRequest(urlStr: string, init?: RequestInit): Respons
       }
 
       (db as any)[tableName] = tableRows;
+      if (tableName === "profiles") {
+        if (!db.local_profiles) db.local_profiles = [];
+        if (!db.profile_overrides) db.profile_overrides = {};
+        for (const row of inserted) {
+          db.profile_overrides[row.id] = {
+            ...(db.profile_overrides[row.id] || {}),
+            ...row,
+          };
+          const lIdx = db.local_profiles.findIndex(
+            (lp) => lp.id === row.id || String(lp.email || "").toLowerCase() === String(row.email || "").toLowerCase()
+          );
+          if (lIdx !== -1) {
+            db.local_profiles[lIdx] = row;
+          } else {
+            db.local_profiles.push(row);
+          }
+        }
+      }
       saveLocalDb(db);
 
       const responsePayload = isSingleObject ? inserted[0] ?? null : inserted;
@@ -530,6 +599,14 @@ function handleLocalSupabaseRequest(urlStr: string, init?: RequestInit): Respons
             updated_at: bodyObj?.updated_at || now,
           };
           updatedRows.push(tableRows[i]);
+          if (tableName === "profiles") {
+            if (!db.profile_overrides) db.profile_overrides = {};
+            db.profile_overrides[tableRows[i].id] = {
+              ...(db.profile_overrides[tableRows[i].id] || {}),
+              ...(bodyObj || {}),
+              updated_at: bodyObj?.updated_at || now,
+            };
+          }
         }
       }
 
@@ -583,6 +660,70 @@ function handleLocalSupabaseRequest(urlStr: string, init?: RequestInit): Respons
 
 // Cache network reachability for 60s when DNS/network fails so fallback is instantaneous (<1ms)
 let supabaseOfflineUntil = 0;
+let lastProfilesSyncAt = 0;
+
+async function syncUpstreamAdFlowProfiles(url: URL, init?: RequestInit) {
+  if (Date.now() < supabaseOfflineUntil) return;
+  if (Date.now() - lastProfilesSyncAt < 8_000) return;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2500);
+  try {
+    const upstreamProfilesUrl = `${url.origin}/rest/v1/profiles?select=*`;
+    const res = await fetch(upstreamProfilesUrl, {
+      ...init,
+      method: "GET",
+      headers: {
+        ...(init?.headers || {}),
+        accept: "application/json",
+      },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) return;
+
+    const upstreamRows = await res.json();
+    if (!Array.isArray(upstreamRows) || upstreamRows.length === 0) return;
+
+    const db = loadLocalDb();
+    const overrides = db.profile_overrides || {};
+    const localCreated = Array.isArray(db.local_profiles) ? db.local_profiles : [];
+
+    // Merge upstream AdFlow profiles with any local dashboard overrides (e.g. developer role assignment)
+    const merged: Record<string, any>[] = upstreamRows.map((upRow: Record<string, any>) => {
+      const ov = overrides[upRow.id];
+      if (!ov) return upRow;
+      return {
+        ...upRow,
+        ...(ov.role ? { role: ov.role } : {}),
+        ...(ov.name ? { name: ov.name } : {}),
+        ...(ov.avatar_url !== undefined ? { avatar_url: ov.avatar_url } : {}),
+        ...(ov.active !== undefined ? { active: ov.active } : {}),
+        ...(ov.deleted_at !== undefined ? { deleted_at: ov.deleted_at } : {}),
+      };
+    });
+
+    // Append any locally created dashboard profiles (e.g. a new Developer account added in Task Manager)
+    const existingIds = new Set(merged.map((m) => m.id));
+    const existingEmails = new Set(
+      merged.map((m) => String(m.email || "").toLowerCase())
+    );
+    for (const lp of localCreated) {
+      const lpEmail = String(lp.email || "").toLowerCase();
+      if (!existingIds.has(lp.id) && !existingEmails.has(lpEmail)) {
+        const ov = overrides[lp.id] || {};
+        merged.push({ ...lp, ...ov });
+      }
+    }
+
+    db.profiles = merged;
+    saveLocalDb(db);
+    lastProfilesSyncAt = Date.now();
+  } catch {
+    clearTimeout(timeout);
+    supabaseOfflineUntil = Date.now() + 30_000;
+  }
+}
 
 export async function resilientSupabaseFetch(
   input: RequestInfo | URL,
@@ -591,13 +732,33 @@ export async function resilientSupabaseFetch(
   const urlStr =
     typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
   const method = (init?.method || "GET").toUpperCase();
+  const url = new URL(urlStr);
 
-  // CRITICAL RULE: NEVER send write/mutation/RPC/auth-admin requests to upstream Adflow Supabase!
+  // Allow read-only sign-in token verification against AdFlow Auth (/auth/v1/token),
+  // falling back to local auth if user has local credentials or upstream is unreachable.
+  if (url.pathname.endsWith("/auth/v1/token") && method === "POST") {
+    if (Date.now() >= supabaseOfflineUntil) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2500);
+      try {
+        const res = await fetch(input, {
+          ...init,
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (res.ok) {
+          return res;
+        }
+      } catch {
+        clearTimeout(timeout);
+      }
+    }
+    return handleLocalSupabaseRequest(urlStr, init);
+  }
+
+  // CRITICAL RULE: NEVER send write/mutation/RPC/auth-admin requests to upstream AdFlow Supabase!
   // All mutations and local Task Manager state operate strictly against the local persistent store.
-  if (
-    method !== "GET" &&
-    method !== "HEAD"
-  ) {
+  if (method !== "GET" && method !== "HEAD") {
     return handleLocalSupabaseRequest(urlStr, init);
   }
 
@@ -605,10 +766,15 @@ export async function resilientSupabaseFetch(
     return handleLocalSupabaseRequest(urlStr, init);
   }
 
-  // Only attempt read-only GET sync of `ads` from upstream if online; all local state tables
-  // (`daily_team_targets`, `profiles`, `notifications`, `audit_logs`, `daily_task_rules`, etc.)
+  // Sync live users from AdFlow (`profiles`) while preserving local dashboard role overrides (e.g. `developer`)
+  if (url.pathname === "/rest/v1/profiles") {
+    await syncUpstreamAdFlowProfiles(url, init);
+    return handleLocalSupabaseRequest(urlStr, init);
+  }
+
+  // Only attempt read-only GET sync of `ads` from upstream if online; all other local state tables
+  // (`daily_team_targets`, `notifications`, `audit_logs`, `daily_task_rules`, etc.)
   // are served with 0ms read-after-write consistency from the local DB.
-  const url = new URL(urlStr);
   const isAdsRead = url.pathname === "/rest/v1/ads";
   if (!isAdsRead) {
     return handleLocalSupabaseRequest(urlStr, init);
@@ -619,7 +785,7 @@ export async function resilientSupabaseFetch(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1500);
+  const timeout = setTimeout(() => controller.abort(), 2000);
 
   try {
     const res = await fetch(input, {

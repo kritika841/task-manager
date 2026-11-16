@@ -7,7 +7,6 @@ import {
   ListTodo,
   BarChart3,
   Calendar as CalendarIcon,
-  Layers,
   Search,
   RotateCcw,
   Download,
@@ -17,6 +16,8 @@ import {
   Filter,
   MoreHorizontal,
   Archive,
+  CheckCircle2,
+  X,
 } from "lucide-react";
 import { TaskProvider, useTasks } from "@/lib/store";
 import { AppShell } from "@/components/app-shell";
@@ -24,7 +25,6 @@ import { TaskBoard } from "@/components/task-board";
 import { TaskTable } from "@/components/task-table";
 import { TaskList } from "@/components/task-list";
 import { TaskCalendar } from "@/components/task-calendar";
-import { TaskTimeline } from "@/components/task-timeline";
 import { TaskAnalytics } from "@/components/task-analytics";
 import { TaskDrawer } from "@/components/task-drawer";
 import { TaskCreateModal } from "@/components/task-create-modal";
@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 function TaskDashboardContent() {
   const {
     users,
+    tasks,
     filteredTasks,
     isAdmin,
     activeSection,
@@ -52,13 +53,16 @@ function TaskDashboardContent() {
     setFilter,
     resetFilter,
     exportTasksToCSV,
+    archiveCompletedTasks,
   } = useTasks();
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
+  const [isDateRangePopoverOpen, setIsDateRangePopoverOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
 
   const filterPopoverRef = useRef<HTMLDivElement>(null);
+  const dateRangePopoverRef = useRef<HTMLDivElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
 
   // Close menus on click outside
@@ -69,6 +73,12 @@ function TaskDashboardContent() {
         !filterPopoverRef.current.contains(event.target as Node)
       ) {
         setIsFilterPopoverOpen(false);
+      }
+      if (
+        dateRangePopoverRef.current &&
+        !dateRangePopoverRef.current.contains(event.target as Node)
+      ) {
+        setIsDateRangePopoverOpen(false);
       }
       if (
         moreMenuRef.current &&
@@ -83,16 +93,49 @@ function TaskDashboardContent() {
     };
   }, []);
 
+  const hasCustomDateRange = Boolean(filter.dateFrom || filter.dateTo);
+  const hasDateFilter =
+    hasCustomDateRange || Boolean(filter.datePreset && filter.datePreset !== "all");
+
   // Count active granular filters
   const activeFiltersCount = [
     filter.assigneeId !== "all",
     filter.status !== "all",
     filter.priority !== "all",
     filter.project !== "all",
-    filter.datePreset && filter.datePreset !== "all",
+    hasDateFilter,
     filter.onlyMyTasks,
     filter.showArchived,
+    filter.showCompletedHistory,
   ].filter(Boolean).length;
+
+  const activeDoneTasksCount = tasks.filter(
+    (t) => !t.isArchived && t.status === "completed"
+  ).length;
+
+  const dateFilterLabel = () => {
+    if (filter.dateFrom && filter.dateTo) {
+      return filter.dateFrom === filter.dateTo
+        ? `Due: ${filter.dateFrom}`
+        : `${filter.dateFrom} → ${filter.dateTo}`;
+    }
+    if (filter.dateFrom) return `From ${filter.dateFrom}`;
+    if (filter.dateTo) return `Until ${filter.dateTo}`;
+    switch (filter.datePreset) {
+      case "today":
+        return "Due Today";
+      case "yesterday":
+        return "Due Yesterday";
+      case "this_week":
+        return "This Week";
+      case "next_7_days":
+        return "Next 7 Days";
+      case "overdue":
+        return "Overdue";
+      default:
+        return "Date Range";
+    }
+  };
 
   return (
     <div className="space-y-3">
@@ -162,20 +205,6 @@ function TaskDashboardContent() {
                 <span>Calendar</span>
               </button>
 
-              <button
-                type="button"
-                onClick={() => setViewMode("timeline")}
-                className={cn(
-                  "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
-                  viewMode === "timeline"
-                    ? "bg-muted text-foreground font-semibold"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-                )}
-              >
-                <Layers className="size-3.5" />
-                <span>Timeline</span>
-              </button>
-
               {isAdmin && (
                 <button
                   type="button"
@@ -197,8 +226,8 @@ function TaskDashboardContent() {
               </span>
             </div>
 
-            {/* Right: Search, Filter & Overflow Actions */}
-            <div className="flex items-center gap-1.5 shrink-0">
+            {/* Right: Search, Due Date Range Picker, Filter & Overflow Actions */}
+            <div className="flex items-center gap-1.5 flex-wrap sm:flex-nowrap shrink-0">
               {/* Quick Search */}
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
@@ -217,6 +246,184 @@ function TaskDashboardContent() {
                   >
                     ✕
                   </button>
+                )}
+              </div>
+
+              {/* Dedicated Due Date & Custom Date Range Picker */}
+              <div className="relative" ref={dateRangePopoverRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsDateRangePopoverOpen((prev) => !prev)}
+                  className={cn(
+                    "flex items-center gap-1.5 h-7 px-2.5 rounded-lg text-xs font-medium transition cursor-pointer",
+                    hasDateFilter
+                      ? "bg-primary/15 text-primary border border-primary/30 font-semibold"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted border border-border/70"
+                  )}
+                  title="Filter by due date or custom date range"
+                >
+                  <CalendarIcon className="size-3" />
+                  <span>{dateFilterLabel()}</span>
+                  {hasDateFilter && (
+                    <span
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setFilter({
+                          datePreset: "all",
+                          dateFrom: "",
+                          dateTo: "",
+                        });
+                      }}
+                      className="ml-0.5 hover:text-destructive"
+                      title="Clear date filter"
+                    >
+                      <X className="size-3" />
+                    </span>
+                  )}
+                </button>
+
+                {isDateRangePopoverOpen && (
+                  <div className="absolute right-0 top-9 z-50 w-76 rounded-2xl border border-border bg-card p-4 shadow-float space-y-3.5 animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="flex items-center justify-between border-b border-border pb-2">
+                      <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                        <CalendarIcon className="size-3.5 text-primary" />
+                        <span>Due Date Range Filter</span>
+                      </span>
+                      {hasDateFilter && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFilter({
+                              datePreset: "all",
+                              dateFrom: "",
+                              dateTo: "",
+                            })
+                          }
+                          className="text-[11px] text-primary hover:underline cursor-pointer"
+                        >
+                          Reset Dates
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Quick Presets */}
+                    <div>
+                      <label className="text-[11px] font-semibold text-muted-foreground block mb-1.5">
+                        Quick Date Presets
+                      </label>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {[
+                          { id: "all", label: "All Dates" },
+                          { id: "today", label: "Today" },
+                          { id: "yesterday", label: "Yesterday" },
+                          { id: "this_week", label: "This Week" },
+                          { id: "next_7_days", label: "Next 7 Days" },
+                          { id: "overdue", label: "Overdue" },
+                        ].map((p) => {
+                          const isSelected =
+                            (filter.datePreset || "all") === p.id && !hasCustomDateRange;
+                          return (
+                            <button
+                              key={p.id}
+                              type="button"
+                              onClick={() =>
+                                setFilter({
+                                  datePreset: p.id as DateRangePreset,
+                                  dateFrom: "",
+                                  dateTo: "",
+                                })
+                              }
+                              className={cn(
+                                "px-2 py-1.5 rounded-lg text-[11px] font-medium border transition cursor-pointer text-center",
+                                isSelected
+                                  ? "border-primary bg-primary/15 text-primary font-semibold"
+                                  : "border-border bg-muted/30 text-muted-foreground hover:text-foreground hover:bg-muted"
+                              )}
+                            >
+                              {p.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Single Custom Date Quick Picker */}
+                    <div className="pt-1 border-t border-border/60">
+                      <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                        Single Custom Date
+                      </label>
+                      <input
+                        type="date"
+                        value={
+                          filter.dateFrom && filter.dateFrom === filter.dateTo
+                            ? filter.dateFrom
+                            : ""
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setFilter({
+                            datePreset: val ? "custom" : "all",
+                            dateFrom: val,
+                            dateTo: val,
+                          });
+                        }}
+                        className="w-full h-8.5 rounded-lg border border-border bg-background px-2.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                      />
+                    </div>
+
+                    {/* Custom Start & End Date Range */}
+                    <div className="pt-1 border-t border-border/60 space-y-2">
+                      <label className="text-[11px] font-semibold text-muted-foreground block">
+                        Custom Date Range (From — To)
+                      </label>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <span className="text-[10px] text-muted-foreground block mb-0.5">
+                            From
+                          </span>
+                          <input
+                            type="date"
+                            value={filter.dateFrom || ""}
+                            onChange={(e) =>
+                              setFilter({
+                                datePreset: "custom",
+                                dateFrom: e.target.value,
+                              })
+                            }
+                            className="w-full h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-muted-foreground block mb-0.5">
+                            To
+                          </span>
+                          <input
+                            type="date"
+                            value={filter.dateTo || ""}
+                            onChange={(e) =>
+                              setFilter({
+                                datePreset: "custom",
+                                dateTo: e.target.value,
+                              })
+                            }
+                            className="w-full h-8 rounded-lg border border-border bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-1 flex justify-end">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="primary"
+                        onClick={() => setIsDateRangePopoverOpen(false)}
+                        className="h-7.5 text-xs w-full"
+                      >
+                        Apply Date Filter
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </div>
 
@@ -243,7 +450,7 @@ function TaskDashboardContent() {
                 </button>
 
                 {isFilterPopoverOpen && (
-                  <div className="absolute right-0 top-9 z-50 w-68 rounded-xl border border-border bg-card p-3 shadow-float space-y-3 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="absolute right-0 top-9 z-50 w-72 rounded-xl border border-border bg-card p-3.5 shadow-float space-y-3 animate-in fade-in slide-in-from-top-2 duration-150">
                     <div className="flex items-center justify-between border-b border-border pb-2">
                       <span className="text-xs font-bold text-foreground">
                         Filter Tasks
@@ -298,13 +505,16 @@ function TaskDashboardContent() {
 
                     <div>
                       <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
-                        Due Date
+                        Due Date Preset
                       </label>
                       <Select
                         value={filter.datePreset || "all"}
                         onChange={(e) =>
                           setFilter({
                             datePreset: e.target.value as DateRangePreset,
+                            ...(e.target.value !== "custom"
+                              ? { dateFrom: "", dateTo: "" }
+                              : {}),
                           })
                         }
                         className="h-8 text-xs w-full bg-card"
@@ -312,9 +522,46 @@ function TaskDashboardContent() {
                         <option value="all">All Dates</option>
                         <option value="today">Due Today</option>
                         <option value="yesterday">Due Yesterday</option>
+                        <option value="this_week">This Week</option>
                         <option value="next_7_days">Next 7 Days</option>
                         <option value="overdue">Overdue</option>
+                        <option value="custom">Custom Date Range</option>
                       </Select>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground block mb-1">
+                          From Date
+                        </label>
+                        <input
+                          type="date"
+                          value={filter.dateFrom || ""}
+                          onChange={(e) =>
+                            setFilter({
+                              datePreset: "custom",
+                              dateFrom: e.target.value,
+                            })
+                          }
+                          className="w-full h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-muted-foreground block mb-1">
+                          To Date
+                        </label>
+                        <input
+                          type="date"
+                          value={filter.dateTo || ""}
+                          onChange={(e) =>
+                            setFilter({
+                              datePreset: "custom",
+                              dateTo: e.target.value,
+                            })
+                          }
+                          className="w-full h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                        />
+                      </div>
                     </div>
 
                     <div>
@@ -382,7 +629,7 @@ function TaskDashboardContent() {
                 </button>
 
                 {isMoreMenuOpen && (
-                  <div className="absolute right-0 top-9 z-50 w-48 rounded-xl border border-border bg-card p-1.5 shadow-float space-y-0.5 animate-in fade-in slide-in-from-top-2 duration-150">
+                  <div className="absolute right-0 top-9 z-50 w-52 rounded-xl border border-border bg-card p-1.5 shadow-float space-y-0.5 animate-in fade-in slide-in-from-top-2 duration-150">
                     <button
                       type="button"
                       onClick={() => {
@@ -406,6 +653,20 @@ function TaskDashboardContent() {
                       <Upload className="size-3.5 text-muted-foreground" />
                       <span>Import CSV</span>
                     </button>
+
+                    {activeDoneTasksCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await archiveCompletedTasks();
+                          setIsMoreMenuOpen(false);
+                        }}
+                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition cursor-pointer border-t border-border mt-1 pt-1.5"
+                      >
+                        <CheckCircle2 className="size-3.5" />
+                        <span>Move Done Out ({activeDoneTasksCount})</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -444,7 +705,6 @@ function TaskDashboardContent() {
             {viewMode === "table" && <TaskTable />}
             {viewMode === "list" && <TaskList />}
             {viewMode === "calendar" && <TaskCalendar />}
-            {viewMode === "timeline" && <TaskTimeline />}
             {viewMode === "analytics" && <TaskAnalytics />}
           </div>
         </>

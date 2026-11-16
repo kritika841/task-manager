@@ -31,6 +31,7 @@ import {
   RoleTemplate,
   OfflineMutation,
   WebhookConfig,
+  StageHistoryEntry,
 } from "./types";
 import { supabase, dateInTargetTimeZone, isCanonicalAdflowTask } from "./supabase";
 import {
@@ -159,6 +160,7 @@ interface TaskContextType {
   bulkMoveStatus: (status: TaskStatus) => Promise<void>;
   bulkReschedule: (dueDate: string) => Promise<void>;
   bulkDelete: () => Promise<void>;
+  archiveCompletedTasks: () => Promise<number>;
   // Notifications
   notifications: NotificationItem[];
   unreadNotificationsCount: number;
@@ -227,10 +229,36 @@ const defaultFilter: FilterState = {
   project: "all",
   onlyMyTasks: false,
   showArchived: false,
+  showCompletedHistory: false,
   showAdflowTasks: true, // Visible by default so live Ads Management data is immediately accessible!
+  dateFrom: "",
+  dateTo: "",
   datePreset: "all",
   savedPreset: "all",
 };
+
+function formatClientStageLabel(
+  status: TaskStatus,
+  subColumnId?: string,
+  productionStage?: string
+): string {
+  const baseMap: Record<TaskStatus, string> = {
+    backlog: "Backlog",
+    todo: "To Do",
+    in_progress: "In Progress",
+    in_review: "In Review",
+    completed: "Done",
+  };
+  const base = baseMap[status] || status;
+  if (productionStage) {
+    return `${base} (${productionStage.replace(/_/g, " ")})`;
+  }
+  if (subColumnId) {
+    const cleanSub = subColumnId.replace(/^(dev|cc|ed|mb|mgr|adm|sub)-/, "").replace(/-/g, " ");
+    return `${base} · ${cleanSub}`;
+  }
+  return base;
+}
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
@@ -484,16 +512,17 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   // Initialize view mode, active section, board layout, density, and AdFlow sync from storage
   useEffect(() => {
     try {
-      const savedView = localStorage.getItem(STORAGE_KEY_VIEW_MODE) as ViewMode;
+      const savedView = localStorage.getItem(STORAGE_KEY_VIEW_MODE) as string;
       if (
         savedView === "board" ||
         savedView === "table" ||
         savedView === "list" ||
         savedView === "calendar" ||
-        savedView === "timeline" ||
         savedView === "analytics"
       ) {
-        setViewModeState(savedView);
+        setViewModeState(savedView as ViewMode);
+      } else if (savedView === "timeline") {
+        setViewModeState("board");
       }
       const savedSection = localStorage.getItem(STORAGE_KEY_ACTIVE_SECTION) as
         | "overview"
@@ -904,19 +933,16 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
           } catch {}
         }
 
-        // 3. Auto-authenticate workspace admin (Kritika) if no explicit logout
+        // 3. Auto-authenticate workspace admin/developer if no explicit logout
         const explicitLogout = localStorage.getItem("satmi-explicit-logout");
         if (!explicitLogout) {
           const defaultAdmin =
             users.find(
               (u) =>
-                (u.email.toLowerCase() === "kritika@satmi.in" ||
-                  u.email.toLowerCase() === "smvkritika@gmail.com") &&
+                (u.role === "developer" || u.role === "admin") &&
                 u.active !== false &&
                 !u.deletedAt
-            ) ||
-            users.find((u) => u.role === "admin" && u.active !== false && !u.deletedAt) ||
-            users[0];
+            ) || users[0];
 
           if (defaultAdmin) {
             setCurrentUserId(defaultAdmin.id);
@@ -1267,8 +1293,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
           setViewMode("list");
         } else if (e.key === "d" || e.key === "D") {
           setViewMode("calendar");
-        } else if (e.key === "g" || e.key === "G") {
-          setViewMode("timeline");
         } else if ((e.key === "o" || e.key === "O") && isAdmin) {
           setViewMode("analytics");
         }
@@ -1325,10 +1349,11 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     );
   }, [users, currentUserId]);
 
-  const isAdmin = currentUser.role === "admin";
-  const isManager = currentUser.role === "manager";
   const isDeveloper = currentUser.role === "developer";
-  const isManagerOrAdmin = isAdmin || isManager;
+  // Developer role has all the permissions that Admin has (for full task delegation & workspace management)
+  const isAdmin = currentUser.role === "admin" || isDeveloper;
+  const isManager = currentUser.role === "manager";
+  const isManagerOrAdmin = isAdmin || isManager || isDeveloper;
   const isAdminOrDeveloper = isAdmin || isDeveloper;
 
   const setFilter = useCallback((updates: Partial<FilterState>) => {
@@ -1398,50 +1423,73 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }): Promise<Task | null> => {
       const today = dateInTargetTimeZone();
       const targetQty = Math.max(1, Number(data.targetQuantity) || 1);
-      const tempId = `temp-${Date.now()}`;
       const assignee = users.find((u) => u.id === data.assigneeId);
-
-      const optimisticTask: Task = {
-        id: tempId,
-        taskNumber: `DT-${tempId.slice(-4).toUpperCase()}`,
-        title: data.title.trim(),
-        description: data.description || "",
-        status: data.status || "todo",
-        priority: data.priority || "medium",
-        assigneeId: data.assigneeId || currentUserId,
-        creatorId: currentUserId,
-        dueDate: data.dueDate || today,
-        targetQuantity: targetQty,
-        completedQuantity: data.status === "completed" ? targetQty : 0,
-        manualCompletedQuantity: data.status === "completed" ? targetQty : 0,
-        autoCompletedQuantity: 0,
-        subtasks:
-          data.customSubtasks && data.customSubtasks.length > 0
-            ? data.customSubtasks
-            : Array.from({ length: targetQty }, (_, i) => ({
-                id: `sub-${tempId}-${i + 1}`,
-                title: `Unit ${i + 1} of ${data.title.trim()}`,
-                completed: data.status === "completed",
-                isCustom: false,
-              })),
-        customSubtasks: data.customSubtasks || [],
-        project: data.project || assignee?.department || "Operations",
-        tags: data.tags || ["Daily Target"],
-        deliverableUrl: data.deliverableUrl || data.deliverableAsset?.url,
-        deliverableAsset: data.deliverableAsset,
-        blockedByTaskIds: data.blockedByTaskIds || [],
-        startDate: data.startDate,
-        dueTime: data.dueTime,
-        estimatedHours: data.estimatedHours,
-        subColumnId: data.subColumnId,
-        parentColumnId: data.parentColumnId || data.status,
-        templateRole: data.templateRole,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        comments: [],
+      const nowIso = new Date().toISOString();
+      const initialStatus: TaskStatus = data.status || "todo";
+      const initialStageEntry: StageHistoryEntry = {
+        stage: initialStatus,
+        label: formatClientStageLabel(initialStatus, data.subColumnId),
+        timestamp: nowIso,
+        actorName: currentUser.name,
       };
 
-      setTasks((prev) => [optimisticTask, ...prev]);
+      // If targetQty > 1 (e.g. 4 units), split into N individual 1-unit optimistic tasks
+      const splitCount = targetQty > 1 ? targetQty : 1;
+      const tempIds: string[] = [];
+      const optimisticTasks: Task[] = [];
+
+      for (let i = 1; i <= splitCount; i++) {
+        const tempId = `temp-${Date.now()}-${i}`;
+        tempIds.push(tempId);
+        const unitTitle =
+          splitCount > 1 ? `${data.title.trim()} (${i}/${splitCount})` : data.title.trim();
+
+        optimisticTasks.push({
+          id: tempId,
+          taskNumber: `DT-${String(i).padStart(2, "0")}`,
+          title: unitTitle,
+          description: data.description || "",
+          status: initialStatus,
+          priority: data.priority || "medium",
+          assigneeId: data.assigneeId || currentUserId,
+          creatorId: currentUserId,
+          dueDate: data.dueDate || today,
+          targetQuantity: 1,
+          completedQuantity: initialStatus === "completed" ? 1 : 0,
+          manualCompletedQuantity: initialStatus === "completed" ? 1 : 0,
+          autoCompletedQuantity: 0,
+          subtasks:
+            data.customSubtasks && data.customSubtasks.length > 0
+              ? data.customSubtasks
+              : [
+                  {
+                    id: `sub-${tempId}-1`,
+                    title: `Unit 1 of ${unitTitle}`,
+                    completed: initialStatus === "completed",
+                    isCustom: false,
+                  },
+                ],
+          customSubtasks: data.customSubtasks || [],
+          project: data.project || assignee?.department || "Operations",
+          tags: data.tags || ["Daily Target"],
+          deliverableUrl: data.deliverableUrl || data.deliverableAsset?.url,
+          deliverableAsset: data.deliverableAsset,
+          blockedByTaskIds: data.blockedByTaskIds || [],
+          startDate: data.startDate,
+          dueTime: data.dueTime,
+          estimatedHours: data.estimatedHours,
+          subColumnId: data.subColumnId,
+          parentColumnId: data.parentColumnId || initialStatus,
+          templateRole: data.templateRole,
+          stageHistory: [initialStageEntry],
+          completedAt: initialStatus === "completed" ? nowIso : undefined,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+          comments: [],
+        });
+      }
+
+      setTasks((prev) => [...optimisticTasks, ...prev]);
 
       const effectiveAssigneeId = data.assigneeId || currentUserId;
       if (effectiveAssigneeId && effectiveAssigneeId === currentUserId) {
@@ -1487,11 +1535,11 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         return json.target;
       } catch (err) {
         console.error("createTask error:", err);
-        setTasks((prev) => prev.filter((t) => t.id !== tempId));
+        setTasks((prev) => prev.filter((t) => !tempIds.includes(t.id)));
         return null;
       }
     },
-    [currentUserId, users, fetchTasks]
+    [currentUserId, currentUser.name, users, fetchTasks]
   );
 
   // 2. Update Task
@@ -1546,12 +1594,52 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
             delete safeUpdates.title;
           }
 
+          const nextStatus: TaskStatus = safeUpdates.status || t.status;
+          const nextSubCol =
+            safeUpdates.subColumnId !== undefined ? safeUpdates.subColumnId : t.subColumnId;
+          const nextProdStage =
+            safeUpdates.productionStage !== undefined
+              ? safeUpdates.productionStage
+              : t.productionStage;
+
+          let nextStageHistory = t.stageHistory || [
+            {
+              stage: t.status,
+              label: formatClientStageLabel(t.status, t.subColumnId, t.productionStage),
+              timestamp: t.createdAt,
+            },
+          ];
+
+          if (
+            nextStatus !== t.status ||
+            (safeUpdates.subColumnId !== undefined && safeUpdates.subColumnId !== t.subColumnId) ||
+            (safeUpdates.productionStage !== undefined &&
+              safeUpdates.productionStage !== t.productionStage)
+          ) {
+            nextStageHistory = [
+              ...nextStageHistory,
+              {
+                stage: nextStatus,
+                label: formatClientStageLabel(nextStatus, nextSubCol, nextProdStage),
+                timestamp: new Date().toISOString(),
+                actorName: currentUser.name,
+              },
+            ];
+          }
+
+          const nextCompletedAt =
+            nextStatus === "completed"
+              ? t.completedAt || new Date().toISOString()
+              : undefined;
+
           return {
             ...t,
             ...safeUpdates,
             completedQuantity: nextCompleted,
             subtasks: updatedSubtasks,
             project: updatedAssignee ? updatedAssignee.department : t.project,
+            stageHistory: nextStageHistory,
+            completedAt: nextCompletedAt,
             updatedAt: new Date().toISOString(),
           };
         })
@@ -1727,12 +1815,34 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
             nextStatus = "todo";
           }
 
+          let nextStageHistory = t.stageHistory || [
+            {
+              stage: t.status,
+              label: formatClientStageLabel(t.status, t.subColumnId, t.productionStage),
+              timestamp: t.createdAt,
+            },
+          ];
+          if (nextStatus !== t.status) {
+            nextStageHistory = [
+              ...nextStageHistory,
+              {
+                stage: nextStatus,
+                label: formatClientStageLabel(nextStatus, t.subColumnId, t.productionStage),
+                timestamp: new Date().toISOString(),
+                actorName: currentUser.name,
+              },
+            ];
+          }
+
           return {
             ...t,
             subtasks: updatedSubtasks,
             customSubtasks: nextCustomSubtasks.length > 0 ? nextCustomSubtasks : t.customSubtasks,
             completedQuantity: nextCompletedCount,
             status: nextStatus,
+            stageHistory: nextStageHistory,
+            completedAt:
+              nextStatus === "completed" ? t.completedAt || new Date().toISOString() : undefined,
             updatedAt: new Date().toISOString(),
           };
         })
@@ -1840,11 +1950,33 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
             nextStatus = "todo";
           }
 
+          let nextStageHistory = t.stageHistory || [
+            {
+              stage: t.status,
+              label: formatClientStageLabel(t.status, t.subColumnId, t.productionStage),
+              timestamp: t.createdAt,
+            },
+          ];
+          if (nextStatus !== t.status) {
+            nextStageHistory = [
+              ...nextStageHistory,
+              {
+                stage: nextStatus,
+                label: formatClientStageLabel(nextStatus, t.subColumnId, t.productionStage),
+                timestamp: new Date().toISOString(),
+                actorName: currentUser.name,
+              },
+            ];
+          }
+
           return {
             ...t,
             completedQuantity: cleanCount,
             subtasks: updatedSubtasks,
             status: nextStatus,
+            stageHistory: nextStageHistory,
+            completedAt:
+              nextStatus === "completed" ? t.completedAt || new Date().toISOString() : undefined,
             updatedAt: new Date().toISOString(),
           };
         })
@@ -2050,6 +2182,42 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
     fetchTasks(false);
   }, [selectedTaskIds, currentUserId, selectedTaskId, clearSelectedTasks, fetchTasks]);
+
+  // Move all currently completed ("Done") tasks out of the active Overview (into Archived / Completed History)
+  const archiveCompletedTasks = useCallback(async (): Promise<number> => {
+    const completedIds = tasks
+      .filter((t) => !t.isArchived && t.status === "completed")
+      .map((t) => t.id);
+
+    if (completedIds.length === 0) return 0;
+
+    const nowIso = new Date().toISOString();
+    setTasks((prev) =>
+      prev.map((t) =>
+        completedIds.includes(t.id)
+          ? { ...t, isArchived: true, archivedAt: nowIso }
+          : t
+      )
+    );
+    setSelectedTaskIds((prev) => prev.filter((id) => !completedIds.includes(id)));
+    if (selectedTaskId && completedIds.includes(selectedTaskId)) {
+      setSelectedTaskId(null);
+    }
+
+    try {
+      await Promise.all(
+        completedIds.map((id) =>
+          fetch(
+            `/api/tasks?id=${encodeURIComponent(id)}&actorId=${encodeURIComponent(currentUserId)}`,
+            { method: "DELETE" }
+          )
+        )
+      );
+    } catch (err) {
+      console.error("archiveCompletedTasks error:", err);
+    }
+    return completedIds.length;
+  }, [tasks, currentUserId, selectedTaskId]);
 
   // 8. Comments Engine (Persistent across reloads, mentions, reactions)
   const addComment = useCallback(
@@ -2541,12 +2709,32 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     [updateTask]
   );
 
-  // Enhanced Filtered Tasks (Supports Search, Members, Status, Priority, Presets, and Date Ranges)
+  // Enhanced Filtered Tasks (Supports Search, Members, Status, Priority, Presets, Date Ranges, and Daily Production Done Roll-Off)
   const filteredTasks = useMemo(() => {
     const today = dateInTargetTimeZone();
     const todayDate = new Date(today);
+    const hasCustomDateRange = Boolean(filter.dateFrom || filter.dateTo);
+    const hasExplicitDateFilter =
+      hasCustomDateRange || (filter.datePreset && filter.datePreset !== "all");
 
     return baseVisibleTasks.filter((task) => {
+      // 0. Daily Production "Done" Tab Overload Protection:
+      // If viewing Completed History specifically, only show completed tasks.
+      if (filter.showCompletedHistory) {
+        if (task.status !== "completed") return false;
+      } else if (
+        !filter.showArchived &&
+        filter.status !== "completed" &&
+        !hasExplicitDateFilter &&
+        task.status === "completed"
+      ) {
+        // Automatically move past-day completed tasks out of the active daily Overview
+        // so the Done column only holds today's completed production items!
+        const completedDateStr = task.completedAt ? task.completedAt.slice(0, 10) : task.dueDate;
+        if (task.dueDate < today && completedDateStr < today) {
+          return false;
+        }
+      }
 
       // 1. Text Search
       if (filter.search.trim()) {
@@ -2589,8 +2777,16 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 3. Date Presets
-      if (filter.datePreset && filter.datePreset !== "all") {
+      // 3. Custom Date Range Picker (dateFrom / dateTo)
+      if (filter.dateFrom && task.dueDate < filter.dateFrom) {
+        return false;
+      }
+      if (filter.dateTo && task.dueDate > filter.dateTo) {
+        return false;
+      }
+
+      // 4. Date Presets
+      if (filter.datePreset && filter.datePreset !== "all" && filter.datePreset !== "custom") {
         if (filter.datePreset === "today" && task.dueDate !== today) {
           return false;
         }
@@ -2605,6 +2801,16 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
           const yStr = y.toISOString().slice(0, 10);
           if (task.dueDate !== yStr) return false;
         }
+        if (filter.datePreset === "this_week") {
+          const dayOfWeek = todayDate.getDay();
+          const startOfWeek = new Date(todayDate);
+          startOfWeek.setDate(todayDate.getDate() - dayOfWeek);
+          const endOfWeek = new Date(startOfWeek);
+          endOfWeek.setDate(startOfWeek.getDate() + 6);
+          const startStr = startOfWeek.toISOString().slice(0, 10);
+          const endStr = endOfWeek.toISOString().slice(0, 10);
+          if (task.dueDate < startStr || task.dueDate > endStr) return false;
+        }
         if (filter.datePreset === "next_7_days") {
           const future = new Date(todayDate);
           future.setDate(future.getDate() + 7);
@@ -2613,12 +2819,12 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 4. Assigned to me toggle
+      // 5. Assigned to me toggle
       if (filter.onlyMyTasks && task.assigneeId !== currentUserId) {
         return false;
       }
 
-      // 5. Explicit dropdowns
+      // 6. Explicit dropdowns
       if (filter.assigneeId !== "all" && task.assigneeId !== filter.assigneeId) {
         return false;
       }
@@ -2756,6 +2962,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         bulkMoveStatus,
         bulkReschedule,
         bulkDelete,
+        archiveCompletedTasks,
         notifications,
         unreadNotificationsCount,
         fetchNotifications,

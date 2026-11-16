@@ -1,50 +1,107 @@
 {
   "profiles": [
     {
-      "id": "011c1a7a-258a-4591-aee1-7bce60eaee01",
+      "id": "4a206a68-c5a4-4d12-be76-90468ea3df44",
       "name": "Kritika",
       "email": "kritika@satmi.in",
       "role": "admin",
-      "avatar_url": "{\"employeeCode\":\"KRI\",\"color\":\"#2563eb\",\"dailyCapacityUnits\":10}",
+      "avatar_url": "{\"color\":\"#14b8a6\",\"employeeCode\":\"KRI\",\"dailyCapacityUnits\":10}",
       "active": true,
       "deleted_at": null,
-      "created_at": "2026-10-01T00:00:00.000Z",
-      "updated_at": "2026-11-16T00:00:00.000Z"
+      "created_at": "2026-07-15T10:23:43.168482+00:00",
+      "updated_at": "2026-11-16T09:16:00.534Z"
+    },
+    {
+      "id": "20ec7ea7-6033-4109-bfc6-6a3c1c09df17",
+      "name": "Kartavya",
+      "email": "kartavya@satmi.in",
+      "role": "admin",
+      "avatar_url": null,
+      "active": true,
+      "deleted_at": null,
+      "created_at": "2026-07-15T12:30:30.797432+00:00",
+      "updated_at": "2026-10-07T10:06:21.64587+00:00"
     },
     {
       "id": "360a1a7a-258a-4591-aee1-7bce60eaee4b",
       "name": "Himik",
       "email": "himik@satmi.in",
-      "role": "editor",
-      "avatar_url": "{\"employeeCode\":\"HIM\",\"color\":\"#10b981\",\"dailyCapacityUnits\":6}",
+      "role": "content_creator",
+      "avatar_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ-hnT6iGEfDt9tn9wl66uxAi27H8xHb3IQ3tZQTtgAFA&s",
       "active": true,
       "deleted_at": null,
-      "created_at": "2026-10-01T00:00:00.000Z",
-      "updated_at": "2026-11-16T00:00:00.000Z"
+      "created_at": "2026-07-16T10:02:08.551518+00:00",
+      "updated_at": "2026-10-15T05:01:56.276033+00:00"
     },
     {
-      "id": "022c1a7a-258a-4591-aee1-7bce60eaee02",
+      "id": "3c8db14b-0e23-40e7-8fab-2c9b7664e588",
       "name": "Nikhil",
       "email": "nikhil@satmi.in",
-      "role": "manager",
-      "avatar_url": "{\"employeeCode\":\"NIK\",\"color\":\"#8b5cf6\",\"dailyCapacityUnits\":8}",
+      "role": "editor",
+      "avatar_url": null,
       "active": true,
       "deleted_at": null,
-      "created_at": "2026-10-01T00:00:00.000Z",
-      "updated_at": "2026-11-16T00:00:00.000Z"
+      "created_at": "2026-07-15T11:02:41.763669+00:00",
+      "updated_at": "2026-07-18T06:55:01.144475+00:00"
     },
     {
-      "id": "033c1a7a-258a-4591-aee1-7bce60eaee03",
+      "id": "2444c7f2-b531-497b-959b-e47d492ea542",
       "name": "Priya",
       "email": "priya@satmi.in",
       "role": "content_creator",
-      "avatar_url": "{\"employeeCode\":\"PRI\",\"color\":\"#f59e0b\",\"dailyCapacityUnits\":4}",
+      "avatar_url": null,
       "active": true,
       "deleted_at": null,
-      "created_at": "2026-10-01T00:00:00.000Z",
-      "updated_at": "2026-11-16T00:00:00.000Z"
+      "created_at": "2026-07-21T11:21:47.765453+00:00",
+      "updated_at": "2026-07-21T11:21:48.09883+00:00"
+    },
+    {
+      "id": "4e3bdd23-8b64-4bcd-a790-ca7b17024e82",
+      "name": "Kunal",
+      "email": "kunal@satmi.in",
+      "role": "editor",
+      "avatar_url": null,
+      "active": true,
+      "deleted_at": null,
+      "created_at": "2026-07-16T10:14:23.630349+00:00",
+      "updated_at": "2026-07-18T07:56:14.166739+00:00"
+    },
+    {
+      "id": "6154c289-84bb-4d0d-8543-70bcaf418b9b",
+      "name": "Tamanna",
+      "email": "tamanna@satmi.in",
+      "role": "content_creator",
+      "avatar_url": null,
+      "active": true,
+      "deleted_at": null,
+      "created_at": "2026-07-16T10:17:33.21603+00:00",
+      "updated_at": "2026-07-18T07:01:05.291949+00:00"
+    },
+    {
+      "id": "1927e832-b695-475d-922a-8ea4040fb50e",
+      "name": "Yash",
+      "email": "yash@satmi.in",
+      "role": "content_creator",
+      "avatar_url": null,
+      "active": true,
+      "deleted_at": null,
+      "created_at": "2026-09-22T07:06:54.076006+00:00",
+      "updated_at": "2026-09-22T07:06:54.31323+00:00"
+    },
+    {
+      "id": "eaf203fc-569b-4735-a7c8-99a3566dc4c3",
+      "name": "ishika",
+      "email": "ishika@satmi.in",
+      "role": "manager",
+      "avatar_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR5Mt77nt88UPEkTYmjtTHZhgtYHhF2JVCOQo_KK999T12BRh2vnl37sqe8&s=10",
+      "active": true,
+      "deleted_at": null,
+      "created_at": "2026-07-15T10:57:36.918884+00:00",
+      "updated_at": "2026-10-15T05:11:15.632381+00:00"
     }
   ],
+  "profile_overrides": {},
+  "local_profiles": [],
   "daily_team_targets": [],
   "ads": [],
   "ad_overrides": {},

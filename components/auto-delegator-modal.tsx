@@ -151,8 +151,14 @@ export function AutoDelegatorModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-foreground/30 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="relative w-full max-w-4xl rounded-2xl border border-border bg-card p-6 shadow-float max-h-[90vh] flex flex-col overflow-hidden">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-foreground/30 backdrop-blur-sm animate-in fade-in duration-150"
+      onClick={() => setIsAutoDelegatorOpen(false)}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="relative w-full max-w-4xl rounded-2xl border border-border bg-card p-6 shadow-float max-h-[90vh] flex flex-col overflow-hidden"
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-border">
           <div className="flex items-center gap-3">

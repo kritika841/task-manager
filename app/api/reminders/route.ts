@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase";
 import { loadLocalDb, saveLocalDb } from "@/lib/local-supabase-fallback";
 import { resolveRequestActor } from "@/lib/auth-server";
+import {
+  sendReminderEmail,
+  resolveDeveloperAndCcFromUsers,
+  isDeveloperUserProfile,
+} from "@/lib/email";
 
 export interface ReminderRecord {
   id: string;
@@ -44,8 +50,15 @@ export async function GET(req: NextRequest) {
       null;
     const includeAll = searchParams.get("includeAll") === "true";
 
+    // Ensure profiles are synced from AdFlow before resolving target user emails
+    const { data: liveProfiles } = await supabaseAdmin.from("profiles").select("*");
     const db = loadLocalDb();
-    const profiles = Array.isArray(db.profiles) ? db.profiles : [];
+    const profiles =
+      Array.isArray(liveProfiles) && liveProfiles.length > 0
+        ? liveProfiles
+        : Array.isArray(db.profiles)
+          ? db.profiles
+          : [];
     const reminders = Array.isArray(db.reminders) ? (db.reminders as ReminderRecord[]) : [];
 
     let userId = queryUserId;
@@ -98,8 +111,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Reminder title is required" }, { status: 400 });
     }
 
+    // Ensure profiles are synced from AdFlow before resolving target user emails
+    const { data: liveProfiles } = await supabaseAdmin.from("profiles").select("*");
     const db = loadLocalDb();
-    const profiles = Array.isArray(db.profiles) ? db.profiles : [];
+    const profiles =
+      Array.isArray(liveProfiles) && liveProfiles.length > 0
+        ? liveProfiles
+        : Array.isArray(db.profiles)
+          ? db.profiles
+          : [];
     if (!Array.isArray(db.reminders)) {
       db.reminders = [];
     }
@@ -244,11 +264,55 @@ export async function POST(req: NextRequest) {
 
     saveLocalDb(db);
 
+    // Dynamically resolve target user email(s) from the users list and CC Kartavya if directed to the Developer
+    let emailSent = false;
+    let emailTo: string[] = [];
+    let emailCc: string[] = [];
+
+    if (created.length > 0 && created[0].enabled !== false) {
+      const targetProfiles = targetIds
+        .map((tid) => findProfile(profiles, tid))
+        .filter(Boolean) as Record<string, any>[];
+
+      const targetEmails = Array.from(
+        new Set(
+          targetProfiles
+            .map((p) => (typeof p.email === "string" ? p.email.trim().toLowerCase() : ""))
+            .filter(Boolean)
+        )
+      );
+
+      const directedToDeveloper = targetProfiles.some((p) =>
+        isDeveloperUserProfile(p, profiles)
+      );
+      const { ccEmails } = resolveDeveloperAndCcFromUsers(profiles);
+
+      if (targetEmails.length > 0) {
+        const emailRes = await sendReminderEmail({
+          title: created[0].title,
+          note: created[0].note,
+          remindAt: created[0].remindAt,
+          targetEmails,
+          ccEmails: directedToDeveloper ? ccEmails : [],
+          targetUserName:
+            created.length > 1 ? "All Team Members" : created[0].targetUserName,
+          createdByName: created[0].createdByName,
+          isDueAlert: false,
+        });
+        emailSent = emailRes.ok;
+        emailTo = emailRes.to || targetEmails;
+        emailCc = emailRes.cc || [];
+      }
+    }
+
     return NextResponse.json(
       {
         ok: true,
         reminder: created[0],
         reminders: created,
+        emailSent,
+        emailTo,
+        emailCc,
       },
       { status: 201 }
     );
@@ -308,6 +372,37 @@ async function handleUpdate(req: NextRequest) {
 
     list[idx] = updated;
     saveLocalDb(db);
+
+    // If reminder just transitioned to notified=true (due alert fired), send due reminder email to target user email
+    if (body.notified === true && !current.notified && updated.enabled !== false) {
+      const { data: liveProfiles } = await supabaseAdmin.from("profiles").select("*");
+      const profiles =
+        Array.isArray(liveProfiles) && liveProfiles.length > 0
+          ? liveProfiles
+          : Array.isArray(db.profiles)
+            ? db.profiles
+            : [];
+      const targetProfile = findProfile(profiles, updated.targetUserId);
+      const targetEmail =
+        targetProfile && typeof targetProfile.email === "string"
+          ? targetProfile.email.trim().toLowerCase()
+          : "";
+
+      if (targetEmail) {
+        const directedToDeveloper = isDeveloperUserProfile(targetProfile, profiles);
+        const { ccEmails } = resolveDeveloperAndCcFromUsers(profiles);
+        await sendReminderEmail({
+          title: updated.title,
+          note: updated.note,
+          remindAt: updated.remindAt,
+          targetEmails: [targetEmail],
+          ccEmails: directedToDeveloper ? ccEmails : [],
+          targetUserName: updated.targetUserName,
+          createdByName: updated.createdByName,
+          isDueAlert: true,
+        });
+      }
+    }
 
     return NextResponse.json({
       ok: true,

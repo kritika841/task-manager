@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { X, Keyboard, Command } from "lucide-react";
+import { X, Keyboard } from "lucide-react";
 import { useTasks } from "@/lib/store";
 
 export function ShortcutsModal() {
@@ -18,45 +18,60 @@ export function ShortcutsModal() {
     { key: "L", description: "Switch to Checklist View (Unit Stepper)" },
     { key: "O", description: "Switch to Overview / Analytics & Capacity" },
     { key: "D", description: "Switch to Calendar View" },
-    { key: "G", description: "Switch to Timeline / Gantt View" },
     { key: "Esc", description: "Close active modal/drawer / Clear task selection" },
     { key: "?", description: "Show this Keyboard Shortcuts cheat sheet" },
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-foreground/25 backdrop-blur-xs animate-in fade-in duration-100">
-      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-float">
-        <div className="flex items-center justify-between pb-3 border-b border-border">
-          <div className="flex items-center gap-2">
-            <Keyboard className="size-4 text-primary" />
-            <h2 className="text-sm font-semibold text-foreground">Keyboard Shortcuts</h2>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-foreground/30 backdrop-blur-sm animate-in fade-in duration-150"
+      onClick={() => setIsShortcutsModalOpen(false)}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-float"
+      >
+        <div className="flex items-center justify-between pb-4 border-b border-border">
+          <div className="flex items-center gap-2.5">
+            <div className="flex size-8 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
+              <Keyboard className="size-4" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-foreground">
+                Keyboard Shortcuts
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Navigate and manage tasks faster across the workspace
+              </p>
+            </div>
           </div>
           <button
             type="button"
             onClick={() => setIsShortcutsModalOpen(false)}
-            className="size-7 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center transition cursor-pointer"
+            className="size-8 rounded-xl border border-border hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center transition cursor-pointer"
+            aria-label="Close shortcuts"
           >
             <X className="size-4" />
           </button>
         </div>
 
-        <div className="mt-3.5 divide-y divide-border/60 text-xs">
+        <div className="mt-4 divide-y divide-border/60 text-sm">
           {shortcuts.map((s) => (
-            <div key={s.key} className="flex items-center justify-between py-2">
-              <span className="text-muted-foreground">{s.description}</span>
-              <kbd className="rounded-md border border-border bg-muted/50 px-2 py-0.5 font-mono text-[11px] font-semibold text-foreground shadow-2xs">
+            <div key={s.key} className="flex items-center justify-between py-2.5">
+              <span className="text-foreground/90">{s.description}</span>
+              <kbd className="rounded-lg border border-border bg-muted/60 px-2.5 py-1 font-mono text-xs font-semibold text-foreground shadow-2xs shrink-0 ml-3">
                 {s.key}
               </kbd>
             </div>
           ))}
         </div>
 
-        <div className="mt-4 pt-3 border-t border-border flex items-center justify-between text-[11px] text-muted-foreground">
-          <span>Shortcuts work when not typing in text fields</span>
+        <div className="mt-5 pt-3.5 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
+          <span>Click anywhere outside or press Esc to dismiss</span>
           <button
             type="button"
             onClick={() => setIsShortcutsModalOpen(false)}
-            className="text-primary hover:underline font-medium cursor-pointer"
+            className="rounded-lg bg-primary px-3.5 py-1.5 text-xs font-semibold text-primary-foreground hover:opacity-90 transition cursor-pointer"
           >
             Got it
           </button>

@@ -10,6 +10,7 @@ import {
   UserCheck,
   Sparkles,
   Layers,
+  Split,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
 import {
@@ -19,7 +20,7 @@ import {
   Subtask,
   Role,
 } from "@/lib/types";
-import { dateInTargetTimeZone, taskOptionsForRole } from "@/lib/supabase";
+import { dateInTargetTimeZone } from "@/lib/supabase";
 import { Button } from "./ui/button";
 import { Input, Textarea, Select } from "./ui/field";
 import { cn } from "@/lib/utils";
@@ -46,13 +47,19 @@ export function TaskCreateModal() {
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [status, setStatus] = useState<TaskStatus>(createModalStatus || "todo");
-  const [assigneeId, setAssigneeId] = useState(createModalAssigneeId || currentUserId || "");
+  const [assigneeId, setAssigneeId] = useState(
+    createModalAssigneeId || currentUserId || ""
+  );
   const [targetQuantity, setTargetQuantity] = useState<number>(1);
   const [dueDate, setDueDate] = useState(today);
   const [dueTime, setDueTime] = useState("");
-  const [estimatedHours, setEstimatedHours] = useState<number | undefined>(undefined);
+  const [estimatedHours, setEstimatedHours] = useState<number | undefined>(
+    undefined
+  );
   const [deliverableUrl, setDeliverableUrl] = useState("");
-  const [deliverableAsset, setDeliverableAsset] = useState<DeliverableAsset | undefined>(undefined);
+  const [deliverableAsset, setDeliverableAsset] = useState<
+    DeliverableAsset | undefined
+  >(undefined);
   const [subColumnId, setSubColumnId] = useState<string | undefined>(undefined);
   const [templateRole, setTemplateRole] = useState<Role | undefined>(undefined);
   const [checklistItems, setChecklistItems] = useState<string[]>([]);
@@ -70,22 +77,32 @@ export function TaskCreateModal() {
       }
       setStatus(createModalStatus || "todo");
     }
-  }, [isCreateModalOpen, createModalAssigneeId, createModalStatus, currentUserId, users]);
+  }, [
+    isCreateModalOpen,
+    createModalAssigneeId,
+    createModalStatus,
+    currentUserId,
+    users,
+  ]);
 
   const selectedAssignee = useMemo(
     () => users.find((u) => u.id === assigneeId) || currentUser,
     [users, assigneeId, currentUser]
   );
 
-  const matchingRoleTemplate = useMemo(() => {
-    if (!selectedAssignee) return templates[0];
-    return (
-      templates.find((t) => t.role === selectedAssignee.role) ||
-      templates[0]
+  // Strictly match templates belonging ONLY to the selected assignee's role (or user-specific override)
+  const matchingRoleTemplates = useMemo(() => {
+    if (!selectedAssignee) return [];
+    return templates.filter(
+      (t) =>
+        t.userId === selectedAssignee.id || t.role === selectedAssignee.role
     );
   }, [templates, selectedAssignee]);
 
-  const templateStages = useMemo(() => {
+  const primaryRoleTemplate = matchingRoleTemplates[0] || null;
+
+  // Extract ONLY the tasks/stages inside the selected assignee's role template(s)
+  const assigneeRoleStages = useMemo(() => {
     const stages: {
       key: string;
       templateId: string;
@@ -100,7 +117,7 @@ export function TaskCreateModal() {
       checklist: string[];
     }[] = [];
 
-    for (const tpl of templates) {
+    for (const tpl of matchingRoleTemplates) {
       for (const parent of tpl.parentColumns) {
         for (const sub of parent.subColumns) {
           stages.push({
@@ -120,20 +137,16 @@ export function TaskCreateModal() {
       }
     }
     return stages;
-  }, [templates]);
+  }, [matchingRoleTemplates]);
 
   if (!isCreateModalOpen) return null;
 
   const isSelfTask = Boolean(currentUserId && assigneeId === currentUserId);
-  const roleStandardTasks = taskOptionsForRole(selectedAssignee?.role);
-  const assigneeRoleStages = templateStages.filter(
-    (s) => s.role === selectedAssignee?.role
-  );
-
   const assigneeCapacity = assigneeId
     ? getMemberCapacity(assigneeId)
     : { max: 6, current: 0, percent: 0, isOverAllocated: false };
-  const projectedTotal = (assigneeCapacity.current || 0) + (Number(targetQuantity) || 1);
+  const unitsNum = Math.max(1, Number(targetQuantity) || 1);
+  const projectedTotal = (assigneeCapacity.current || 0) + unitsNum;
   const willOverAllocate = projectedTotal > assigneeCapacity.max;
 
   const handlePresetSelect = (val: string) => {
@@ -145,16 +158,8 @@ export function TaskCreateModal() {
       return;
     }
 
-    if (val.startsWith("std:")) {
-      const taskTitle = val.slice(4);
-      setTitle(taskTitle);
-      setSubColumnId(undefined);
-      setTemplateRole(selectedAssignee?.role);
-      return;
-    }
-
     if (val.startsWith("stage:")) {
-      const found = templateStages.find((s) => s.key === val);
+      const found = assigneeRoleStages.find((s) => s.key === val);
       if (found) {
         setTitle(found.label);
         if (found.description) setDescription(found.description);
@@ -177,11 +182,15 @@ export function TaskCreateModal() {
   };
 
   const handleApplyFullRoleTemplate = async () => {
-    if (!matchingRoleTemplate) return;
+    if (!primaryRoleTemplate) return;
     const targetUser = assigneeId || currentUserId;
     if (!targetUser) return;
     setIsSubmitting(true);
-    await applyTemplateToUser(matchingRoleTemplate.id, targetUser, dueDate || today);
+    await applyTemplateToUser(
+      primaryRoleTemplate.id,
+      targetUser,
+      dueDate || today
+    );
     setIsSubmitting(false);
     setIsCreateModalOpen(false);
   };
@@ -213,8 +222,9 @@ export function TaskCreateModal() {
       dueDate: dueDate || today,
       dueTime: dueTime || undefined,
       estimatedHours: estimatedHours || undefined,
-      targetQuantity: Math.max(1, Number(targetQuantity) || 1),
-      deliverableUrl: deliverableUrl.trim() || deliverableAsset?.url || undefined,
+      targetQuantity: unitsNum,
+      deliverableUrl:
+        deliverableUrl.trim() || deliverableAsset?.url || undefined,
       deliverableAsset,
       subColumnId,
       parentColumnId: status,
@@ -238,54 +248,64 @@ export function TaskCreateModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto">
-      <div
-        className="fixed inset-0 bg-foreground/20 backdrop-blur-xs transition-opacity"
-        onClick={() => setIsCreateModalOpen(false)}
-      />
-
-      <div className="flex min-h-full items-center justify-center p-4">
-        <div className="relative w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-float transition-all">
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-border pb-3 mb-3.5">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-foreground">
-                {isSelfTask ? "New Self Task" : "Assign Task"}
-              </h2>
-              <span
-                className={cn(
-                  "text-[10px] font-mono px-2 py-0.5 rounded-full border",
-                  willOverAllocate
-                    ? "border-warning/40 bg-warning/10 text-warning font-semibold"
-                    : "border-border bg-muted text-muted-foreground"
-                )}
-              >
-                {willOverAllocate ? (
-                  <span className="inline-flex items-center gap-1">
-                    <AlertCircle className="size-3" />
-                    {projectedTotal}/{assigneeCapacity.max} units
-                  </span>
-                ) : (
-                  `${assigneeCapacity.current}/${assigneeCapacity.max} units`
-                )}
-              </span>
+    <div
+      className="fixed inset-0 z-50 overflow-y-auto bg-foreground/30 backdrop-blur-sm animate-in fade-in duration-150"
+      onClick={() => setIsCreateModalOpen(false)}
+    >
+      <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="relative w-full max-w-2xl rounded-2xl border border-border bg-card p-6 sm:p-7 shadow-float transition-all"
+        >
+          {/* Modal Header */}
+          <div className="flex items-center justify-between border-b border-border pb-4 mb-5">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2.5">
+                <h2 className="text-lg font-bold text-foreground tracking-tight">
+                  {isSelfTask ? "Create New Self Task" : "Assign New Task"}
+                </h2>
+                <span
+                  className={cn(
+                    "text-xs font-mono px-2.5 py-0.5 rounded-full border",
+                    willOverAllocate
+                      ? "border-warning/40 bg-warning/10 text-warning font-semibold"
+                      : "border-border bg-muted text-muted-foreground"
+                  )}
+                >
+                  {willOverAllocate ? (
+                    <span className="inline-flex items-center gap-1">
+                      <AlertCircle className="size-3.5" />
+                      {projectedTotal}/{assigneeCapacity.max} units
+                    </span>
+                  ) : (
+                    `${assigneeCapacity.current}/${assigneeCapacity.max} daily units`
+                  )}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Configure task details, role template stage, and target units.
+              </p>
             </div>
 
             <button
               type="button"
               onClick={() => setIsCreateModalOpen(false)}
-              className="size-7 rounded-lg border border-border hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center transition"
+              className="size-8 rounded-xl border border-border hover:bg-muted text-muted-foreground hover:text-foreground flex items-center justify-center transition cursor-pointer"
+              aria-label="Close modal"
             >
               <X className="size-4" />
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-3 text-xs">
-            {/* Assignee & Self-Task Quick Bar */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="font-medium text-foreground">Assignee</label>
-                <div className="flex items-center gap-1.5">
+          <form onSubmit={handleSubmit} className="space-y-4 text-sm">
+            {/* Row 1: Assignee & Role Template Stage */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Assignee */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-sm font-semibold text-foreground">
+                    Assignee
+                  </label>
                   {currentUserId && (
                     <button
                       type="button"
@@ -294,168 +314,194 @@ export function TaskCreateModal() {
                         setSelectedPreset("");
                       }}
                       className={cn(
-                        "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold transition cursor-pointer border",
+                        "inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-semibold transition cursor-pointer border",
                         isSelfTask
                           ? "bg-primary/15 text-primary border-primary/30"
                           : "bg-muted/60 text-muted-foreground hover:text-foreground border-border"
                       )}
                     >
                       <UserCheck className="size-3" />
-                      <span>Assign to Me (Self Task)</span>
+                      <span>Assign to Me</span>
                     </button>
                   )}
                 </div>
+
+                <Select
+                  value={assigneeId}
+                  onChange={(e) => {
+                    setAssigneeId(e.target.value);
+                    setSelectedPreset("");
+                  }}
+                  className="w-full text-sm h-10 bg-background"
+                  required
+                >
+                  {users.map((u) => {
+                    const isMe = u.id === currentUserId;
+                    const cap = getMemberCapacity(u.id);
+                    return (
+                      <option key={u.id} value={u.id}>
+                        {u.name} {isMe ? "(Me)" : ""} —{" "}
+                        {u.role.replace("_", " ")} ({cap.current}/{cap.max}u)
+                      </option>
+                    );
+                  })}
+                </Select>
               </div>
 
-              <Select
-                value={assigneeId}
-                onChange={(e) => {
-                  setAssigneeId(e.target.value);
-                  setSelectedPreset("");
-                }}
-                className="w-full text-xs h-8.5 bg-card"
-                required
-              >
-                {users.map((u) => {
-                  const isMe = u.id === currentUserId;
-                  const cap = getMemberCapacity(u.id);
-                  return (
-                    <option key={u.id} value={u.id}>
-                      {u.name} {isMe ? "(Me)" : ""} — {u.role.replace("_", " ")} ({cap.current}/{cap.max}u)
-                    </option>
-                  );
-                })}
-              </Select>
-            </div>
+              {/* Strictly Role-Scoped Template Task Selector */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+                    <Layers className="size-3.5 text-primary" />
+                    <span>
+                      {selectedAssignee
+                        ? `${selectedAssignee.role.replace("_", " ")} Template Tasks`
+                        : "Role Template Tasks"}
+                    </span>
+                  </label>
+                  {primaryRoleTemplate && assigneeRoleStages.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleApplyFullRoleTemplate}
+                      disabled={isSubmitting}
+                      className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline cursor-pointer"
+                      title={`Create all workflow stages from ${primaryRoleTemplate.name}`}
+                    >
+                      <Sparkles className="size-3" />
+                      <span>Apply All</span>
+                    </button>
+                  )}
+                </div>
 
-            {/* Role Template & Task Preset Selector */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="flex items-center gap-1 font-medium text-foreground">
-                  <Layers className="size-3 text-primary" />
-                  <span>Role Template / Preset</span>
-                </label>
-                {matchingRoleTemplate && (
-                  <button
-                    type="button"
-                    onClick={handleApplyFullRoleTemplate}
-                    disabled={isSubmitting}
-                    className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary hover:underline cursor-pointer"
-                    title={`Create all workflow stages from ${matchingRoleTemplate.name}`}
-                  >
-                    <Sparkles className="size-3" />
-                    <span>Apply Full {matchingRoleTemplate.role.replace("_", " ")} Template</span>
-                  </button>
-                )}
+                <Select
+                  value={selectedPreset}
+                  onChange={(e) => handlePresetSelect(e.target.value)}
+                  className="w-full text-sm h-10 bg-background"
+                >
+                  <option value="">
+                    {assigneeRoleStages.length > 0
+                      ? `Select from ${selectedAssignee?.role.replace("_", " ")} template...`
+                      : `Custom task (No ${selectedAssignee?.role.replace("_", " ")} template tasks)`}
+                  </option>
+                  {assigneeRoleStages.length > 0 && (
+                    <optgroup
+                      label={`${primaryRoleTemplate?.name || selectedAssignee?.role.replace("_", " ")} Tasks`}
+                    >
+                      {assigneeRoleStages.map((s) => (
+                        <option key={s.key} value={s.key}>
+                          [{s.parentLabel}] {s.label} ({s.units}u)
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <option value="__custom__">Write custom task title...</option>
+                </Select>
               </div>
-
-              <Select
-                value={selectedPreset}
-                onChange={(e) => handlePresetSelect(e.target.value)}
-                className="w-full text-xs h-8.5 bg-card"
-              >
-                <option value="">Custom task or choose role template...</option>
-                <optgroup label={`Quick Presets (${selectedAssignee?.role.replace("_", " ") || "Role"})`}>
-                  {roleStandardTasks.map((t) => (
-                    <option key={`std:${t}`} value={`std:${t}`}>
-                      {t}
-                    </option>
-                  ))}
-                </optgroup>
-                {assigneeRoleStages.length > 0 && (
-                  <optgroup label={`${matchingRoleTemplate?.name || "Role"} Stages`}>
-                    {assigneeRoleStages.map((s) => (
-                      <option key={s.key} value={s.key}>
-                        [{s.parentLabel}] {s.label} ({s.units}u)
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                <optgroup label="All Role Templates">
-                  {templateStages
-                    .filter((s) => s.role !== selectedAssignee?.role)
-                    .map((s) => (
-                      <option key={s.key} value={s.key}>
-                        {s.role.replace("_", " ").toUpperCase()}: {s.label}
-                      </option>
-                    ))}
-                </optgroup>
-                <option value="__custom__">Custom task...</option>
-              </Select>
             </div>
 
-            {/* Title */}
+            {/* Row 2: Task Title */}
             <div>
-              <label className="block font-medium text-foreground mb-1">Task Title *</label>
+              <label className="block text-sm font-semibold text-foreground mb-1.5">
+                Task Title <span className="text-destructive">*</span>
+              </label>
               <Input
                 required
                 placeholder="What needs to get done?"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                className="text-xs h-8.5 bg-card"
+                className="text-sm h-10 bg-background"
               />
             </div>
 
-            {/* Target Units, Due Date, Due Time, Est Hours */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-              <div>
-                <label className="block font-medium text-foreground mb-1">Units</label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={targetQuantity}
-                  onChange={(e) => setTargetQuantity(Number(e.target.value))}
-                  className="text-xs h-8.5 bg-card"
-                  required
-                />
+            {/* Row 3: Units (with Multi-Task Split notice), Due Date, Due Time, Est. Hours */}
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
+                <div>
+                  <label className="block text-sm font-semibold text-foreground mb-1.5">
+                    Units
+                  </label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={50}
+                    value={targetQuantity}
+                    onChange={(e) =>
+                      setTargetQuantity(Math.max(1, Number(e.target.value) || 1))
+                    }
+                    className="text-sm h-10 bg-background font-mono"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-foreground mb-1.5">
+                    Due Date
+                  </label>
+                  <Input
+                    type="date"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    className="text-sm h-10 bg-background"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-foreground mb-1.5">
+                    Time
+                  </label>
+                  <Input
+                    type="time"
+                    value={dueTime}
+                    onChange={(e) => setDueTime(e.target.value)}
+                    className="text-sm h-10 bg-background"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-semibold text-foreground mb-1.5">
+                    Est. Hours
+                  </label>
+                  <Input
+                    type="number"
+                    step="0.5"
+                    min="0"
+                    placeholder="2.0"
+                    value={estimatedHours ?? ""}
+                    onChange={(e) =>
+                      setEstimatedHours(
+                        e.target.value ? parseFloat(e.target.value) : undefined
+                      )
+                    }
+                    className="text-sm h-10 bg-background"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block font-medium text-foreground mb-1">Due Date</label>
-                <Input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  className="text-xs h-8.5 bg-card"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block font-medium text-foreground mb-1">Time</label>
-                <Input
-                  type="time"
-                  value={dueTime}
-                  onChange={(e) => setDueTime(e.target.value)}
-                  className="text-xs h-8.5 bg-card"
-                />
-              </div>
-
-              <div>
-                <label className="block font-medium text-foreground mb-1">Est. Hrs</label>
-                <Input
-                  type="number"
-                  step="0.5"
-                  min="0"
-                  placeholder="2.0"
-                  value={estimatedHours ?? ""}
-                  onChange={(e) =>
-                    setEstimatedHours(e.target.value ? parseFloat(e.target.value) : undefined)
-                  }
-                  className="text-xs h-8.5 bg-card"
-                />
-              </div>
+              {unitsNum > 1 && (
+                <div className="flex items-center gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3.5 py-2 text-xs font-medium text-primary">
+                  <Split className="size-3.5 shrink-0" />
+                  <span>
+                    Adding <strong>{unitsNum} units</strong> will automatically
+                    split into <strong>{unitsNum} individual tasks</strong> (
+                    {title.trim() ? `"${title.trim()} (1/${unitsNum})"` : `1/${unitsNum}`}{" "}
+                    to {`(${unitsNum}/${unitsNum})`}) for{" "}
+                    {selectedAssignee?.name || "the user"}.
+                  </span>
+                </div>
+              )}
             </div>
 
-            {/* Priority & Status */}
-            <div className="grid grid-cols-2 gap-2.5">
+            {/* Row 4: Priority & Initial Stage */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block font-medium text-foreground mb-1">Priority</label>
+                <label className="block text-sm font-semibold text-foreground mb-1.5">
+                  Priority
+                </label>
                 <Select
                   value={priority}
                   onChange={(e) => setPriority(e.target.value as TaskPriority)}
-                  className="w-full text-xs h-8.5 bg-card"
+                  className="w-full text-sm h-10 bg-background"
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -465,11 +511,13 @@ export function TaskCreateModal() {
               </div>
 
               <div>
-                <label className="block font-medium text-foreground mb-1">Status</label>
+                <label className="block text-sm font-semibold text-foreground mb-1.5">
+                  Initial Stage
+                </label>
                 <Select
                   value={status}
                   onChange={(e) => setStatus(e.target.value as TaskStatus)}
-                  className="w-full text-xs h-8.5 bg-card"
+                  className="w-full text-sm h-10 bg-background"
                 >
                   <option value="todo">To Do</option>
                   <option value="in_progress">In Progress</option>
@@ -480,106 +528,114 @@ export function TaskCreateModal() {
               </div>
             </div>
 
-            {/* Checklist Steps (Optional or populated from template) */}
-            <div>
-              <label className="block font-medium text-foreground mb-1">
-                Checklist Steps {checklistItems.length > 0 && `(${checklistItems.length})`}
-              </label>
-              <div className="flex items-center gap-1.5">
-                <Input
-                  placeholder="Add step..."
-                  value={newChecklistInput}
-                  onChange={(e) => setNewChecklistInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleAddChecklistItem();
-                    }
-                  }}
-                  className="text-xs h-8 bg-card flex-1"
-                />
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleAddChecklistItem}
-                  className="h-8 px-2.5 text-xs"
-                >
-                  <Plus className="size-3.5" />
-                </Button>
-              </div>
-              {checklistItems.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {checklistItems.map((item, idx) => (
-                    <span
-                      key={idx}
-                      className="inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-0.5 text-[11px] text-foreground"
-                    >
-                      <span>{item}</span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setChecklistItems((prev) => prev.filter((_, i) => i !== idx))
-                        }
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="size-2.5" />
-                      </button>
-                    </span>
-                  ))}
+            {/* Row 5: Checklist Steps & Deliverable Link */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1.5">
+                  Checklist Steps{" "}
+                  {checklistItems.length > 0 && `(${checklistItems.length})`}
+                </label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    placeholder="Add a step & press Enter..."
+                    value={newChecklistInput}
+                    onChange={(e) => setNewChecklistInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddChecklistItem();
+                      }
+                    }}
+                    className="text-sm h-10 bg-background flex-1"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={handleAddChecklistItem}
+                    className="h-10 px-3 text-sm"
+                  >
+                    <Plus className="size-4" />
+                  </Button>
                 </div>
-              )}
+                {checklistItems.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {checklistItems.map((item, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-muted/50 px-2.5 py-1 text-xs text-foreground"
+                      >
+                        <span>{item}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setChecklistItems((prev) =>
+                              prev.filter((_, i) => i !== idx)
+                            )
+                          }
+                          className="text-muted-foreground hover:text-destructive cursor-pointer"
+                        >
+                          <Trash2 className="size-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="flex items-center gap-1.5 text-sm font-semibold text-foreground mb-1.5">
+                  <LinkIcon className="size-3.5 text-muted-foreground" />
+                  <span>Drive / Deliverable Link</span>
+                </label>
+                <Input
+                  placeholder="https://drive.google.com/..."
+                  value={deliverableUrl}
+                  onChange={(e) => setDeliverableUrl(e.target.value)}
+                  className="text-sm h-10 bg-background"
+                />
+              </div>
             </div>
 
-            {/* Deliverable Link */}
+            {/* Row 6: Instructions / Brief */}
             <div>
-              <label className="flex items-center gap-1.5 font-medium text-foreground mb-1">
-                <LinkIcon className="size-3 text-muted-foreground" />
-                <span>Drive / Deliverable Link</span>
+              <label className="block text-sm font-semibold text-foreground mb-1.5">
+                Notes & Instructions
               </label>
-              <Input
-                placeholder="https://drive.google.com/..."
-                value={deliverableUrl}
-                onChange={(e) => setDeliverableUrl(e.target.value)}
-                className="text-xs h-8.5 bg-card"
-              />
-            </div>
-
-            {/* Notes */}
-            <div>
-              <label className="block font-medium text-foreground mb-1">Notes</label>
               <Textarea
-                rows={2}
-                placeholder="Brief or instructions..."
+                rows={3}
+                placeholder="Add brief, references, or deliverable expectations..."
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
-                className="text-xs bg-card"
+                className="text-sm bg-background"
               />
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center justify-end gap-2 pt-2.5 border-t border-border">
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-2.5 pt-4 border-t border-border">
               <Button
                 type="button"
                 variant="secondary"
-                size="sm"
+                size="md"
                 onClick={() => setIsCreateModalOpen(false)}
-                className="text-xs h-8"
+                className="text-sm h-10 px-4"
               >
                 Cancel
               </Button>
               <Button
                 type="submit"
                 variant="primary"
-                size="sm"
+                size="md"
                 disabled={isSubmitting || !title.trim()}
-                className="text-xs h-8"
+                className="text-sm h-10 px-5 shadow-xs"
               >
                 {isSubmitting
-                  ? "Saving..."
-                  : isSelfTask
-                  ? "Create Self Task"
-                  : "Assign Task"}
+                  ? "Creating..."
+                  : unitsNum > 1
+                    ? `Create ${unitsNum} Split Tasks`
+                    : isSelfTask
+                      ? "Create Self Task"
+                      : "Assign Task"}
               </Button>
             </div>
           </form>
