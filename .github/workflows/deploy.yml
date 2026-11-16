@@ -46,11 +46,11 @@ jobs:
           SSH="ssh -i ~/.ssh/id_deploy -p ${{ secrets.VPS_PORT || 22 }}"
           TARGET="${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}"
           $SSH $TARGET "mkdir -p $APP_DIR"
-          # data/ , public/uploads and .env* live on the server and are never overwritten
+          # public/uploads and .env* live on the server and are never overwritten
           rsync -az --delete -e "$SSH" \
-            --exclude 'data/' --exclude 'public/uploads/' \
+            --exclude 'public/uploads/' \
             --exclude '.env*' --exclude 'node_modules/' \
-            .next public package.json package-lock.json next.config.ts ecosystem.config.cjs \
+            .next public data package.json package-lock.json next.config.ts ecosystem.config.cjs \
             $TARGET:$APP_DIR/
 
       - name: Install deps and (re)start with PM2

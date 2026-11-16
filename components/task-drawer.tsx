@@ -21,10 +21,15 @@ import {
   ShieldCheck,
   ListTodo,
   MessageSquare,
+  XCircle,
+  Sparkles,
+  ExternalLink,
+  Loader2,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
 import { TaskPriority, TaskStatus } from "@/lib/types";
 import { isCanonicalAdflowTask } from "@/lib/supabase";
+import { ADFLOW_PRODUCTION_STAGES } from "@/lib/adflow-bridge";
 import { Button } from "./ui/button";
 import { Input, Textarea, Select } from "./ui/field";
 import { Markdown } from "./ui/markdown";
@@ -64,6 +69,7 @@ export function TaskDrawer() {
     currentUser,
     isAdsManagementConnected,
     enforceCanonicalLock,
+    refreshAll,
   } = useTasks();
 
   const [revisionReasonInput, setRevisionReasonInput] = useState("");
@@ -71,6 +77,10 @@ export function TaskDrawer() {
   const [isRevisionOpen, setIsRevisionOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"overview" | "checklist" | "activity">("overview");
   const [descMode, setDescMode] = useState<"edit" | "preview">("edit");
+  const [adflowTarget, setAdflowTarget] = useState<"creator" | "editor">("editor");
+  const [adflowNote, setAdflowNote] = useState("");
+  const [adflowBusy, setAdflowBusy] = useState(false);
+  const [adflowMessage, setAdflowMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
   if (!selectedTaskId) return null;
 
@@ -107,6 +117,56 @@ export function TaskDrawer() {
       ? current.filter((id) => id !== depTaskId)
       : [...current, depTaskId];
     updateTask(task.id, { blockedByTaskIds: updated });
+  };
+
+  const isAdFlowTask = Boolean(task.adId || task.creativeName || isStandardAdflow);
+
+  const executeAdFlowControl = async (
+    action: "approve" | "request_changes" | "reject" | "update_stage" | "create_creative",
+    extra?: Record<string, any>
+  ) => {
+    setAdflowBusy(true);
+    setAdflowMessage(null);
+    try {
+      const res = await fetch("/api/adflow/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          adId: task.adId || (task.id.startsWith("ad-") ? task.id.replace(/^ad-/, "") : undefined),
+          taskId: task.id,
+          creativeName: task.creativeName || task.taskNumber,
+          creatorId: task.adCreatorId || task.assigneeId,
+          actorId: currentUserId,
+          note: adflowNote,
+          target: adflowTarget,
+          ...extra,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        setAdflowMessage({
+          type: "err",
+          text: data.error || "Failed to update AdFlow creative.",
+        });
+      } else {
+        setAdflowMessage({
+          type: "ok",
+          text: data.message || "AdFlow creative updated!",
+        });
+        if (action === "approve" || action === "request_changes" || action === "reject") {
+          setAdflowNote("");
+        }
+        await refreshAll();
+      }
+    } catch (err: any) {
+      setAdflowMessage({
+        type: "err",
+        text: err.message || "Network error updating AdFlow creative.",
+      });
+    } finally {
+      setAdflowBusy(false);
+    }
   };
 
   return (
@@ -365,23 +425,30 @@ export function TaskDrawer() {
                   </div>
 
                   {/* Production Stage (for AdFlow / Creative pipeline tasks) */}
-                  {(task.adId || task.productionStage) && (
+                  {isAdFlowTask && (
                     <div className="grid grid-cols-3 items-center">
-                      <span className="text-muted-foreground font-medium">Stage</span>
+                      <span className="text-muted-foreground font-medium">AdFlow Stage</span>
                       <div className="col-span-2">
                         <Select
-                          value={task.productionStage || "editing"}
-                          onChange={(e) =>
-                            updateTask(task.id, { productionStage: e.target.value })
-                          }
+                          value={task.productionStage || "script_writing"}
+                          disabled={adflowBusy}
+                          onChange={async (e) => {
+                            const nextStage = e.target.value;
+                            if (task.adId || task.id.startsWith("ad-")) {
+                              await executeAdFlowControl("update_stage", {
+                                productionStage: nextStage,
+                              });
+                            } else {
+                              await updateTask(task.id, { productionStage: nextStage });
+                            }
+                          }}
                           className="w-full text-xs h-8 bg-card"
                         >
-                          <option value="ready_for_shoot">Ready for Shoot</option>
-                          <option value="shooting">Shooting</option>
-                          <option value="ready_for_edit">Ready for Edit</option>
-                          <option value="editing">Editing</option>
-                          <option value="pending_review">Pending Review</option>
-                          <option value="approved">Approved</option>
+                          {ADFLOW_PRODUCTION_STAGES.map((stg) => (
+                            <option key={stg.id} value={stg.id}>
+                              {stg.label}
+                            </option>
+                          ))}
                         </Select>
                       </div>
                     </div>
@@ -570,6 +637,217 @@ export function TaskDrawer() {
                     </div>
                   )}
                 </div>
+
+                {/* AdFlow Creative Control & Review Gate */}
+                {isAdFlowTask && isManagerOrAdmin && (
+                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3 text-xs">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="size-4 text-primary" />
+                        <span className="font-bold text-foreground text-sm">
+                          AdFlow Creative Control
+                        </span>
+                        <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-primary/15 text-primary border border-primary/30">
+                          {task.creativeName || task.taskNumber}
+                        </span>
+                      </div>
+                      <span
+                        className={cn(
+                          "text-[10px] font-mono px-2 py-0.5 rounded font-semibold uppercase",
+                          task.adId
+                            ? "bg-emerald-500/15 text-emerald-500 border border-emerald-500/30"
+                            : "bg-amber-500/15 text-amber-500 border border-amber-500/30"
+                        )}
+                      >
+                        {task.adId
+                          ? `Synced · ${(task.productionStage || "script_writing").replace(/_/g, " ")}`
+                          : "Reserved ID (Pending AdFlow Creation)"}
+                      </span>
+                    </div>
+
+                    {task.rawFootageUrl && (
+                      <div className="flex items-center justify-between rounded-lg bg-card/80 border border-border px-3 py-2">
+                        <span className="text-muted-foreground font-medium">Raw Footage Folder:</span>
+                        <a
+                          href={task.rawFootageUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-1 text-primary font-semibold hover:underline"
+                        >
+                          <span>Open Drive Folder</span>
+                          <ExternalLink className="size-3" />
+                        </a>
+                      </div>
+                    )}
+
+                    {!task.adId ? (
+                      <div className="flex items-center justify-between gap-3 rounded-lg bg-card/80 border border-border p-3">
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-foreground">
+                            Creative ID <span className="font-mono text-primary">{task.creativeName || task.taskNumber}</span> is reserved for AdFlow
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            When the creator creates a creative in AdFlow, it will automatically pick up this ID — or click to create it in AdFlow now.
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="primary"
+                          disabled={adflowBusy}
+                          onClick={() =>
+                            executeAdFlowControl("create_creative", {
+                              productionStage: task.productionStage || "script_writing",
+                              scriptText: task.description || task.title,
+                            })
+                          }
+                          className="shrink-0 text-xs h-8 gap-1.5"
+                        >
+                          {adflowBusy ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <Sparkles className="size-3.5" />
+                          )}
+                          <span>Create in AdFlow</span>
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-3 pt-1">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <div>
+                            <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                              Route Revision / Changes To
+                            </label>
+                            <Select
+                              value={adflowTarget}
+                              onChange={(e) =>
+                                setAdflowTarget(e.target.value as "creator" | "editor")
+                              }
+                              className="w-full text-xs h-8 bg-card"
+                            >
+                              <option value="editor">
+                                Editor (changes_requested)
+                              </option>
+                              <option value="creator">
+                                Content Creator (creator_changes_requested)
+                              </option>
+                            </Select>
+                          </div>
+                          <div>
+                            <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                              Assign / Reassign Editor
+                            </label>
+                            <Select
+                              value={task.adEditorId || ""}
+                              onChange={(e) =>
+                                executeAdFlowControl("update_stage", {
+                                  editorId: e.target.value || null,
+                                  productionStage: task.productionStage || "ready_for_edit",
+                                })
+                              }
+                              className="w-full text-xs h-8 bg-card"
+                            >
+                              <option value="">Unassigned Editor</option>
+                              {users
+                                .filter((u) => u.role === "editor")
+                                .map((ed) => (
+                                  <option key={ed.id} value={ed.id}>
+                                    {ed.name}
+                                  </option>
+                                ))}
+                            </Select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                            Review Note / Revision Instructions / Rejection Reason
+                          </label>
+                          <Textarea
+                            rows={2}
+                            placeholder="Enter approval note, revision instructions for creator/editor, or rejection reason..."
+                            value={adflowNote}
+                            onChange={(e) => setAdflowNote(e.target.value)}
+                            className="w-full text-xs bg-card"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="primary"
+                            disabled={adflowBusy}
+                            onClick={() => executeAdFlowControl("approve")}
+                            className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600 cursor-pointer"
+                          >
+                            {adflowBusy ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <Check className="size-3.5" />
+                            )}
+                            <span>
+                              {task.productionStage === "approved"
+                                ? "Re-Approve in AdFlow"
+                                : "Approve in AdFlow"}
+                            </span>
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            disabled={adflowBusy || !adflowNote.trim()}
+                            onClick={() => executeAdFlowControl("request_changes")}
+                            title={
+                              !adflowNote.trim()
+                                ? "Enter a review note above to send revisions"
+                                : undefined
+                            }
+                            className="h-8 text-xs gap-1.5 border-amber-500/40 text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+                          >
+                            <RotateCcw className="size-3.5" />
+                            <span>
+                              {task.productionStage === "approved"
+                                ? `Reopen & Send to ${adflowTarget === "creator" ? "Creator" : "Editor"}`
+                                : `Send Revisions (${adflowTarget === "creator" ? "Creator" : "Editor"})`}
+                            </span>
+                          </Button>
+
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            disabled={adflowBusy || !adflowNote.trim()}
+                            onClick={() => executeAdFlowControl("reject")}
+                            title={
+                              !adflowNote.trim()
+                                ? "Enter a rejection reason above to reject"
+                                : undefined
+                            }
+                            className="h-8 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 cursor-pointer"
+                          >
+                            <XCircle className="size-3.5" />
+                            <span>Reject Creative</span>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {adflowMessage && (
+                      <div
+                        className={cn(
+                          "rounded-lg px-3 py-2 text-xs font-medium",
+                          adflowMessage.type === "ok"
+                            ? "bg-emerald-500/15 text-emerald-500 border border-emerald-500/30"
+                            : "bg-destructive/15 text-destructive border border-destructive/30"
+                        )}
+                      >
+                        {adflowMessage.text}
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             )}
 

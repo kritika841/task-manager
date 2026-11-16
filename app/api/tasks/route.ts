@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin, dateInTargetTimeZone, isCanonicalAdflowTask } from "@/lib/supabase";
+import {
+  supabaseAdmin,
+  dateInTargetTimeZone,
+  isCanonicalAdflowTask,
+  ADFLOW_SUPABASE_URL,
+} from "@/lib/supabase";
 import { loadLocalDb, saveLocalDb } from "@/lib/local-supabase-fallback";
+import {
+  generateNextCreativeIds,
+  getAdFlowHeaders,
+  legacyAdStatusForStage,
+} from "@/lib/adflow-bridge";
 import {
   Task,
   User,
@@ -103,6 +113,9 @@ interface ParsedNotes {
   templateRole?: Role;
   stageHistory?: StageHistoryEntry[];
   completedAt?: string;
+  creativeName?: string;
+  adId?: string;
+  productionStage?: string;
 }
 
 function parseNotes(raw: string | null): ParsedNotes {
@@ -136,6 +149,9 @@ function parseNotes(raw: string | null): ParsedNotes {
         templateRole: parsed.templateRole,
         stageHistory: Array.isArray(parsed.stageHistory) ? parsed.stageHistory : undefined,
         completedAt: parsed.completedAt,
+        creativeName: parsed.creativeName,
+        adId: parsed.adId,
+        productionStage: parsed.productionStage,
       };
     }
   } catch {}
@@ -167,7 +183,10 @@ function stringifyNotes(meta: ParsedNotes): string {
     meta.parentColumnId ||
     meta.templateRole ||
     (meta.stageHistory && meta.stageHistory.length > 0) ||
-    meta.completedAt;
+    meta.completedAt ||
+    meta.creativeName ||
+    meta.adId ||
+    meta.productionStage;
 
   if (!hasExtra) {
     return meta.description || "";
@@ -200,6 +219,9 @@ function stringifyNotes(meta: ParsedNotes): string {
     templateRole: meta.templateRole,
     stageHistory: meta.stageHistory,
     completedAt: meta.completedAt,
+    creativeName: meta.creativeName,
+    adId: meta.adId,
+    productionStage: meta.productionStage,
   });
 }
 
@@ -285,17 +307,17 @@ export async function GET(req: Request) {
       };
     });
 
-    // 3. Fetch active ad creatives from Supabase Ads Management (strictly read-only!)
+    // 3. Fetch active ad creatives from Supabase Ads Management
     const { data: activeAds } = await supabaseAdmin
       .from("ads")
       .select(
-        "id, name, status, production_stage, editor_id, creator_id, editing_started_at, shoot_completed_at, submitted_at, approved_at, drive_url, deadline, notes, created_at, updated_at"
+        "id, name, status, approval_stage, production_stage, editor_id, creator_id, editing_started_at, shoot_completed_at, submitted_at, approved_at, drive_url, raw_footage_url, script_text, editing_freeze, deadline, notes, created_at, updated_at"
       )
       .or("status.neq.approved,production_stage.neq.approved")
       .is("deleted_at", null)
       .order("updated_at", { ascending: false });
 
-    // Load local overrides for AdFlow creatives (never modifies upstream or local `ads` rows)
+    // Load local overrides for AdFlow creatives
     const localDb = loadLocalDb();
     const adOverrides = localDb.ad_overrides || {};
 
@@ -310,6 +332,49 @@ export async function GET(req: Request) {
       console.error("Error fetching daily targets:", targetErr);
       return NextResponse.json({ error: targetErr.message }, { status: 500 });
     }
+
+    // Also fetch any AdFlow ads whose `name` matches a `creativeName` in `targetRows` (even if approved)
+    const targetCreativeNames = Array.from(
+      new Set(
+        (targetRows || [])
+          .map((r) => parseNotes(r.notes).creativeName?.trim().toUpperCase())
+          .filter((n): n is string => Boolean(n))
+      )
+    );
+
+    const adsById = new Map<string, Record<string, any>>();
+    const adsByName = new Map<string, Record<string, any>>();
+
+    for (const ad of activeAds || []) {
+      adsById.set(ad.id, ad);
+      if (ad.name) {
+        adsByName.set(String(ad.name).trim().toUpperCase(), ad);
+      }
+    }
+
+    const missingCreativeNames = targetCreativeNames.filter((n) => !adsByName.has(n));
+    if (missingCreativeNames.length > 0) {
+      try {
+        const inList = missingCreativeNames.map((n) => `"${n}"`).join(",");
+        const res = await fetch(
+          `${ADFLOW_SUPABASE_URL}/rest/v1/ads?name=in.(${encodeURIComponent(inList)})&deleted_at=is.null&select=id,name,status,approval_stage,production_stage,editor_id,creator_id,editing_started_at,shoot_completed_at,submitted_at,approved_at,drive_url,raw_footage_url,script_text,editing_freeze,deadline,notes,created_at,updated_at`,
+          { headers: getAdFlowHeaders() }
+        );
+        if (res.ok) {
+          const matchedAds = await res.json();
+          if (Array.isArray(matchedAds)) {
+            for (const ad of matchedAds) {
+              adsById.set(ad.id, ad);
+              if (ad.name) {
+                adsByName.set(String(ad.name).trim().toUpperCase(), ad);
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    const mergedAdIds = new Set<string>();
 
     // 5. Fetch recent audit logs for tasks
     const { data: auditRows } = await supabaseAdmin
@@ -380,7 +445,45 @@ export async function GET(req: Request) {
       const empCode = assignee?.employeeCode || getEmployeeCode(assignee?.name || "EMP");
 
       userTargetCounts[empCode] = (userTargetCounts[empCode] || 0) + 1;
-      const taskNumber = `${empCode}-${String(userTargetCounts[empCode]).padStart(2, "0")}`;
+
+      const resolvedCreativeName = parsedNotes.creativeName
+        ? parsedNotes.creativeName.trim().toUpperCase()
+        : undefined;
+      const matchedAd = resolvedCreativeName
+        ? adsByName.get(resolvedCreativeName)
+        : parsedNotes.adId
+        ? adsById.get(parsedNotes.adId)
+        : undefined;
+
+      if (matchedAd?.id) {
+        mergedAdIds.add(matchedAd.id);
+      }
+
+      const taskNumber =
+        resolvedCreativeName ||
+        matchedAd?.name ||
+        `${empCode}-${String(userTargetCounts[empCode]).padStart(2, "0")}`;
+
+      // If linked to a live AdFlow creative, synchronize status & productionStage from AdFlow
+      const liveProdStage = matchedAd?.production_stage || parsedNotes.productionStage;
+      const liveAdStatus = matchedAd?.status;
+
+      if (matchedAd) {
+        const stg = String(matchedAd.production_stage || "").toLowerCase();
+        const stRaw = String(matchedAd.status || "").toLowerCase();
+        if (stg === "approved" || stRaw === "approved") {
+          status = "completed";
+        } else if (stg === "creator_review" || stg === "final_review" || stRaw === "pending_review") {
+          status = "in_review";
+        } else if (
+          stg === "editing" ||
+          stg === "shoot_complete" ||
+          stg === "changes_requested" ||
+          stg === "creator_changes_requested"
+        ) {
+          status = "in_progress";
+        }
+      }
 
       const tags: string[] =
         parsedNotes.tags && parsedNotes.tags.length > 0
@@ -392,6 +495,9 @@ export async function GET(req: Request) {
         if (row.task_name.toLowerCase().includes("script")) tags.push("Creative");
         if (row.task_name.toLowerCase().includes("shoot")) tags.push("Production");
       }
+      if (resolvedCreativeName && !tags.includes("AdFlow")) {
+        tags.unshift("AdFlow");
+      }
 
       // Generate unit checklist subtasks
       const subtasks: Subtask[] = [];
@@ -400,10 +506,12 @@ export async function GET(req: Request) {
       } else {
         const totalUnits = Math.max(targetQty, completedQty, 1);
         for (let i = 1; i <= totalUnits; i++) {
-          const isDone = i <= completedQty;
+          const isDone = status === "completed" || i <= completedQty;
           subtasks.push({
             id: `sub-${row.id}-${i}`,
-            title: `Unit ${i} of ${row.task_name.replace(/\s*\(carried forward\)/i, "")}`,
+            title: resolvedCreativeName
+              ? `Deliver Creative ${resolvedCreativeName}: ${row.task_name}`
+              : `Unit ${i} of ${row.task_name.replace(/\s*\(carried forward\)/i, "")}`,
             completed: isDone,
             completedAt: isDone ? row.updated_at : undefined,
             assignedTo: row.user_id,
@@ -417,7 +525,7 @@ export async function GET(req: Request) {
       const fallbackStageHistory: StageHistoryEntry[] = [
         {
           stage: status,
-          label: formatStageLabel(status, parsedNotes.subColumnId),
+          label: formatStageLabel(status, parsedNotes.subColumnId, liveProdStage),
           timestamp: row.created_at || new Date().toISOString(),
         },
       ];
@@ -425,6 +533,12 @@ export async function GET(req: Request) {
         parsedNotes.stageHistory && parsedNotes.stageHistory.length > 0
           ? parsedNotes.stageHistory
           : fallbackStageHistory;
+
+      const isAdRevision =
+        parsedNotes.isRevisionRequested ||
+        liveProdStage === "changes_requested" ||
+        liveProdStage === "creator_changes_requested" ||
+        liveAdStatus === "rejected";
 
       return {
         id: row.id,
@@ -444,15 +558,26 @@ export async function GET(req: Request) {
         updatedAt: row.updated_at || new Date().toISOString(),
         comments: taskComments,
         targetQuantity: targetQty,
-        completedQuantity: completedQty,
+        completedQuantity: status === "completed" ? targetQty : completedQty,
         manualCompletedQuantity: row.manual_completed_quantity || 0,
         autoCompletedQuantity: row.auto_completed_quantity || 0,
         isCarried,
         carriedFromTargetId: row.carried_from_target_id,
-        deliverableUrl: parsedNotes.deliverableUrl || parsedNotes.deliverableAsset?.url,
+        deliverableUrl:
+          matchedAd?.drive_url ||
+          parsedNotes.deliverableUrl ||
+          parsedNotes.deliverableAsset?.url,
         deliverableAsset: parsedNotes.deliverableAsset,
-        isRevisionRequested: parsedNotes.isRevisionRequested,
-        revisionReason: parsedNotes.revisionReason,
+        isRevisionRequested: isAdRevision,
+        revisionReason:
+          parsedNotes.revisionReason ||
+          (liveAdStatus === "rejected"
+            ? "Rejected"
+            : liveProdStage === "creator_changes_requested"
+            ? "Creator Changes Requested"
+            : liveProdStage === "changes_requested"
+            ? "Editor Changes Requested"
+            : undefined),
         revisionNotes: parsedNotes.revisionNotes,
         blockedByTaskIds: parsedNotes.blockedByTaskIds || [],
         startDate: parsedNotes.startDate,
@@ -463,7 +588,17 @@ export async function GET(req: Request) {
         isArchived,
         archivedAt: parsedNotes.archivedAt,
         archivedBy: parsedNotes.archivedBy,
-        isCanonicalAdflowTask: isStandardAdflow,
+        isCanonicalAdflowTask: isStandardAdflow || Boolean(resolvedCreativeName),
+        adId: matchedAd?.id || parsedNotes.adId,
+        creativeName: resolvedCreativeName || matchedAd?.name,
+        productionStage: liveProdStage,
+        adStatus: liveAdStatus,
+        approvalStage: matchedAd?.approval_stage,
+        rawFootageUrl: matchedAd?.raw_footage_url,
+        scriptText: matchedAd?.script_text,
+        adCreatorId: matchedAd?.creator_id || row.user_id,
+        adEditorId: matchedAd?.editor_id,
+        editingFreeze: matchedAd?.editing_freeze,
         subColumnId: parsedNotes.subColumnId,
         parentColumnId: parsedNotes.parentColumnId || status,
         templateRole: parsedNotes.templateRole,
@@ -474,18 +609,24 @@ export async function GET(req: Request) {
       };
     });
 
-    // 8. Convert active AdFlow creatives into Task models (read-only from `ads` + merged with local `ad_overrides`)
-    const adCreativeTasks: Task[] = (activeAds || []).map((ad) => {
+    // 8. Convert active AdFlow creatives into Task models (skipping any already merged with a Task Manager task)
+    const unmergedActiveAds = (activeAds || []).filter((ad) => !mergedAdIds.has(ad.id));
+    const adCreativeTasks: Task[] = unmergedActiveAds.map((ad) => {
       const override = adOverrides[ad.id] || adOverrides[`ad-${ad.id}`] || {};
       const stage = (override.productionStage || ad.production_stage || "").toLowerCase();
       const statusRaw = (ad.status || "").toLowerCase();
 
       const isShootStage =
+        stage === "script_writing" ||
         stage === "ready_to_shoot" ||
         stage === "ready_for_shoot" ||
         stage === "shoot_complete" ||
-        stage === "shooting";
-      const isEditStage = stage === "ready_for_edit" || stage === "editing";
+        stage === "shooting" ||
+        stage === "creator_changes_requested";
+      const isEditStage =
+        stage === "ready_for_edit" ||
+        stage === "editing" ||
+        stage === "changes_requested";
 
       let defaultAssigneeId = "";
       if (isShootStage) {
@@ -515,23 +656,37 @@ export async function GET(req: Request) {
         defaultStatus = "in_review";
         stageLabel = "Creator Review";
         defaultSubColumnId = "ed-creator-review";
+      } else if (stage === "creator_changes_requested") {
+        defaultStatus = "in_progress";
+        stageLabel = "Changes: Creator";
+        defaultSubColumnId = "cc-script-draft";
+        defaultTemplateRole = "content_creator";
+      } else if (stage === "changes_requested") {
+        defaultStatus = "in_progress";
+        stageLabel = "Changes: Editor";
+        defaultSubColumnId = "ed-primary-cut";
       } else if (stage === "editing") {
         defaultStatus = "in_progress";
         stageLabel = "Video Editing";
         defaultSubColumnId = "ed-primary-cut";
       } else if (stage === "shoot_complete" || stage === "shooting") {
         defaultStatus = "in_progress";
-        stageLabel = stage === "shooting" ? "Shooting" : "Shoot Complete (Footage Review)";
+        stageLabel = stage === "shooting" ? "Shooting" : "Shoot Complete";
         defaultSubColumnId = "cc-broll-capture";
         defaultTemplateRole = "content_creator";
       } else if (stage === "ready_for_edit") {
         defaultStatus = "todo";
-        stageLabel = "Queued for Edit";
+        stageLabel = "Ready for Editing";
         defaultSubColumnId = "ed-rough-cut";
       } else if (stage === "ready_to_shoot" || stage === "ready_for_shoot") {
         defaultStatus = "todo";
         stageLabel = "Ready to Shoot";
         defaultSubColumnId = "cc-video-shoots";
+        defaultTemplateRole = "content_creator";
+      } else if (stage === "script_writing") {
+        defaultStatus = "todo";
+        stageLabel = "Script in Progress";
+        defaultSubColumnId = "cc-script-draft";
         defaultTemplateRole = "content_creator";
       } else if (stage === "backlog") {
         defaultStatus = "backlog";
@@ -630,8 +785,21 @@ export async function GET(req: Request) {
             ? override.deliverableUrl
             : override.deliverableAsset?.url || ad.drive_url,
         deliverableAsset: override.deliverableAsset,
-        isRevisionRequested: override.isRevisionRequested,
-        revisionReason: override.revisionReason,
+        isRevisionRequested:
+          override.isRevisionRequested !== undefined
+            ? override.isRevisionRequested
+            : stage === "changes_requested" ||
+              stage === "creator_changes_requested" ||
+              statusRaw === "rejected",
+        revisionReason:
+          override.revisionReason ||
+          (statusRaw === "rejected"
+            ? "Rejected"
+            : stage === "creator_changes_requested"
+            ? "Creator Changes Requested"
+            : stage === "changes_requested"
+            ? "Editor Changes Requested"
+            : undefined),
         revisionNotes: override.revisionNotes,
         blockedByTaskIds: override.blockedByTaskIds || [],
         startDate: override.startDate,
@@ -645,6 +813,13 @@ export async function GET(req: Request) {
         adId: ad.id,
         creativeName: ad.name,
         productionStage: override.productionStage || ad.production_stage,
+        adStatus: override.adStatus || ad.status,
+        approvalStage: ad.approval_stage,
+        rawFootageUrl: ad.raw_footage_url,
+        scriptText: ad.script_text,
+        adCreatorId: ad.creator_id,
+        adEditorId: ad.editor_id,
+        editingFreeze: ad.editing_freeze,
         subColumnId:
           override.subColumnId !== undefined ? override.subColumnId : defaultSubColumnId,
         parentColumnId: override.parentColumnId || status,
@@ -740,15 +915,43 @@ export async function POST(req: Request) {
     const splitUnitsCount = targetQuantity > 1 ? targetQuantity : 1;
     const createdRows: any[] = [];
 
+    // Check if this task is an AdFlow creative task so we generate sequential Creative IDs (e.g. KRI0036..KRI0039)
+    const dbSnapshot = loadLocalDb();
+    const assigneeProfile = dbSnapshot.profiles.find((p) => p.id === userId);
+    const assigneeRole = String(assigneeProfile?.role || "").toLowerCase();
+    const isCreativeTask =
+      Boolean(body.generateCreativeId) ||
+      isCanonicalAdflowTask(taskName) ||
+      assigneeRole === "content_creator" ||
+      (Array.isArray(body.tags) &&
+        body.tags.some((t: string) =>
+          ["adflow", "creative", "video ads"].includes(String(t).toLowerCase())
+        ));
+
+    let generatedCreativeIds: string[] = [];
+    if (isCreativeTask) {
+      const generated = await generateNextCreativeIds(userId, splitUnitsCount);
+      generatedCreativeIds = generated.creativeIds;
+    }
+
     for (let i = 1; i <= splitUnitsCount; i++) {
-      const unitTaskName =
+      const assignedCreativeId = generatedCreativeIds[i - 1];
+      const baseUnitName =
         splitUnitsCount > 1 ? `${taskName} (${i}/${splitUnitsCount})` : taskName;
+      const unitTaskName = assignedCreativeId
+        ? `${assignedCreativeId} — ${baseUnitName}`
+        : baseUnitName;
+
+      const baseTags: string[] = Array.isArray(body.tags) ? [...body.tags] : [];
+      if (assignedCreativeId && !baseTags.includes("AdFlow")) {
+        baseTags.unshift("AdFlow");
+      }
 
       const notesMeta: ParsedNotes = {
         description: body.description || "",
         priority: body.priority || "medium",
         project: body.project,
-        tags: Array.isArray(body.tags) ? body.tags : undefined,
+        tags: baseTags.length > 0 ? baseTags : undefined,
         deliverableUrl: body.deliverableUrl,
         deliverableAsset: body.deliverableAsset,
         blockedByTaskIds: body.blockedByTaskIds,
@@ -762,6 +965,10 @@ export async function POST(req: Request) {
         templateRole: body.templateRole,
         stageHistory: [initialStageEntry],
         completedAt: initialStatus === "completed" ? nowIso : undefined,
+        creativeName: assignedCreativeId,
+        productionStage: assignedCreativeId
+          ? body.productionStage || "script_writing"
+          : undefined,
       };
 
       const initialCompleted = initialStatus === "completed" ? 1 : 0;
@@ -833,6 +1040,7 @@ export async function POST(req: Request) {
       target: firstRow,
       targets: createdRows,
       splitCount: splitUnitsCount,
+      creativeIds: generatedCreativeIds,
     });
   } catch (error: any) {
     console.error("POST /api/tasks error:", error);
@@ -1051,6 +1259,59 @@ export async function PATCH(req: Request) {
       currentOverride.updatedAt = new Date().toISOString();
       db.ad_overrides[realAdId] = currentOverride;
       saveLocalDb(db);
+
+      // Sync stage / revision / approval changes to AdFlow (`ads` table)
+      if (
+        currentOverride.productionStage ||
+        status !== undefined ||
+        isRevisionRequested !== undefined ||
+        deliverableUrl !== undefined
+      ) {
+        try {
+          const targetProdStage =
+            currentOverride.productionStage ||
+            (isRevisionRequested
+              ? "changes_requested"
+              : nextAdStatus === "completed"
+              ? "approved"
+              : nextAdStatus === "in_review"
+              ? "final_review"
+              : nextAdStatus === "in_progress"
+              ? "editing"
+              : "ready_for_edit");
+
+          const adPatch: Record<string, any> = {
+            production_stage: targetProdStage,
+            status: legacyAdStatusForStage(targetProdStage),
+            approval_stage:
+              targetProdStage === "approved"
+                ? "complete"
+                : targetProdStage === "final_review"
+                ? "admin_final"
+                : "manager_review",
+            updated_at: new Date().toISOString(),
+            workflow_status_changed_at: new Date().toISOString(),
+          };
+          if (targetProdStage === "approved") {
+            adPatch.approved_at = new Date().toISOString();
+            adPatch.final_approved_at = new Date().toISOString();
+          }
+          if (deliverableUrl) {
+            adPatch.drive_url = deliverableUrl;
+          }
+
+          await fetch(
+            `${ADFLOW_SUPABASE_URL}/rest/v1/ads?id=eq.${encodeURIComponent(realAdId)}`,
+            {
+              method: "PATCH",
+              headers: getAdFlowHeaders(),
+              body: JSON.stringify(adPatch),
+            }
+          );
+        } catch (err) {
+          console.warn("Could not sync ad-* update to AdFlow:", err);
+        }
+      }
 
       if (assigneeId && assigneeId !== prevAssignee) {
         await sendTargetedNotification(
@@ -1291,6 +1552,10 @@ export async function PATCH(req: Request) {
       currentNotesMeta.stageHistory = existingHist;
     }
 
+    if (productionStage !== undefined) {
+      currentNotesMeta.productionStage = productionStage;
+    }
+
     updates.notes = stringifyNotes(currentNotesMeta);
 
     const { data: updatedRow, error: updateErr } = await supabaseAdmin
@@ -1303,6 +1568,58 @@ export async function PATCH(req: Request) {
     if (updateErr) {
       console.error("Update target error:", updateErr);
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    }
+
+    // If this task is linked to an AdFlow creative (by adId or creativeName), sync stage/status to AdFlow
+    if (
+      (currentNotesMeta.adId || currentNotesMeta.creativeName) &&
+      (productionStage !== undefined || status !== undefined || isRevisionRequested !== undefined)
+    ) {
+      try {
+        const targetStage =
+          currentNotesMeta.productionStage ||
+          (isRevisionRequested
+            ? "changes_requested"
+            : nextTargetStatus === "completed"
+            ? "approved"
+            : nextTargetStatus === "in_review"
+            ? "final_review"
+            : nextTargetStatus === "in_progress"
+            ? "editing"
+            : "script_writing");
+
+        const adPatch: Record<string, any> = {
+          production_stage: targetStage,
+          status: legacyAdStatusForStage(targetStage),
+          approval_stage:
+            targetStage === "approved"
+              ? "complete"
+              : targetStage === "final_review"
+              ? "admin_final"
+              : "manager_review",
+          updated_at: new Date().toISOString(),
+          workflow_status_changed_at: new Date().toISOString(),
+        };
+        if (targetStage === "approved") {
+          adPatch.approved_at = new Date().toISOString();
+          adPatch.final_approved_at = new Date().toISOString();
+        }
+        if (deliverableUrl) {
+          adPatch.drive_url = deliverableUrl;
+        }
+
+        const filterQuery = currentNotesMeta.adId
+          ? `id=eq.${encodeURIComponent(currentNotesMeta.adId)}`
+          : `name=ilike.${encodeURIComponent(currentNotesMeta.creativeName!)}&deleted_at=is.null`;
+
+        await fetch(`${ADFLOW_SUPABASE_URL}/rest/v1/ads?${filterQuery}`, {
+          method: "PATCH",
+          headers: getAdFlowHeaders(),
+          body: JSON.stringify(adPatch),
+        });
+      } catch (err) {
+        console.warn("Could not sync linked target task to AdFlow:", err);
+      }
     }
 
     // Insert audit log

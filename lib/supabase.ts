@@ -1,11 +1,27 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const supabaseUrl =
-  process.env.NEXT_PUBLIC_SUPABASE_URL ||
-  "https://ads.satmi.in";
-const supabaseAnonKey =
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+const DEFAULT_ADFLOW_URL = "https://ads.satmi.in";
+const DEFAULT_ADFLOW_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkZmxvdy12cHMiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTc4MzU4NTI5MSwiZXhwIjoyMDk5MTYxMjkxfQ.PNmYQFpq0Yu7QwCq08JAivVQ9WCS3rWzT09CwPs8xZg";
+const DEFAULT_ADFLOW_SERVICE_KEY =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkZmxvdy12cHMiLCJyb2xlIjoic2VydmljZV9yb2xlIiwiaWF0IjoxNzgzNTg1MjkxLCJleHAiOjIwOTkxNjEyOTF9.kcaaZgkR7f_65dSnvynjZ22cqdU451Q934r0JwvnU-8";
+
+const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const isLegacyDeadUrl = envUrl.includes("qexjnswuvbyjenfrbwvj");
+
+export const ADFLOW_SUPABASE_URL =
+  !envUrl || isLegacyDeadUrl ? DEFAULT_ADFLOW_URL : envUrl;
+export const ADFLOW_SUPABASE_ANON_KEY =
+  !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || isLegacyDeadUrl
+    ? DEFAULT_ADFLOW_ANON_KEY
+    : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+export const ADFLOW_SUPABASE_SERVICE_KEY =
+  !process.env.SUPABASE_SERVICE_ROLE_KEY || isLegacyDeadUrl
+    ? DEFAULT_ADFLOW_SERVICE_KEY
+    : process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const supabaseUrl = ADFLOW_SUPABASE_URL;
+const supabaseAnonKey = ADFLOW_SUPABASE_ANON_KEY;
 
 // Browser client for realtime subscriptions
 export const supabase = createClient(supabaseUrl, supabaseAnonKey);
@@ -15,10 +31,7 @@ function createServerAdminClient(): SupabaseClient {
   if (typeof window !== "undefined") {
     return supabase;
   }
-  const serviceKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
-    supabaseAnonKey;
+  const serviceKey = ADFLOW_SUPABASE_SERVICE_KEY;
 
   // Use resilient fetch wrapper on the server so if Supabase DNS/network is offline,
   // API routes seamlessly fall back to the persistent local database store.
@@ -52,6 +65,7 @@ export function dateInTargetTimeZone(date = new Date()): string {
 }
 
 export const creatorTaskOptions = [
+  "Creative creation",
   "Script writing",
   "Video shoots",
   "Raw clip generation",
@@ -108,6 +122,7 @@ export function taskOptionsForRole(role: string | undefined): readonly string[] 
 }
 
 export const CANONICAL_ADFLOW_TASKS = [
+  "Creative creation",
   "Ad video edits",
   "Social media edits",
   "Script writing",
@@ -120,6 +135,16 @@ export type CanonicalAdflowTask = (typeof CANONICAL_ADFLOW_TASKS)[number];
 export function isCanonicalAdflowTask(taskName: string | undefined | null): boolean {
   if (!taskName) return false;
   const trimmed = taskName.trim().toLowerCase();
+  if (
+    trimmed.includes("creative") ||
+    trimmed.includes("script") ||
+    trimmed.includes("shoot") ||
+    trimmed.includes("raw clip") ||
+    trimmed.includes("ad video") ||
+    trimmed.includes("video edit")
+  ) {
+    return true;
+  }
   return CANONICAL_ADFLOW_TASKS.some((canonical) => {
     const cLower = canonical.toLowerCase();
     return (

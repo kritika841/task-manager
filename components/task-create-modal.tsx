@@ -20,7 +20,11 @@ import {
   Subtask,
   Role,
 } from "@/lib/types";
-import { dateInTargetTimeZone } from "@/lib/supabase";
+import {
+  dateInTargetTimeZone,
+  taskOptionsForRole,
+  isCanonicalAdflowTask,
+} from "@/lib/supabase";
 import { Button } from "./ui/button";
 import { Input, Textarea, Select } from "./ui/field";
 import { cn } from "@/lib/utils";
@@ -65,6 +69,7 @@ export function TaskCreateModal() {
   const [checklistItems, setChecklistItems] = useState<string[]>([]);
   const [newChecklistInput, setNewChecklistInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [previewCreativeIds, setPreviewCreativeIds] = useState<string[]>([]);
 
   useEffect(() => {
     if (isCreateModalOpen) {
@@ -139,13 +144,46 @@ export function TaskCreateModal() {
     return stages;
   }, [matchingRoleTemplates]);
 
+  const canonicalRoleTasks = useMemo(() => {
+    if (!selectedAssignee) return [];
+    return taskOptionsForRole(selectedAssignee.role);
+  }, [selectedAssignee]);
+
+  const unitsNum = Math.max(1, Number(targetQuantity) || 1);
+  const willGenerateCreativeIds = Boolean(
+    selectedAssignee?.role === "content_creator" ||
+      isCanonicalAdflowTask(title)
+  );
+
+  useEffect(() => {
+    if (!isCreateModalOpen || !assigneeId || !willGenerateCreativeIds) {
+      setPreviewCreativeIds([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(
+      `/api/adflow/creative-ids?creatorId=${encodeURIComponent(
+        assigneeId
+      )}&count=${unitsNum}`
+    )
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!cancelled && data?.nextSequentialIds) {
+          setPreviewCreativeIds(data.nextSequentialIds);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isCreateModalOpen, assigneeId, unitsNum, willGenerateCreativeIds]);
+
   if (!isCreateModalOpen) return null;
 
   const isSelfTask = Boolean(currentUserId && assigneeId === currentUserId);
   const assigneeCapacity = assigneeId
     ? getMemberCapacity(assigneeId)
     : { max: 6, current: 0, percent: 0, isOverAllocated: false };
-  const unitsNum = Math.max(1, Number(targetQuantity) || 1);
   const projectedTotal = (assigneeCapacity.current || 0) + unitsNum;
   const willOverAllocate = projectedTotal > assigneeCapacity.max;
 
@@ -155,6 +193,14 @@ export function TaskCreateModal() {
       if (val === "__custom__") setTitle("");
       setSubColumnId(undefined);
       setTemplateRole(undefined);
+      return;
+    }
+
+    if (val.startsWith("canonical:")) {
+      const taskTitle = val.replace(/^canonical:/, "");
+      setTitle(taskTitle);
+      setSubColumnId(undefined);
+      setTemplateRole(selectedAssignee?.role);
       return;
     }
 
@@ -379,17 +425,28 @@ export function TaskCreateModal() {
                   className="w-full text-sm h-10 bg-background"
                 >
                   <option value="">
-                    {assigneeRoleStages.length > 0
-                      ? `Select from ${selectedAssignee?.role.replace("_", " ")} template...`
-                      : `Custom task (No ${selectedAssignee?.role.replace("_", " ")} template tasks)`}
+                    {assigneeRoleStages.length > 0 || canonicalRoleTasks.length > 0
+                      ? `Select ${selectedAssignee?.role.replace("_", " ")} task...`
+                      : `Custom task`}
                   </option>
                   {assigneeRoleStages.length > 0 && (
                     <optgroup
-                      label={`${primaryRoleTemplate?.name || selectedAssignee?.role.replace("_", " ")} Tasks`}
+                      label={`${primaryRoleTemplate?.name || selectedAssignee?.role.replace("_", " ")} Template Tasks`}
                     >
                       {assigneeRoleStages.map((s) => (
                         <option key={s.key} value={s.key}>
                           [{s.parentLabel}] {s.label} ({s.units}u)
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {canonicalRoleTasks.length > 0 && (
+                    <optgroup
+                      label={`${selectedAssignee?.role.replace("_", " ")} Pipeline Tasks`}
+                    >
+                      {canonicalRoleTasks.map((taskLabel) => (
+                        <option key={`canonical:${taskLabel}`} value={`canonical:${taskLabel}`}>
+                          {taskLabel}
                         </option>
                       ))}
                     </optgroup>
@@ -487,6 +544,30 @@ export function TaskCreateModal() {
                     {title.trim() ? `"${title.trim()} (1/${unitsNum})"` : `1/${unitsNum}`}{" "}
                     to {`(${unitsNum}/${unitsNum})`}) for{" "}
                     {selectedAssignee?.name || "the user"}.
+                  </span>
+                </div>
+              )}
+
+              {previewCreativeIds.length > 0 && (
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Sparkles className="size-3.5 shrink-0" />
+                    <span>
+                      AdFlow Creative {previewCreativeIds.length > 1 ? "IDs" : "ID"} Generated:
+                    </span>
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {previewCreativeIds.map((cid) => (
+                        <span
+                          key={cid}
+                          className="font-mono font-bold px-2 py-0.5 rounded bg-emerald-500/20 border border-emerald-500/30 text-[11px]"
+                        >
+                          {cid}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <span className="text-[10px] opacity-80 shrink-0">
+                    Synced with AdFlow
                   </span>
                 </div>
               )}

@@ -98,15 +98,247 @@
       "deleted_at": null,
       "created_at": "2026-07-15T10:57:36.918884+00:00",
       "updated_at": "2026-10-15T05:11:15.632381+00:00"
+    },
+    {
+      "id": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+      "name": "kritika test",
+      "email": "smvkritika@gmail.com",
+      "role": "content_creator",
+      "avatar_url": null,
+      "active": true,
+      "deleted_at": null,
+      "created_at": "2026-07-24T08:47:41.473777+00:00",
+      "updated_at": "2026-11-16T10:47:56.290375+00:00"
     }
   ],
   "profile_overrides": {},
   "local_profiles": [],
-  "daily_team_targets": [],
+  "daily_team_targets": [
+    {
+      "id": "905c9cf9-ee3b-43ab-b5f3-f4ec89e0e8ae",
+      "created_at": "2026-11-16T11:29:10.316Z",
+      "updated_at": "2026-11-16T11:29:10.525Z",
+      "user_id": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+      "target_date": "2026-11-16",
+      "task_name": "KRI0036 — Creative creation (1/4)",
+      "target_quantity": 1,
+      "completed_quantity": 0,
+      "manual_completed_quantity": 0,
+      "auto_completed_quantity": 0,
+      "notes": "{\"__meta__\":true,\"desc\":\"Create vertical 9:16 ad creative hooks for Satmi campaign\",\"priority\":\"high\",\"tags\":[\"AdFlow\"],\"statusOverride\":\"in_review\",\"parentColumnId\":\"todo\",\"stageHistory\":[{\"stage\":\"todo\",\"label\":\"To Do\",\"timestamp\":\"2026-11-16T11:29:10.264Z\",\"actorName\":\"Kritika\"},{\"stage\":\"in_review\",\"label\":\"Final review\",\"timestamp\":\"2026-11-16T11:29:10.525Z\",\"actorName\":\"Admin\"}],\"creativeName\":\"KRI0036\",\"productionStage\":\"final_review\",\"adId\":\"a45930a4-5bdf-4642-a58a-f4f63fa2694f\",\"deliverableUrl\":\"https://drive.google.com/file/d/1QxJy7v95whSv50tnN5b-xEsVrZ2UIJbK/view?usp=sharing\",\"isRevisionRequested\":false}",
+      "assigned_by": "4a206a68-c5a4-4d12-be76-90468ea3df44"
+    },
+    {
+      "id": "360d932a-940b-42c7-a8e0-cb4f85a8c9b4",
+      "created_at": "2026-11-16T11:29:10.317Z",
+      "updated_at": "2026-11-16T11:29:10.694Z",
+      "user_id": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+      "target_date": "2026-11-16",
+      "task_name": "KRI0037 — Creative creation (2/4)",
+      "target_quantity": 1,
+      "completed_quantity": 0,
+      "manual_completed_quantity": 0,
+      "auto_completed_quantity": 0,
+      "notes": "{\"__meta__\":true,\"desc\":\"Create vertical 9:16 ad creative hooks for Satmi campaign\",\"priority\":\"high\",\"tags\":[\"AdFlow\"],\"statusOverride\":\"in_review\",\"parentColumnId\":\"todo\",\"stageHistory\":[{\"stage\":\"todo\",\"label\":\"To Do\",\"timestamp\":\"2026-11-16T11:29:10.264Z\",\"actorName\":\"Kritika\"},{\"stage\":\"in_review\",\"label\":\"Creator review\",\"timestamp\":\"2026-11-16T11:29:10.694Z\",\"actorName\":\"Admin\"}],\"creativeName\":\"KRI0037\",\"productionStage\":\"creator_review\",\"adId\":\"e2f44127-e5cc-4fdf-93aa-5f3dc4c2338a\",\"deliverableUrl\":\"https://drive.google.com/file/d/1QxJy7v95whSv50tnN5b-xEsVrZ2UIJbK/view?usp=sharing\",\"isRevisionRequested\":false}",
+      "assigned_by": "4a206a68-c5a4-4d12-be76-90468ea3df44"
+    },
+    {
+      "id": "4dcfcb19-7ebc-49ad-8957-147804aa6b8f",
+      "created_at": "2026-11-16T11:29:10.318Z",
+      "updated_at": "2026-11-16T11:29:11.544Z",
+      "user_id": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+      "target_date": "2026-11-16",
+      "task_name": "KRI0038 — Creative creation (3/4)",
+      "target_quantity": 1,
+      "completed_quantity": 0,
+      "manual_completed_quantity": 0,
+      "auto_completed_quantity": 0,
+      "notes": "{\"__meta__\":true,\"desc\":\"Create vertical 9:16 ad creative hooks for Satmi campaign\",\"priority\":\"high\",\"tags\":[\"AdFlow\"],\"statusOverride\":\"in_progress\",\"parentColumnId\":\"todo\",\"stageHistory\":[{\"stage\":\"todo\",\"label\":\"To Do\",\"timestamp\":\"2026-11-16T11:29:10.264Z\",\"actorName\":\"Kritika\"},{\"stage\":\"in_progress\",\"label\":\"Editing\",\"timestamp\":\"2026-11-16T11:29:10.871Z\",\"actorName\":\"Admin\"},{\"stage\":\"in_progress\",\"label\":\"Changes requested to creator\",\"timestamp\":\"2026-11-16T11:29:11.544Z\",\"actorName\":\"Admin\"}],\"creativeName\":\"KRI0038\",\"productionStage\":\"creator_changes_requested\",\"adId\":\"802b8188-4b1a-4c18-96fb-64322808b27c\",\"deliverableUrl\":\"https://drive.google.com/file/d/1QxJy7v95whSv50tnN5b-xEsVrZ2UIJbK/view?usp=sharing\",\"isRevisionRequested\":true,\"revisionReason\":\"Creator Changes Requested\",\"revisionNotes\":\"Please tighten the opening 3-second hook in the script.\"}",
+      "assigned_by": "4a206a68-c5a4-4d12-be76-90468ea3df44"
+    },
+    {
+      "id": "a1e1e016-5031-4c01-a41c-11ec52b56687",
+      "created_at": "2026-11-16T11:29:10.318Z",
+      "updated_at": "2026-11-16T11:29:11.732Z",
+      "user_id": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+      "target_date": "2026-11-16",
+      "task_name": "KRI0039 — Creative creation (4/4)",
+      "target_quantity": 1,
+      "completed_quantity": 0,
+      "manual_completed_quantity": 0,
+      "auto_completed_quantity": 0,
+      "notes": "{\"__meta__\":true,\"desc\":\"Create vertical 9:16 ad creative hooks for Satmi campaign\",\"priority\":\"high\",\"tags\":[\"AdFlow\"],\"statusOverride\":\"in_progress\",\"parentColumnId\":\"todo\",\"stageHistory\":[{\"stage\":\"todo\",\"label\":\"To Do\",\"timestamp\":\"2026-11-16T11:29:10.264Z\",\"actorName\":\"Kritika\"},{\"stage\":\"todo\",\"label\":\"Ready to shoot\",\"timestamp\":\"2026-11-16T11:29:11.319Z\",\"actorName\":\"Admin\"},{\"stage\":\"in_progress\",\"label\":\"Changes requested to editor\",\"timestamp\":\"2026-11-16T11:29:11.732Z\",\"actorName\":\"Admin\"}],\"creativeName\":\"KRI0039\",\"productionStage\":\"changes_requested\",\"adId\":\"5b473750-3c9d-4e72-8c0e-3de78bd25004\",\"deliverableUrl\":\"https://drive.google.com/file/d/1QxJy7v95whSv50tnN5b-xEsVrZ2UIJbK/view?usp=sharing\",\"isRevisionRequested\":true,\"revisionReason\":\"Editor Changes Requested\",\"revisionNotes\":\"Adjust caption contrast and music volume at 0:08.\"}",
+      "assigned_by": "4a206a68-c5a4-4d12-be76-90468ea3df44"
+    }
+  ],
   "ads": [],
-  "ad_overrides": {},
-  "audit_logs": [],
-  "notifications": [],
+  "ad_overrides": {
+    "a45930a4-5bdf-4642-a58a-f4f63fa2694f": {
+      "status": "in_review",
+      "productionStage": "final_review",
+      "adStatus": "pending_review",
+      "assigneeId": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+      "deliverableUrl": "https://drive.google.com/file/d/1QxJy7v95whSv50tnN5b-xEsVrZ2UIJbK/view?usp=sharing",
+      "isRevisionRequested": false,
+      "stageHistory": [
+        {
+          "stage": "in_review",
+          "label": "Final review",
+          "timestamp": "2026-11-16T11:29:10.525Z",
+          "actorName": "Admin"
+        }
+      ],
+      "completedQuantity": 0,
+      "updatedAt": "2026-11-16T11:29:10.525Z"
+    },
+    "e2f44127-e5cc-4fdf-93aa-5f3dc4c2338a": {
+      "status": "in_review",
+      "productionStage": "creator_review",
+      "adStatus": "pending_review",
+      "assigneeId": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+      "deliverableUrl": "https://drive.google.com/file/d/1QxJy7v95whSv50tnN5b-xEsVrZ2UIJbK/view?usp=sharing",
+      "isRevisionRequested": false,
+      "stageHistory": [
+        {
+          "stage": "in_review",
+          "label": "Creator review",
+          "timestamp": "2026-11-16T11:29:10.694Z",
+          "actorName": "Admin"
+        }
+      ],
+      "completedQuantity": 0,
+      "updatedAt": "2026-11-16T11:29:10.694Z"
+    },
+    "802b8188-4b1a-4c18-96fb-64322808b27c": {
+      "status": "in_progress",
+      "productionStage": "creator_changes_requested",
+      "adStatus": "changes_requested",
+      "assigneeId": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+      "deliverableUrl": "https://drive.google.com/file/d/1QxJy7v95whSv50tnN5b-xEsVrZ2UIJbK/view?usp=sharing",
+      "isRevisionRequested": true,
+      "stageHistory": [
+        {
+          "stage": "in_progress",
+          "label": "Editing",
+          "timestamp": "2026-11-16T11:29:10.871Z",
+          "actorName": "Admin"
+        },
+        {
+          "stage": "in_progress",
+          "label": "Changes requested to creator",
+          "timestamp": "2026-11-16T11:29:11.544Z",
+          "actorName": "Admin"
+        }
+      ],
+      "completedQuantity": 0,
+      "updatedAt": "2026-11-16T11:29:11.544Z",
+      "revisionReason": "Creator Changes Requested",
+      "revisionNotes": "Please tighten the opening 3-second hook in the script."
+    },
+    "5b473750-3c9d-4e72-8c0e-3de78bd25004": {
+      "status": "in_progress",
+      "productionStage": "changes_requested",
+      "adStatus": "changes_requested",
+      "assigneeId": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+      "deliverableUrl": "https://drive.google.com/file/d/1QxJy7v95whSv50tnN5b-xEsVrZ2UIJbK/view?usp=sharing",
+      "isRevisionRequested": true,
+      "stageHistory": [
+        {
+          "stage": "todo",
+          "label": "Ready to shoot",
+          "timestamp": "2026-11-16T11:29:11.319Z",
+          "actorName": "Admin"
+        },
+        {
+          "stage": "in_progress",
+          "label": "Changes requested to editor",
+          "timestamp": "2026-11-16T11:29:11.732Z",
+          "actorName": "Admin"
+        }
+      ],
+      "completedQuantity": 0,
+      "updatedAt": "2026-11-16T11:29:11.732Z",
+      "revisionReason": "Editor Changes Requested",
+      "revisionNotes": "Adjust caption contrast and music volume at 0:08."
+    }
+  },
+  "audit_logs": [
+    {
+      "id": "8682d8b6-2333-45f9-8666-408cd0ddcaa8",
+      "created_at": "2026-11-16T11:29:10.317Z",
+      "updated_at": "2026-11-16T11:29:10.317Z",
+      "actor_id": "4a206a68-c5a4-4d12-be76-90468ea3df44",
+      "action": "created_task",
+      "target_type": "daily_team_target",
+      "target_id": "905c9cf9-ee3b-43ab-b5f3-f4ec89e0e8ae",
+      "metadata": {
+        "taskName": "KRI0036 — Creative creation (1/4)",
+        "targetQuantity": 1,
+        "targetDate": "2026-11-16",
+        "assigneeId": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+        "priority": "high"
+      }
+    },
+    {
+      "id": "70feb754-6ea1-4920-a547-46224656e5d1",
+      "created_at": "2026-11-16T11:29:10.317Z",
+      "updated_at": "2026-11-16T11:29:10.317Z",
+      "actor_id": "4a206a68-c5a4-4d12-be76-90468ea3df44",
+      "action": "created_task",
+      "target_type": "daily_team_target",
+      "target_id": "360d932a-940b-42c7-a8e0-cb4f85a8c9b4",
+      "metadata": {
+        "taskName": "KRI0037 — Creative creation (2/4)",
+        "targetQuantity": 1,
+        "targetDate": "2026-11-16",
+        "assigneeId": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+        "priority": "high"
+      }
+    },
+    {
+      "id": "ae1ae964-aac6-4aff-9865-e8cbca4e1e05",
+      "created_at": "2026-11-16T11:29:10.318Z",
+      "updated_at": "2026-11-16T11:29:10.318Z",
+      "actor_id": "4a206a68-c5a4-4d12-be76-90468ea3df44",
+      "action": "created_task",
+      "target_type": "daily_team_target",
+      "target_id": "4dcfcb19-7ebc-49ad-8957-147804aa6b8f",
+      "metadata": {
+        "taskName": "KRI0038 — Creative creation (3/4)",
+        "targetQuantity": 1,
+        "targetDate": "2026-11-16",
+        "assigneeId": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+        "priority": "high"
+      }
+    },
+    {
+      "id": "3c3929d3-f817-4466-bb57-81aa465d7a8e",
+      "created_at": "2026-11-16T11:29:10.319Z",
+      "updated_at": "2026-11-16T11:29:10.319Z",
+      "actor_id": "4a206a68-c5a4-4d12-be76-90468ea3df44",
+      "action": "created_task",
+      "target_type": "daily_team_target",
+      "target_id": "a1e1e016-5031-4c01-a41c-11ec52b56687",
+      "metadata": {
+        "taskName": "KRI0039 — Creative creation (4/4)",
+        "targetQuantity": 1,
+        "targetDate": "2026-11-16",
+        "assigneeId": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+        "priority": "high"
+      }
+    }
+  ],
+  "notifications": [
+    {
+      "id": "3fa56ff9-77bd-4975-9186-8cb5d428bd01",
+      "created_at": "2026-11-16T11:29:10.319Z",
+      "updated_at": "2026-11-16T11:29:10.319Z",
+      "user_id": "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+      "title": "4 Tasks Assigned: Creative creation",
+      "body": "Kritika assigned \"Creative creation\" (4 units split into 4 individual tasks) due on 2026-11-16.",
+      "ad_id": null
+    }
+  ],
   "daily_task_rules": [],
   "auth_users": [],
   "personal_notes": [],

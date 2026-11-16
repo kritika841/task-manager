@@ -103,10 +103,17 @@ export interface Task {
   archivedAt?: string;
   archivedBy?: string | null;
   isCanonicalAdflowTask?: boolean;
-  // AdFlow Creative Ingestion Fields:
+  // AdFlow Creative Ingestion & Control Fields:
   adId?: string;
   creativeName?: string;
   productionStage?: string;
+  adStatus?: string;
+  approvalStage?: string;
+  rawFootageUrl?: string | null;
+  scriptText?: string | null;
+  adCreatorId?: string | null;
+  adEditorId?: string | null;
+  editingFreeze?: string | null;
   // Role & Template Workflow Fields:
   subColumnId?: string;
   parentColumnId?: TaskStatus;
