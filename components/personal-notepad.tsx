@@ -57,13 +57,19 @@ export function PersonalNotepad({
   const [filterMode, setFilterMode] = useState<"all" | "pinned">("all");
   const [taskCreatedToast, setTaskCreatedToast] = useState<string | null>(null);
 
-  // Lightbox Modal State (for adding or editing a note)
+  // Lightbox Modal State (for adding or editing a note via the Edit button)
   const [isLightboxOpen, setIsLightboxOpen] = useState(false);
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftContent, setDraftContent] = useState("");
   const [draftColor, setDraftColor] = useState("blue");
   const [draftPinned, setDraftPinned] = useState(false);
+
+  // Inline Card Editing State (when clicking directly on title or text inside a card)
+  const [inlineEditId, setInlineEditId] = useState<string | null>(null);
+  const [inlineField, setInlineField] = useState<"title" | "content">("content");
+  const [inlineTitle, setInlineTitle] = useState("");
+  const [inlineContent, setInlineContent] = useState("");
 
   const loadedUserRef = useRef<string | null>(null);
 
@@ -207,12 +213,55 @@ export function PersonalNotepad({
   };
 
   const openEditNoteLightbox = (note: PersonalNoteEntry) => {
+    setInlineEditId(null);
     setEditingNoteId(note.id);
     setDraftTitle(note.title);
     setDraftContent(note.content);
     setDraftColor(note.color || "default");
     setDraftPinned(Boolean(note.pinned));
     setIsLightboxOpen(true);
+  };
+
+  const startInlineEdit = (
+    note: PersonalNoteEntry,
+    field: "title" | "content"
+  ) => {
+    if (inlineEditId === note.id) {
+      setInlineField(field);
+      return;
+    }
+    setInlineEditId(note.id);
+    setInlineField(field);
+    setInlineTitle(note.title);
+    setInlineContent(note.content);
+  };
+
+  const commitInlineEdit = async (noteId: string) => {
+    if (inlineEditId !== noteId) return;
+    const target = notes.find((n) => n.id === noteId);
+    setInlineEditId(null);
+    if (!target) return;
+
+    const nextTitle = inlineTitle.trim() || "Untitled Note";
+    const nextContent = inlineContent;
+
+    if (nextTitle === target.title && nextContent === target.content) {
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updated = notes.map((n) =>
+      n.id === noteId
+        ? {
+            ...n,
+            title: nextTitle,
+            content: nextContent,
+            updatedAt: now,
+          }
+        : n
+    );
+    setNotes(updated);
+    await persistNotes(updated, currentUserId);
   };
 
   const handleSaveNoteFromLightbox = async (e: React.FormEvent) => {
@@ -316,26 +365,61 @@ export function PersonalNotepad({
   const renderNoteCard = (note: PersonalNoteEntry) => {
     const colorDef =
       NOTE_COLORS.find((c) => c.id === note.color) || NOTE_COLORS[0];
+    const isInlineEditing = inlineEditId === note.id;
 
     return (
       <div
         key={note.id}
-        onClick={() => openEditNoteLightbox(note)}
         className={cn(
-          "group relative flex flex-col justify-between rounded-2xl border p-4 shadow-xs transition-all duration-150 hover:shadow-md hover:-translate-y-0.5 cursor-pointer min-h-[175px]",
-          colorDef.cardClass
+          "group relative flex flex-col justify-between rounded-2xl border p-4 shadow-xs transition-all duration-150 hover:shadow-md min-h-[175px]",
+          colorDef.cardClass,
+          isInlineEditing && "ring-2 ring-primary/40 shadow-md"
         )}
         style={{
           borderTopWidth: "3px",
           borderTopColor: colorDef.hex,
         }}
+        onBlur={(e) => {
+          if (
+            isInlineEditing &&
+            !e.currentTarget.contains(e.relatedTarget as Node | null)
+          ) {
+            commitInlineEdit(note.id);
+          }
+        }}
       >
-        <div>
+        <div className="flex-1 flex flex-col">
           {/* Card Header */}
           <div className="flex items-start justify-between gap-2 mb-2">
-            <h3 className="text-sm font-bold text-foreground line-clamp-1">
-              {note.title || "Untitled Note"}
-            </h3>
+            {isInlineEditing ? (
+              <input
+                type="text"
+                autoFocus={inlineField === "title"}
+                value={inlineTitle}
+                onChange={(e) => setInlineTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    commitInlineEdit(note.id);
+                  } else if (e.key === "Escape") {
+                    setInlineEditId(null);
+                  }
+                }}
+                placeholder="Note title..."
+                className="w-full rounded-lg border border-primary/40 bg-background/80 px-2 py-1 text-sm font-bold text-foreground focus:border-primary focus:outline-none"
+              />
+            ) : (
+              <h3
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startInlineEdit(note, "title");
+                }}
+                className="text-sm font-bold text-foreground line-clamp-1 cursor-text rounded px-1 -mx-1 hover:bg-muted/60 transition flex-1"
+                title="Click to edit title inline"
+              >
+                {note.title || "Untitled Note"}
+              </h3>
+            )}
             <button
               type="button"
               onClick={(e) => handleTogglePin(e, note.id)}
@@ -351,23 +435,60 @@ export function PersonalNotepad({
             </button>
           </div>
 
-          {/* Note Body */}
-          <p className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-5 leading-relaxed">
-            {note.content || "Empty note..."}
-          </p>
+          {/* Note Body — Click to edit text directly inside card */}
+          {isInlineEditing ? (
+            <textarea
+              autoFocus={inlineField === "content"}
+              rows={4}
+              value={inlineContent}
+              onChange={(e) => setInlineContent(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  commitInlineEdit(note.id);
+                } else if (e.key === "Escape") {
+                  setInlineEditId(null);
+                }
+              }}
+              placeholder="Write your note..."
+              className="w-full flex-1 resize-none rounded-lg border border-primary/40 bg-background/80 p-2 text-xs text-foreground leading-relaxed focus:border-primary focus:outline-none"
+            />
+          ) : (
+            <p
+              onClick={(e) => {
+                e.stopPropagation();
+                startInlineEdit(note, "content");
+              }}
+              className="text-xs text-muted-foreground whitespace-pre-wrap line-clamp-5 leading-relaxed cursor-text rounded p-1 -mx-1 hover:bg-muted/50 transition flex-1"
+              title="Click to edit text inline"
+            >
+              {note.content || "Click to write note..."}
+            </p>
+          )}
         </div>
 
         {/* Card Footer */}
         <div className="mt-4 pt-2.5 border-t border-border/50 flex items-center justify-between gap-2">
-          <span className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
-            <Clock className="size-3" />
-            {new Date(note.updatedAt).toLocaleDateString([], {
-              month: "short",
-              day: "numeric",
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
-          </span>
+          {isInlineEditing ? (
+            <button
+              type="button"
+              onClick={() => commitInlineEdit(note.id)}
+              className="inline-flex items-center gap-1 rounded-md bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground shadow-2xs cursor-pointer"
+            >
+              <Check className="size-3" />
+              <span>Save</span>
+            </button>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[10px] font-mono text-muted-foreground">
+              <Clock className="size-3" />
+              {new Date(note.updatedAt).toLocaleDateString([], {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          )}
 
           <div
             className="flex items-center gap-1"
@@ -385,7 +506,7 @@ export function PersonalNotepad({
               type="button"
               onClick={() => openEditNoteLightbox(note)}
               className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground transition cursor-pointer"
-              title="Edit note"
+              title="Open full edit popup modal"
             >
               <Edit3 className="size-3.5" />
             </button>

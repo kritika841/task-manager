@@ -469,7 +469,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </nav>
 
             {/* Feedback to Developer / Request Feature — directly beneath Workspace Tools */}
-            <div className="mt-2 pt-2 border-t border-border/60 space-y-1">
+            <div className="mt-2 pt-2 border-t border-border/60">
               <button
                 type="button"
                 onClick={() => {
@@ -485,24 +485,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </div>
                 <Sparkles className="size-3 text-primary/70 opacity-70 group-hover:opacity-100" />
               </button>
-
-              {isAdminOrDeveloper && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFeedbackInitialTab("manage");
-                    setIsFeedbackOpen(true);
-                    setMobileMenuOpen(false);
-                  }}
-                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer text-primary bg-primary/5 hover:bg-primary/15"
-                  title="Open Developer Feedback & Feature Request Inbox"
-                >
-                  <span>Developer Feedback Inbox</span>
-                  <span className="rounded bg-primary/15 px-1.5 py-0.2 text-[9px] font-mono uppercase">
-                    Dev
-                  </span>
-                </button>
-              )}
             </div>
           </div>
         </div>

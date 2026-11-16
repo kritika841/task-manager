@@ -45,8 +45,11 @@ export function FeatureRequestModal({
   initialTab = "submit",
 }: FeatureRequestModalProps) {
   const { currentUser, isAdmin } = useTasks();
-  const isDeveloper = currentUser?.role === "developer";
-  const isAdminOrDeveloper = isAdmin || isDeveloper;
+  const userEmailLower = (currentUser?.email || "").trim().toLowerCase();
+  const isDeveloper =
+    currentUser?.role === "developer" || userEmailLower === "kritika@satmi.in";
+  const isKartavya = userEmailLower === "kartavya@satmi.in";
+  const isAdminOrDeveloper = isAdmin || isDeveloper || isKartavya;
 
   const [activeTab, setActiveTab] = useState<"submit" | "manage">(
     isAdminOrDeveloper ? initialTab : "submit"
@@ -260,7 +263,7 @@ export function FeatureRequestModal({
                 Developer Feedback & Feature Requests
               </h2>
               <p className="text-xs text-muted-foreground">
-                Delivered to Developer Inbox & emailed from support@satmi.in
+                Sent from support@satmi.in to kritika@satmi.in (CC: kartavya@satmi.in)
               </p>
             </div>
           </div>

@@ -52,6 +52,7 @@ async function resolveCaller(req: NextRequest, bodyActorId?: string) {
       return {
         id: String(profile.id),
         name: getProfileName(profile),
+        email: String(profile.email || "").trim().toLowerCase(),
         role: String(profile.role || "editor") as Role,
       };
     }
@@ -62,6 +63,7 @@ async function resolveCaller(req: NextRequest, bodyActorId?: string) {
     return {
       id: resolved.actor.id,
       name: resolved.actor.name,
+      email: String(resolved.actor.email || "").trim().toLowerCase(),
       role: resolved.actor.role as Role,
     };
   }
@@ -69,14 +71,23 @@ async function resolveCaller(req: NextRequest, bodyActorId?: string) {
   return null;
 }
 
-function isPrivilegedViewer(role: string | null | undefined): boolean {
-  return role === "admin" || role === "developer";
+function isPrivilegedViewer(
+  role: string | null | undefined,
+  email?: string | null
+): boolean {
+  const emailLower = (email || "").trim().toLowerCase();
+  return (
+    role === "admin" ||
+    role === "developer" ||
+    emailLower === "kritika@satmi.in" ||
+    emailLower === "kartavya@satmi.in"
+  );
 }
 
 export async function GET(req: NextRequest) {
   try {
     const caller = await resolveCaller(req);
-    if (!caller || !isPrivilegedViewer(caller.role)) {
+    if (!caller || !isPrivilegedViewer(caller.role, caller.email)) {
       return NextResponse.json(
         {
           ok: false,
@@ -224,7 +235,7 @@ async function handleUpdate(req: NextRequest) {
   try {
     const body = await req.json();
     const caller = await resolveCaller(req, body.actorId || body.userId);
-    if (!caller || !isPrivilegedViewer(caller.role)) {
+    if (!caller || !isPrivilegedViewer(caller.role, caller.email)) {
       return NextResponse.json(
         { error: "Forbidden: Only Admin or Developer accounts can update feature requests." },
         { status: 403 }
@@ -288,7 +299,7 @@ export async function DELETE(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const body = await req.json().catch(() => ({}));
     const caller = await resolveCaller(req, body.actorId || body.userId);
-    if (!caller || !isPrivilegedViewer(caller.role)) {
+    if (!caller || !isPrivilegedViewer(caller.role, caller.email)) {
       return NextResponse.json(
         { error: "Forbidden: Only Admin or Developer accounts can delete feature requests." },
         { status: 403 }

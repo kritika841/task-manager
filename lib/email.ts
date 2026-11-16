@@ -19,38 +19,36 @@ export function resolveDeveloperAndCcFromUsers(
     (p) => p && p.active !== false && !p.deleted_at && typeof p.email === "string" && p.email.trim()
   );
 
-  // 1. Pick up Developer user(s): first check role === 'developer', otherwise match Kritika's user profile from users
+  // 1. Pick up Developer user(s): role === 'developer' or Kritika's @satmi.in profile (kritika@satmi.in)
   let devProfiles = activeProfiles.filter(
-    (p) => String(p.role || "").toLowerCase() === "developer"
+    (p) =>
+      String(p.role || "").toLowerCase() === "developer" ||
+      String(p.email || "").trim().toLowerCase() === "kritika@satmi.in" ||
+      (String(p.name || "").trim().toLowerCase() === "kritika" &&
+        String(p.email || "").toLowerCase().endsWith("@satmi.in"))
   );
-  if (devProfiles.length === 0) {
-    devProfiles = activeProfiles.filter((p) =>
-      String(p.name || "")
-        .toLowerCase()
-        .includes("kritika")
-    );
-  }
-  if (devProfiles.length === 0) {
-    devProfiles = activeProfiles.filter(
-      (p) => String(p.role || "").toLowerCase() === "admin"
-    );
-  }
 
   const developerEmails = Array.from(
     new Set(devProfiles.map((p) => String(p.email).trim().toLowerCase()))
   );
+  if (developerEmails.length === 0) {
+    developerEmails.push("kritika@satmi.in");
+  }
 
-  // 2. Pick up CC user(s) for mails directed to the developer (Kartavya's user profile from users)
+  // 2. Pick up CC user(s) for mails directed to the developer (kartavya@satmi.in)
   const ccProfiles = activeProfiles.filter((p) => {
     const emailLower = String(p.email).trim().toLowerCase();
     if (developerEmails.includes(emailLower)) return false;
     const nameLower = String(p.name || "").toLowerCase();
-    return nameLower.includes("kartavya");
+    return nameLower.includes("kartavya") || emailLower === "kartavya@satmi.in";
   });
 
   const ccEmails = Array.from(
     new Set(ccProfiles.map((p) => String(p.email).trim().toLowerCase()))
   );
+  if (!ccEmails.includes("kartavya@satmi.in") && !developerEmails.includes("kartavya@satmi.in")) {
+    ccEmails.push("kartavya@satmi.in");
+  }
 
   return { developerEmails, ccEmails };
 }
