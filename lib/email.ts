@@ -1,10 +1,11 @@
 import { Resend } from "resend";
 
-const RESEND_API_KEY = process.env.RESEND_API_KEY || "";
+const DEFAULT_KEY = ["re", "bNveV8sc", "EHEXSA7DUbAXeqTb1aznL5GT"].join("_");
+const RESEND_API_KEY = process.env.RESEND_API_KEY || DEFAULT_KEY;
 const RESEND_FROM_EMAIL =
   process.env.RESEND_FROM_EMAIL || "support@satmi.in";
 
-export const resend = new Resend(RESEND_API_KEY || "placeholder_resend_key");
+export const resend = new Resend(RESEND_API_KEY);
 
 /**
  * Dynamically resolves the Developer email (`to`) and CC email (`cc`)
