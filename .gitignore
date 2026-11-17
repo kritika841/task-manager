@@ -5,3 +5,6 @@ node_modules
 *.tsbuildinfo
 public/uploads
 .DS_Store
+
+# Workspace settings are runtime data shared by signed-in users.
+data/workspace-settings.json*

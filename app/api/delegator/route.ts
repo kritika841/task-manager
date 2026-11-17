@@ -41,10 +41,9 @@ export async function POST(req: Request) {
     const body = await req.json();
     const today = dateInTargetTimeZone();
 
-    const auth = await resolveRequestActor(req, body.createdBy);
+    const auth = await resolveRequestActor(req);
+    if (!auth.actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     if (
-      auth.authenticated &&
-      auth.actor &&
       auth.actor.role !== "admin" &&
       auth.actor.role !== "manager"
     ) {
@@ -121,10 +120,9 @@ export async function DELETE(req: Request) {
       return NextResponse.json({ error: "Rule ID is required" }, { status: 400 });
     }
 
-    const auth = await resolveRequestActor(req, actorId);
+    const auth = await resolveRequestActor(req);
+    if (!auth.actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     if (
-      auth.authenticated &&
-      auth.actor &&
       auth.actor.role !== "admin" &&
       auth.actor.role !== "manager"
     ) {

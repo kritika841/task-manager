@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabase, supabaseAdmin } from "@/lib/supabase";
+import { createPasswordAuthClient, supabaseAdmin } from "@/lib/supabase";
 import { Role, User } from "@/lib/types";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
 import {
@@ -104,7 +104,11 @@ function formatProfileToUser(profile: any): User {
   };
 }
 
-function attachSessionCookie(res: NextResponse, user: User) {
+function secureCookie(req: Request) {
+  return new URL(req.url).protocol === "https:" || req.headers.get("x-forwarded-proto") === "https";
+}
+
+function attachSessionCookie(req: Request, res: NextResponse, user: User) {
   const token = signSessionToken({
     id: user.id,
     email: user.email,
@@ -119,16 +123,15 @@ function attachSessionCookie(res: NextResponse, user: User) {
     sameSite: "lax",
     path: "/",
     maxAge: 60 * 60 * 24 * 7, // 7 days
-    secure: process.env.NODE_ENV === "production" && process.env.DISABLE_SECURE_COOKIE !== "true" ? false : false,
+    secure: secureCookie(req),
   });
 
-  return token;
 }
 
 export async function GET(req: Request) {
   try {
     const resolved = await resolveRequestActor(req);
-    if (!resolved.authenticated || !resolved.actor) {
+    if (!resolved.actor) {
       return NextResponse.json({ ok: false, authenticated: false }, { status: 401 });
     }
 
@@ -143,7 +146,7 @@ export async function GET(req: Request) {
     }
 
     const user = formatProfileToUser(profile);
-    return NextResponse.json({ ok: true, authenticated: true, user });
+    return NextResponse.json({ ok: true, authenticated: true, user }, { headers: { "Cache-Control": "no-store" } });
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: err?.message || "Session check failed" },
@@ -156,29 +159,8 @@ export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    // Handle admin workspace user switch or session refresh
-    if (body.switchUserId) {
-      const { data: targetProfile } = await supabaseAdmin
-        .from("profiles")
-        .select("*")
-        .eq("id", body.switchUserId)
-        .maybeSingle();
-
-      if (!targetProfile || targetProfile.active === false || targetProfile.deleted_at) {
-        return NextResponse.json(
-          { ok: false, error: "Target user profile not found or inactive." },
-          { status: 404 }
-        );
-      }
-
-      const user = formatProfileToUser(targetProfile);
-      const res = NextResponse.json({ ok: true, user });
-      attachSessionCookie(res, user);
-      return res;
-    }
-
-    const cleanEmail = (body.email || "").trim().toLowerCase();
-    const cleanPassword = (body.password || "").trim();
+    const cleanEmail = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const cleanPassword = typeof body.password === "string" ? body.password.trim() : "";
 
     if (!cleanEmail || !cleanPassword) {
       return NextResponse.json(
@@ -187,52 +169,14 @@ export async function POST(req: Request) {
       );
     }
 
-    // 1. Resolve corresponding profile in Satmi Workspace
-    const searchEmail =
-      cleanEmail === "smvkritika@gmail.com" ? "kritika@satmi.in" : cleanEmail;
-
-    let resolvedProfile = null;
-    const { data: byEmail } = await supabaseAdmin
+    const { data: resolvedProfile } = await supabaseAdmin
       .from("profiles")
       .select("*")
-      .ilike("email", searchEmail)
+      .eq("email", cleanEmail)
       .maybeSingle();
 
-    if (byEmail) {
-      resolvedProfile = byEmail;
-    } else if (cleanEmail !== searchEmail) {
-      const { data: byOriginalEmail } = await supabaseAdmin
-        .from("profiles")
-        .select("*")
-        .ilike("email", cleanEmail)
-        .maybeSingle();
-      resolvedProfile = byOriginalEmail;
-    }
-
-    // 2. Verify credentials via Supabase Auth (using local-fallback-wrapped client)
-    const { data: authData, error: authError } =
-      await supabaseAdmin.auth.signInWithPassword({
-        email: resolvedProfile?.email || cleanEmail,
-        password: cleanPassword,
-      });
-
-    if (!resolvedProfile && authData?.user?.id) {
-      const { data: profileById } = await supabaseAdmin
-        .from("profiles")
-        .select("*")
-        .eq("id", authData.user.id)
-        .maybeSingle();
-      resolvedProfile = profileById;
-    }
-
     if (!resolvedProfile) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: `Account "${cleanEmail}" not recognized in Satmi Workspace team directory.`,
-        },
-        { status: 404 }
-      );
+      return NextResponse.json({ ok: false, error: "Invalid email or password." }, { status: 401 });
     }
 
     if (resolvedProfile.active === false || resolvedProfile.deleted_at) {
@@ -252,29 +196,23 @@ export async function POST(req: Request) {
       resolvedProfile.role
     );
 
-    // 3. Password verification:
-    const isSupabaseVerified = Boolean(authData?.user && !authError);
-    const isHashVerified = meta.passwordHash
-      ? verifyPasswordHash(cleanPassword, meta.passwordHash)
-      : cleanPassword.length >= 1;
+    if (!verifyPasswordHash(cleanPassword, meta.passwordHash)) {
+      // A Task Manager password takes precedence if an admin has set one.
+      const { data, error } = meta.passwordHash
+        ? { data: null, error: null }
+        : await createPasswordAuthClient().auth.signInWithPassword({
+            email: resolvedProfile.email,
+            password: cleanPassword,
+          });
 
-    if (!isSupabaseVerified && !isHashVerified) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Invalid email or password. Please verify your credentials.",
-        },
-        { status: 401 }
-      );
+      if (error || data?.user?.email?.toLowerCase() !== cleanEmail) {
+        return NextResponse.json({ ok: false, error: "Invalid email or password." }, { status: 401 });
+      }
     }
 
     const user = formatProfileToUser(resolvedProfile);
-    const res = NextResponse.json({
-      ok: true,
-      user,
-      session: authData?.session || null,
-    });
-    attachSessionCookie(res, user);
+    const res = NextResponse.json({ ok: true, user }, { headers: { "Cache-Control": "no-store" } });
+    attachSessionCookie(req, res, user);
     return res;
   } catch (err: any) {
     console.error("Auth login route error:", err);
@@ -285,7 +223,7 @@ export async function POST(req: Request) {
   }
 }
 
-export async function DELETE() {
+export async function DELETE(req: Request) {
   const res = NextResponse.json({ ok: true });
   res.cookies.set({
     name: SESSION_COOKIE_NAME,
@@ -294,6 +232,7 @@ export async function DELETE() {
     sameSite: "lax",
     path: "/",
     maxAge: 0,
+    secure: secureCookie(req),
   });
   return res;
 }

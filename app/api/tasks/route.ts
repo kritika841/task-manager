@@ -30,7 +30,7 @@ import {
 } from "@/lib/types";
 import { getAllCommentsMap } from "@/lib/comments-store";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
-import { resolveRequestActor } from "@/lib/auth-server";
+import { canReviewTasks, resolveRequestActor } from "@/lib/auth-server";
 import { dispatchWebhookEvent } from "@/lib/webhooks-store";
 
 function getDepartment(role: string): string {
@@ -264,6 +264,8 @@ function parseUserMetadata(avatarUrl: string | null, name: string, role?: string
 
 export async function GET(req: Request) {
   try {
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     const today = dateInTargetTimeZone();
     const url = new URL(req.url);
     const includeArchived = url.searchParams.get("includeArchived") === "true";
@@ -607,7 +609,7 @@ export async function GET(req: Request) {
     const unmergedActiveAds = (activeAds || []).filter((ad) => !mergedAdIds.has(ad.id));
     const adCreativeTasks: Task[] = unmergedActiveAds.map((ad) => {
       const override = adOverrides[ad.id] || adOverrides[`ad-${ad.id}`] || {};
-      const stage = (override.productionStage || ad.production_stage || "").toLowerCase();
+      const stage = (ad.production_stage || override.productionStage || "").toLowerCase();
       const statusRaw = (ad.status || "").toLowerCase();
 
       const isShootStage =
@@ -691,8 +693,10 @@ export async function GET(req: Request) {
         stageLabel = ad.production_stage ? ad.production_stage.replace(/_/g, " ") : "Creative";
       }
 
-      const status: TaskStatus = override.status || defaultStatus;
-      if (override.status && !override.productionStage) {
+      const status = ad.production_stage || ad.status
+        ? mapAdFlowStageToTaskStatus(ad.production_stage, ad.status)
+        : override.status || defaultStatus;
+      if (!ad.production_stage && !ad.status && override.status) {
         if (override.status === "completed") stageLabel = "Approved";
         else if (override.status === "in_review") stageLabel = "Creator Review";
         else if (override.status === "in_progress") stageLabel = "Video Editing";
@@ -806,8 +810,8 @@ export async function GET(req: Request) {
         archivedBy: override.archivedBy,
         adId: ad.id,
         creativeName: ad.name,
-        productionStage: override.productionStage || ad.production_stage,
-        adStatus: override.adStatus || ad.status,
+        productionStage: ad.production_stage || override.productionStage,
+        adStatus: ad.status || override.adStatus,
         approvalStage: ad.approval_stage,
         rawFootageUrl: ad.raw_footage_url,
         scriptText: ad.script_text,
@@ -848,19 +852,6 @@ export async function GET(req: Request) {
   }
 }
 
-async function getActorName(actorId?: string | null): Promise<string> {
-  if (!actorId) return "Admin";
-  try {
-    const { data } = await supabaseAdmin
-      .from("profiles")
-      .select("name, email")
-      .eq("id", actorId)
-      .single();
-    if (data) return data.name || data.email.split("@")[0];
-  } catch {}
-  return "Team Member";
-}
-
 async function sendTargetedNotification(
   userId: string,
   title: string,
@@ -884,18 +875,19 @@ export async function POST(req: Request) {
     const body = await req.json();
     const today = dateInTargetTimeZone();
 
-    const auth = await resolveRequestActor(req, body.creatorId);
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     const userId = body.assigneeId;
     const taskName = (body.title || "Daily Task").trim();
     const targetDate = body.dueDate || today;
     const targetQuantity = Math.max(1, Number(body.targetQuantity) || 1);
-    const assignedBy = auth.actor?.id || body.creatorId || userId || null;
+    const assignedBy = actor.id;
 
     if (!userId) {
       return NextResponse.json({ error: "Assignee is required" }, { status: 400 });
     }
 
-    const actorName = await getActorName(assignedBy);
+    const actorName = actor.name;
     const nowIso = new Date().toISOString();
     const initialStatus: TaskStatus = body.status || "todo";
     const initialStageEntry: StageHistoryEntry = {
@@ -1096,8 +1088,102 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const body = await req.json();
+    const { id, workflowAction } = body;
+    if (typeof id !== "string" || !id) {
+      return NextResponse.json({ error: "Task ID is required" }, { status: 400 });
+    }
+
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    const { id: verifiedActorId, name: actorName } = actor;
+
+    // Resolve the association from server records before applying a workflow change.
+    const standaloneAdId = id.startsWith("ad-") ? id.slice(3) : undefined;
+    let existing = standaloneAdId
+      ? null
+      : (await supabaseAdmin.from("daily_team_targets").select("*").eq("id", id).maybeSingle()).data;
+    if (!standaloneAdId && !existing) {
+      return NextResponse.json({ error: "Target not found" }, { status: 404 });
+    }
+    let currentNotesMeta = parseNotes(existing?.notes);
+    const adId = standaloneAdId || currentNotesMeta.adId;
+    const creativeName = currentNotesMeta.creativeName;
+    const linked = Boolean(adId || creativeName);
+    const isStatusEdit =
+      body.status !== undefined || body.productionStage !== undefined ||
+      body.isRevisionRequested !== undefined || body.subColumnId !== undefined ||
+      body.parentColumnId !== undefined;
+
+    if (linked && !workflowAction && isStatusEdit) {
+      return NextResponse.json(
+        { error: "Use the review actions or the AdFlow stage control to change this creative." },
+        { status: 409 }
+      );
+    }
+
+    if (workflowAction !== undefined) {
+      if (workflowAction === "approve" || workflowAction === "request_changes") {
+        if (!canReviewTasks(actor.role)) {
+          return NextResponse.json({ error: "Review permissions are required." }, { status: 403 });
+        }
+      }
+
+      switch (workflowAction) {
+        case "approve":
+          body.status = "completed";
+          body.productionStage = "approved";
+          body.isRevisionRequested = false;
+          break;
+        case "request_changes":
+          if (typeof body.revisionReason !== "string" || !body.revisionReason.trim()) {
+            return NextResponse.json({ error: "A revision reason is required." }, { status: 400 });
+          }
+          body.status = "in_progress";
+          body.revisionTarget = body.revisionTarget === "creator" ? "creator" : "editor";
+          body.productionStage = body.revisionTarget === "creator" ? "creator_changes_requested" : "changes_requested";
+          body.isRevisionRequested = true;
+          break;
+        case "submit_for_review": {
+          const db = standaloneAdId ? loadLocalDb() : null;
+          const cachedAd = db?.ads.find((ad) => ad.id === standaloneAdId);
+          const assignee = existing?.user_id ||
+            (standaloneAdId ? db?.ad_overrides[standaloneAdId]?.assigneeId : undefined) || cachedAd?.editor_id || cachedAd?.creator_id;
+          if (actor.id !== assignee && !canReviewTasks(actor.role)) {
+            return NextResponse.json({ error: "Only the assignee or a reviewer can submit this task." }, { status: 403 });
+          }
+          body.status = "in_review";
+          body.productionStage = "final_review";
+          body.isRevisionRequested = false;
+          break;
+        }
+        default:
+          return NextResponse.json({ error: "Unknown workflow action." }, { status: 400 });
+      }
+
+      if (linked) {
+        const synced = await syncTaskUpdateToAdFlow({
+          adId,
+          creativeName,
+          productionStage: body.productionStage,
+          revisionReason: body.revisionReason,
+          revisionNotes: body.revisionNotes,
+          deliverableUrl: body.deliverableUrl,
+          actorId: verifiedActorId,
+          actorName,
+        });
+        if (!synced.ok && (adId || !synced.notFound)) {
+          return NextResponse.json({ error: "AdFlow did not save this workflow action." }, { status: 502 });
+        }
+        if (existing) {
+          const refreshed = await supabaseAdmin.from("daily_team_targets").select("*").eq("id", id).maybeSingle();
+          if (!refreshed.data) return NextResponse.json({ error: "Target not found" }, { status: 404 });
+          existing = refreshed.data;
+          currentNotesMeta = parseNotes(existing.notes);
+        }
+      }
+    }
+
     const {
-      id,
       status,
       productionStage,
       revisionTarget,
@@ -1122,19 +1208,10 @@ export async function PATCH(req: Request) {
       estimatedHours,
       actualHours,
       timeTracking,
-      actorId,
       subColumnId,
       parentColumnId,
       templateRole,
     } = body;
-
-    if (!id) {
-      return NextResponse.json({ error: "Task ID is required" }, { status: 400 });
-    }
-
-    const auth = await resolveRequestActor(req, actorId);
-    const verifiedActorId = auth.actor?.id || actorId || null;
-    const actorName = auth.actor?.name || (await getActorName(verifiedActorId));
 
     // 1. Handle AdFlow creative task updates (`ad-*`) strictly via local `ad_overrides`
     // CRITICAL RULE: NEVER modify `ads` table records!
@@ -1252,7 +1329,7 @@ export async function PATCH(req: Request) {
       if (completedQuantity !== undefined) {
         const safeQty = Math.max(0, Number(completedQuantity));
         currentOverride.completedQuantity = safeQty;
-        if (!status && productionStage === undefined) {
+        if (!linked && !status && productionStage === undefined) {
           if (safeQty >= effectiveTargetQty) {
             currentOverride.status = "completed";
             currentOverride.productionStage = "approved";
@@ -1308,31 +1385,6 @@ export async function PATCH(req: Request) {
       db.ad_overrides[realAdId] = currentOverride;
       saveLocalDb(db);
 
-      // Sync stage / revision / approval changes to AdFlow (`ads`, `review_actions`, `activity_logs`, cache)
-      if (
-        productionStage !== undefined ||
-        status !== undefined ||
-        isRevisionRequested !== undefined ||
-        deliverableUrl !== undefined
-      ) {
-        try {
-          await syncTaskUpdateToAdFlow({
-            adId: realAdId,
-            productionStage: currentOverride.productionStage,
-            taskStatus: nextAdStatus,
-            isRevisionRequested,
-            revisionTarget,
-            revisionReason,
-            revisionNotes,
-            deliverableUrl,
-            actorId: verifiedActorId,
-            actorName,
-          });
-        } catch (err) {
-          console.warn("Could not sync ad-* update to AdFlow:", err);
-        }
-      }
-
       if (assigneeId && assigneeId !== prevAssignee) {
         await sendTargetedNotification(
           assigneeId,
@@ -1363,17 +1415,6 @@ export async function PATCH(req: Request) {
     }
 
     // 2. Regular daily team target updates
-    const { data: existing, error: fetchErr } = await supabaseAdmin
-      .from("daily_team_targets")
-      .select("*")
-      .eq("id", id)
-      .single();
-
-    if (fetchErr || !existing) {
-      return NextResponse.json({ error: "Target not found" }, { status: 404 });
-    }
-
-    const currentNotesMeta = parseNotes(existing.notes);
     const prevTargetStatus: TaskStatus =
       currentNotesMeta.statusOverride ||
       (Number(existing.completed_quantity) >= Number(existing.target_quantity || 1)
@@ -1529,7 +1570,7 @@ export async function PATCH(req: Request) {
       updates.manual_completed_quantity = Math.max(0, safeQty - autoQty);
 
       // Keep statusOverride synchronized when progress/subtasks update completedQuantity without explicit `status`
-      if (!status && productionStage === undefined) {
+      if (!linked && !status && productionStage === undefined) {
         if (safeQty >= currentTargetQty) {
           currentNotesMeta.statusOverride = "completed";
           currentNotesMeta.isRevisionRequested = false;
@@ -1603,33 +1644,6 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
 
-    // If this task is linked to an AdFlow creative (by adId or creativeName), sync stage/status to AdFlow
-    if (
-      (currentNotesMeta.adId || currentNotesMeta.creativeName) &&
-      (productionStage !== undefined ||
-        status !== undefined ||
-        isRevisionRequested !== undefined ||
-        deliverableUrl !== undefined)
-    ) {
-      try {
-        await syncTaskUpdateToAdFlow({
-          adId: currentNotesMeta.adId,
-          creativeName: currentNotesMeta.creativeName,
-          productionStage: currentNotesMeta.productionStage,
-          taskStatus: nextTargetStatus,
-          isRevisionRequested,
-          revisionTarget,
-          revisionReason,
-          revisionNotes,
-          deliverableUrl,
-          actorId: verifiedActorId,
-          actorName,
-        });
-      } catch (err) {
-        console.warn("Could not sync linked target task to AdFlow:", err);
-      }
-    }
-
     // Insert audit log
     try {
       await supabaseAdmin.from("audit_logs").insert({
@@ -1681,14 +1695,14 @@ export async function DELETE(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
     const id = searchParams.get("id");
-    const actorId = searchParams.get("actorId");
 
     if (!id) {
       return NextResponse.json({ error: "Task ID is required" }, { status: 400 });
     }
 
-    const auth = await resolveRequestActor(req, actorId);
-    const verifiedActorId = auth.actor?.id || actorId || null;
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    const verifiedActorId = actor.id;
 
     // If AdFlow creative task: archive locally in `ad_overrides` (NEVER touch `ads` table!)
     if (id.startsWith("ad-")) {
@@ -1707,7 +1721,7 @@ export async function DELETE(req: Request) {
 
       dispatchWebhookEvent("task.archived", {
         taskId: id,
-        archivedBy: auth.actor?.name || verifiedActorId,
+        archivedBy: actor.name,
       }).catch(() => {});
 
       return NextResponse.json({ ok: true, archived: true });
@@ -1745,7 +1759,7 @@ export async function DELETE(req: Request) {
     dispatchWebhookEvent("task.archived", {
       taskId: id,
       taskName: existing.task_name,
-      archivedBy: auth.actor?.name || verifiedActorId,
+      archivedBy: actor.name,
     }).catch(() => {});
 
     return NextResponse.json({ ok: true, archived: true });

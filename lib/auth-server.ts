@@ -2,12 +2,12 @@ import crypto from "node:crypto";
 import { Role } from "./types";
 import { supabaseAdmin } from "./supabase";
 
-export const SESSION_COOKIE_NAME = "satmi_session";
+export const SESSION_COOKIE_NAME = "satmi_session_v2";
 
 const SESSION_SECRET =
   process.env.SESSION_SECRET ||
   process.env.SUPABASE_SERVICE_ROLE_KEY ||
-  "satmi-task-manager-hmac-session-secret-v1";
+  crypto.randomBytes(32).toString("hex");
 
 export interface SessionPayload {
   id: string;
@@ -64,7 +64,7 @@ export function verifySessionToken(token: string): SessionPayload | null {
     ) as SessionPayload;
 
     const now = Math.floor(Date.now() / 1000);
-    if (payload.exp && payload.exp < now) {
+    if (!payload.id || !Number.isFinite(payload.exp) || payload.exp <= now) {
       return null;
     }
 
@@ -101,103 +101,40 @@ export function extractSessionCookie(req: Request): string | null {
     .map((c) => c.trim())
     .find((c) => c.startsWith(`${SESSION_COOKIE_NAME}=`));
   if (match) {
-    return decodeURIComponent(match.slice(SESSION_COOKIE_NAME.length + 1));
+    return match.slice(SESSION_COOKIE_NAME.length + 1);
   }
-
-  const authHeader = req.headers.get("authorization") || "";
-  if (authHeader.toLowerCase().startsWith("bearer ")) {
-    return authHeader.slice(7).trim();
-  }
-
   return null;
 }
 
-export async function resolveRequestActor(
-  req: Request,
-  fallbackActorId?: string | null
-): Promise<{
-  authenticated: boolean;
-  fromSignedSession: boolean;
+export async function resolveRequestActor(req: Request): Promise<{
   actor: { id: string; name: string; email: string; role: Role } | null;
-  error?: string;
 }> {
-  // 1. Check signed session cookie or bearer token
   const token = extractSessionCookie(req);
-  if (token) {
-    const session = verifySessionToken(token);
-    if (session?.id) {
-      const { data: profile } = await supabaseAdmin
-        .from("profiles")
-        .select("id, name, email, role, active, deleted_at")
-        .eq("id", session.id)
-        .maybeSingle();
+  const session = token ? verifySessionToken(token) : null;
+  if (!session) return { actor: null };
 
-      if (profile && profile.active !== false && !profile.deleted_at) {
-        return {
-          authenticated: true,
-          fromSignedSession: true,
-          actor: {
-            id: profile.id,
-            name: profile.name || profile.email.split("@")[0],
-            email: profile.email,
-            role: (profile.role as Role) || "member",
-          },
-        };
-      }
-      return {
-        authenticated: false,
-        fromSignedSession: false,
-        actor: null,
-        error: "Session user account is inactive or deactivated.",
-      };
-    }
-  }
+  const { data: profile } = await supabaseAdmin
+    .from("profiles")
+    .select("id, name, email, role, active, deleted_at")
+    .eq("id", session.id)
+    .maybeSingle();
 
-  // 2. Check explicit header or fallback actorId against live database profiles
-  const candidateId =
-    req.headers.get("x-satmi-actor-id") || fallbackActorId || null;
-
-  if (candidateId && candidateId !== "default") {
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("id, name, email, role, active, deleted_at")
-      .eq("id", candidateId)
-      .maybeSingle();
-
-    if (!profile) {
-      return {
-        authenticated: false,
-        fromSignedSession: false,
-        actor: null,
-        error: "Unrecognized actor ID.",
-      };
-    }
-
-    if (profile.active === false || profile.deleted_at) {
-      return {
-        authenticated: false,
-        fromSignedSession: false,
-        actor: null,
-        error: "Actor account has been deactivated.",
-      };
-    }
-
-    return {
-      authenticated: true,
-      fromSignedSession: false,
-      actor: {
-        id: profile.id,
-        name: profile.name || profile.email.split("@")[0],
-        email: profile.email,
-        role: (profile.role as Role) || "member",
-      },
-    };
-  }
+  if (!profile || profile.active === false || profile.deleted_at) return { actor: null };
 
   return {
-    authenticated: false,
-    fromSignedSession: false,
-    actor: null,
-    error: "Authentication required.",
+    actor: {
+      id: profile.id,
+      name: profile.name || profile.email.split("@")[0],
+      email: profile.email,
+      role: (profile.role as Role) || "member",
+    },
   };
+}
+
+export function canManageWorkspace(role: Role): boolean {
+  return role === "admin" || role === "developer";
+}
+
+export function canReviewTasks(role: Role): boolean {
+  return canManageWorkspace(role) || role === "manager";
 }

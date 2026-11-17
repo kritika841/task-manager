@@ -84,6 +84,11 @@ export interface AdFlowStageMappingConfig {
   defaultBlankCreativeStage: AdFlowProductionStage;
 }
 
+export type AdFlowStageMappingUpdate = Partial<Omit<AdFlowStageMappingConfig, "stageToColumn" | "columnDefaultStage">> & {
+  stageToColumn?: Partial<AdFlowStageMappingConfig["stageToColumn"]>;
+  columnDefaultStage?: Partial<AdFlowStageMappingConfig["columnDefaultStage"]>;
+};
+
 export const DEFAULT_ADFLOW_STAGE_MAPPING: AdFlowStageMappingConfig = {
   stageToColumn: {
     script_writing: "backlog",
@@ -543,23 +548,19 @@ export function legacyAdStatusForStage(stage: string): string {
 export async function syncTaskUpdateToAdFlow(params: {
   adId?: string | null;
   creativeName?: string | null;
-  productionStage?: string;
-  taskStatus?: TaskStatus;
-  isRevisionRequested?: boolean;
-  revisionTarget?: "creator" | "editor";
+  productionStage: string;
   revisionReason?: string;
   revisionNotes?: string;
   deliverableUrl?: string;
-  actorId?: string | null;
-  actorName?: string;
-}): Promise<{ ok: boolean; ad?: Record<string, any>; error?: string }> {
+  actorId: string;
+  actorName: string;
+}): Promise<{ ok: boolean; ad?: Record<string, any>; error?: string; notFound?: boolean }> {
   const headers = {
     ...getAdFlowHeaders(),
     Prefer: "return=representation",
   };
   const nowIso = new Date().toISOString();
-  const reviewerId = params.actorId || "4a206a68-c5a4-4d12-be76-90468ea3df44";
-  const actorName = params.actorName || "Admin";
+  const { actorId: reviewerId, actorName } = params;
 
   // 1. Find existing AdFlow creative by adId or creativeName
   let existingAd: Record<string, any> | null = null;
@@ -578,6 +579,7 @@ export async function syncTaskUpdateToAdFlow(params: {
     } catch {}
   }
 
+  let nameLookupSucceeded = false;
   if (!existingAd && params.creativeName) {
     try {
       const res = await fetch(
@@ -588,41 +590,21 @@ export async function syncTaskUpdateToAdFlow(params: {
       );
       if (res.ok) {
         const rows = await res.json();
-        existingAd = Array.isArray(rows) && rows[0] ? rows[0] : null;
+        nameLookupSucceeded = Array.isArray(rows);
+        existingAd = Array.isArray(rows)
+          ? rows.find((row) => typeof row.name === "string" &&
+              row.name.toUpperCase() === params.creativeName?.trim().toUpperCase()) || null
+          : null;
       }
     } catch {}
   }
 
   if (!existingAd) {
-    return { ok: false, error: "Matching AdFlow creative not found" };
+    return { ok: false, error: "Matching AdFlow creative not found", notFound: nameLookupSucceeded };
   }
 
   const prevStage = existingAd.production_stage;
-  let nextStage = params.productionStage || prevStage;
-
-  // Determine target productionStage if not explicitly provided or if revision/approval was triggered
-  if (params.isRevisionRequested === true) {
-    const resolvedTarget: "creator" | "editor" =
-      params.revisionTarget ||
-      (params.productionStage === "creator_changes_requested" ||
-      String(params.revisionReason || "")
-        .toLowerCase()
-        .includes("creator")
-        ? "creator"
-        : "editor");
-    nextStage =
-      resolvedTarget === "creator"
-        ? "creator_changes_requested"
-        : "changes_requested";
-  } else if (!params.productionStage && params.taskStatus) {
-    nextStage = mapTaskStatusToDefaultAdFlowStage(
-      params.taskStatus,
-       undefined,
-      params.isRevisionRequested,
-      params.revisionTarget
-    );
-  }
-
+  const nextStage = params.productionStage;
   const stageIdx = ADFLOW_PRODUCTION_STAGES.findIndex((s) => s.id === nextStage);
   const patch: Record<string, any> = {
     production_stage: nextStage,

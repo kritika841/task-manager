@@ -18,7 +18,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { Task, TaskPriority, TaskStatus } from "@/lib/types";
-import { useTasks } from "@/lib/store";
+import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
 import { StatusBadge, PriorityBadge } from "./ui/badge";
 import { ProgressBar } from "./ui/progress-bar";
 import { calculateProgress, formatDate, isOverdue, cn } from "@/lib/utils";
@@ -379,6 +379,7 @@ export function TaskTable() {
                       onClick={(e) => e.stopPropagation()}
                     >
                       <select
+                        disabled={isAdFlowLinkedTask(task)}
                         value={task.status}
                         onChange={(e) =>
                           updateTask(task.id, {

@@ -4,10 +4,13 @@ import {
   saveWebhookConfig,
   dispatchWebhookEvent,
 } from "@/lib/webhooks-store";
-import { resolveRequestActor } from "@/lib/auth-server";
+import { canReviewTasks, resolveRequestActor } from "@/lib/auth-server";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    if (!canReviewTasks(actor.role)) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     const config = await getWebhookConfig();
     return NextResponse.json({ ok: true, config });
   } catch (err: any) {
@@ -21,10 +24,9 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const auth = await resolveRequestActor(req, body.actorId);
+    const auth = await resolveRequestActor(req);
+    if (!auth.actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     if (
-      auth.authenticated &&
-      auth.actor &&
       auth.actor.role !== "admin" &&
       auth.actor.role !== "manager"
     ) {
@@ -52,12 +54,15 @@ export async function POST(req: Request) {
 
 export async function PUT(req: Request) {
   try {
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    if (!canReviewTasks(actor.role)) return NextResponse.json({ error: "Forbidden." }, { status: 403 });
     const body = await req.json().catch(() => ({}));
     const result = await dispatchWebhookEvent(
       "webhook.test",
       {
         message: "Test ping from Satmi Task Manager",
-        triggeredBy: body.actorName || "Workspace Admin",
+        triggeredBy: actor.name,
       },
       {
         forceTest: true,

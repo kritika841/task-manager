@@ -128,10 +128,9 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     // Server-side role check: admins and developers have full member provisioning permissions
-    const auth = await resolveRequestActor(req, body.actorId);
+    const auth = await resolveRequestActor(req);
+    if (!auth.actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     if (
-      auth.authenticated &&
-      auth.actor &&
       auth.actor.role !== "admin" &&
       auth.actor.role !== "developer"
     ) {
@@ -280,22 +279,21 @@ export async function POST(req: Request) {
 export async function PATCH(req: Request) {
   try {
     const body = await req.json();
-    const { id, name, role, active, employeeCode, color, dailyCapacityUnits, password, actorId } = body;
+    const { id, name, role, active, employeeCode, color, dailyCapacityUnits, password } = body;
 
     if (!id) {
       return NextResponse.json({ error: "User ID is required" }, { status: 400 });
     }
 
-    const auth = await resolveRequestActor(req, actorId);
+    const auth = await resolveRequestActor(req);
+    if (!auth.actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     if (
-      auth.authenticated &&
-      auth.actor &&
       auth.actor.role !== "admin" &&
       auth.actor.role !== "developer" &&
-      auth.actor.id !== id
+      (auth.actor.id !== id || role !== undefined || active !== undefined)
     ) {
       return NextResponse.json(
-        { error: "Forbidden: Only Admins or Developers can modify other team members." },
+        { error: "Forbidden: Only Admins or Developers can change team roles, account access, or other members." },
         { status: 403 }
       );
     }
@@ -383,16 +381,14 @@ export async function DELETE(req: Request) {
   try {
     const url = new URL(req.url);
     const id = url.searchParams.get("id");
-    const actorId = url.searchParams.get("actorId");
 
     if (!id) {
       return NextResponse.json({ error: "User ID is required" }, { status: 400 });
     }
 
-    const auth = await resolveRequestActor(req, actorId);
+    const auth = await resolveRequestActor(req);
+    if (!auth.actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     if (
-      auth.authenticated &&
-      auth.actor &&
       auth.actor.role !== "admin" &&
       auth.actor.role !== "developer"
     ) {

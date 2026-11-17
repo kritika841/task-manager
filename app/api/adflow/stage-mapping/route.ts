@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { canManageWorkspace, resolveRequestActor } from "@/lib/auth-server";
 import { loadLocalDb, saveLocalDb } from "@/lib/local-supabase-fallback";
 import {
   ADFLOW_PRODUCTION_STAGES,
@@ -7,8 +8,10 @@ import {
   type AdFlowStageMappingConfig,
 } from "@/lib/adflow-bridge";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     const db = loadLocalDb();
     const mapping = getAdFlowStageMappingConfig(
       db.adflow_stage_mapping as Partial<AdFlowStageMappingConfig> | undefined
@@ -28,6 +31,11 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    if (!canManageWorkspace(actor.role)) {
+      return NextResponse.json({ error: "Only workspace admins can change the stage mapping." }, { status: 403 });
+    }
     const body = await req.json();
     const db = loadLocalDb();
 

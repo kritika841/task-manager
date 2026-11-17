@@ -26,7 +26,7 @@ import {
   ExternalLink,
   Loader2,
 } from "lucide-react";
-import { useTasks } from "@/lib/store";
+import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
 import { TaskPriority, TaskStatus } from "@/lib/types";
 import { isCanonicalAdflowTask } from "@/lib/supabase";
 import { ADFLOW_PRODUCTION_STAGES } from "@/lib/adflow-bridge";
@@ -131,10 +131,11 @@ export function TaskDrawer() {
     updateTask(task.id, { blockedByTaskIds: updated });
   };
 
-  const isAdFlowTask = Boolean(task.adId || task.creativeName || isStandardAdflow);
+  const linked = isAdFlowLinkedTask(task);
+  const isAdFlowTask = linked || isStandardAdflow;
 
   const executeAdFlowControl = async (
-    action: "approve" | "request_changes" | "reject" | "update_stage" | "create_creative",
+    action: "approve" | "request_changes" | "reject" | "update_stage" | "assign_editor" | "create_creative",
     extra?: Record<string, any>
   ) => {
     setAdflowBusy(true);
@@ -423,6 +424,7 @@ export function TaskDrawer() {
                           <button
                             key={st.id}
                             type="button"
+                            disabled={linked}
                             onClick={() => updateTask(task.id, { status: st.id as TaskStatus })}
                             className={cn(
                               "px-2 py-0.5 rounded-md text-[11px] font-semibold border transition cursor-pointer select-none",
@@ -437,50 +439,44 @@ export function TaskDrawer() {
                       </div>
 
                       {/* All 10 AdFlow Statuses mapped into the 5 main statuses */}
-                      <div className="pt-1.5 border-t border-border/50 space-y-1">
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
-                          AdFlow Pipeline Statuses (10 Stages)
-                        </span>
-                        <div className="flex flex-wrap gap-1">
-                          {ADFLOW_PRODUCTION_STAGES.map((stg) => {
-                            const isStageActive = task.productionStage === stg.id;
-                            const mappedCol =
-                              adflowStageMapping?.stageToColumn?.[stg.id] || stg.taskStatus;
-                            return (
-                              <button
-                                key={stg.id}
-                                type="button"
-                                disabled={adflowBusy}
-                                onClick={async () => {
-                                  if (task.adId || task.id.startsWith("ad-")) {
-                                    await executeAdFlowControl("update_stage", {
-                                      productionStage: stg.id,
-                                    });
-                                  } else {
-                                    await updateTask(task.id, {
-                                      status: mappedCol,
-                                      productionStage: stg.id,
-                                    });
-                                  }
-                                }}
-                                className={cn(
-                                  "px-2 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer select-none flex items-center gap-1",
-                                  isStageActive
-                                    ? "bg-primary/20 text-primary border-primary/50 ring-1 ring-primary/30 font-bold shadow-2xs"
-                                    : "border-border/50 bg-card/60 text-muted-foreground hover:bg-muted hover:text-foreground"
-                                )}
-                                title={`Move to ${stg.label} (${mappedCol.replace("_", " ")})`}
-                              >
-                                <span
-                                  className="size-1.5 rounded-full shrink-0"
-                                  style={{ backgroundColor: stg.color }}
-                                />
-                                <span>{stg.shortLabel}</span>
-                              </button>
-                            );
-                          })}
+                      {!linked && (
+                        <div className="pt-1.5 border-t border-border/50 space-y-1">
+                          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
+                            AdFlow Pipeline Statuses (10 Stages)
+                          </span>
+                          <div className="flex flex-wrap gap-1">
+                            {ADFLOW_PRODUCTION_STAGES.map((stg) => {
+                              const isStageActive = task.productionStage === stg.id;
+                              const mappedCol =
+                                adflowStageMapping?.stageToColumn?.[stg.id] || stg.taskStatus;
+                              return (
+                                <button
+                                  key={stg.id}
+                                  type="button"
+                                  disabled={adflowBusy}
+                                  onClick={() => updateTask(task.id, {
+                                    status: mappedCol,
+                                    productionStage: stg.id,
+                                  })}
+                                  className={cn(
+                                    "px-2 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer select-none flex items-center gap-1",
+                                    isStageActive
+                                      ? "bg-primary/20 text-primary border-primary/50 ring-1 ring-primary/30 font-bold shadow-2xs"
+                                      : "border-border/50 bg-card/60 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                  )}
+                                  title={`Move to ${stg.label} (${mappedCol.replace("_", " ")})`}
+                                >
+                                  <span
+                                    className="size-1.5 rounded-full shrink-0"
+                                    style={{ backgroundColor: stg.color }}
+                                  />
+                                  <span>{stg.shortLabel}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   </div>
 
@@ -491,10 +487,10 @@ export function TaskDrawer() {
                       <div className="col-span-2">
                         <Select
                           value={task.productionStage || "script_writing"}
-                          disabled={adflowBusy}
+                          disabled={adflowBusy || (linked && !isManagerOrAdmin)}
                           onChange={async (e) => {
                             const nextStage = e.target.value;
-                            if (task.adId || task.id.startsWith("ad-")) {
+                            if (linked) {
                               await executeAdFlowControl("update_stage", {
                                 productionStage: nextStage,
                               });
@@ -505,7 +501,11 @@ export function TaskDrawer() {
                           className="w-full text-xs h-8 bg-card"
                         >
                           {ADFLOW_PRODUCTION_STAGES.map((stg) => (
-                            <option key={stg.id} value={stg.id}>
+                            <option
+                              key={stg.id}
+                              value={stg.id}
+                              disabled={linked && ["approved", "creator_changes_requested", "changes_requested"].includes(stg.id)}
+                            >
                               {stg.label}
                             </option>
                           ))}
@@ -800,10 +800,7 @@ export function TaskDrawer() {
                             <Select
                               value={task.adEditorId || ""}
                               onChange={(e) =>
-                                executeAdFlowControl("update_stage", {
-                                  editorId: e.target.value || null,
-                                  productionStage: task.productionStage || "ready_for_edit",
-                                })
+                                executeAdFlowControl("assign_editor", { editorId: e.target.value || null })
                               }
                               className="w-full text-xs h-8 bg-card"
                             >

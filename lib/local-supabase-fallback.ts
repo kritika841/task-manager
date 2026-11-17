@@ -211,13 +211,13 @@ export function loadLocalDb(): LocalDbSchema {
 }
 
 export function saveLocalDb(db: LocalDbSchema) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const tempPath = LOCAL_DB_FILE + "." + crypto.randomUUID() + ".tmp";
   try {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    fs.writeFileSync(LOCAL_DB_FILE, JSON.stringify(db, null, 2), "utf8");
-  } catch (err) {
-    console.error("Failed to write local fallback DB:", err);
+    fs.writeFileSync(tempPath, JSON.stringify(db, null, 2), { mode: 0o600 });
+    fs.renameSync(tempPath, LOCAL_DB_FILE);
+  } finally {
+    fs.rmSync(tempPath, { force: true });
   }
 }
 

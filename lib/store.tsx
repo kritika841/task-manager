@@ -33,7 +33,7 @@ import {
   WebhookConfig,
   StageHistoryEntry,
 } from "./types";
-import { supabase, dateInTargetTimeZone, isCanonicalAdflowTask } from "./supabase";
+import { dateInTargetTimeZone, isCanonicalAdflowTask } from "./supabase";
 import {
   playNotificationSound,
   isSoundMuted,
@@ -43,7 +43,12 @@ import {
 import {
   DEFAULT_ADFLOW_STAGE_MAPPING,
   type AdFlowStageMappingConfig,
+  type AdFlowStageMappingUpdate,
 } from "./adflow-bridge";
+
+import type { WorkspaceSettings } from "./workspace-settings";
+
+type TaskWorkflowAction = "approve" | "request_changes" | "submit_for_review";
 
 interface TaskContextType {
   tasks: Task[];
@@ -90,7 +95,6 @@ interface TaskContextType {
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => Promise<void>;
   updateUserCapacity: (userId: string, units: number) => Promise<void>;
-  switchUser: (userId: string) => void;
   createUser: (userData: {
     name: string;
     email?: string;
@@ -197,8 +201,9 @@ interface TaskContextType {
   isSettingsModalOpen: boolean;
   setIsSettingsModalOpen: (open: boolean) => void;
   isAdsManagementConnected: boolean;
-  setIsAdsManagementConnected: (connected: boolean) => void;
-  toggleAdsManagementConnection: () => void;
+  workspaceSettings: WorkspaceSettings;
+  isWorkspaceSettingsLoading: boolean;
+  saveWorkspaceSettings: (updates: Partial<WorkspaceSettings>) => Promise<void>;
   adsSyncMode: AdsSyncMode;
   setAdsSyncMode: (mode: AdsSyncMode) => void;
   enforceCanonicalLock: boolean;
@@ -231,7 +236,7 @@ interface TaskContextType {
   // AdFlow Stage Mapping Template
   adflowStageMapping: AdFlowStageMappingConfig;
   saveAdflowStageMapping: (
-    updates: Partial<AdFlowStageMappingConfig>
+    updates: AdFlowStageMappingUpdate
   ) => Promise<boolean>;
   resetAdflowStageMapping: () => Promise<boolean>;
 }
@@ -277,7 +282,6 @@ function formatClientStageLabel(
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
 
-const STORAGE_KEY_USER = "satmi-current-user-id-v2";
 const STORAGE_KEY_VIEW_MODE = "satmi-view-mode-v1";
 const STORAGE_KEY_ACTIVE_SECTION = "satmi-active-section-v1";
 const STORAGE_KEY_LAYOUT = "satmi-board-layout-v1";
@@ -290,11 +294,14 @@ const STORAGE_KEY_OFFLINE_CHANGES = "satmi-ads-offline-changes-v1";
 const STORAGE_KEY_ACTIVE_TEMPLATE = "satmi-active-template-id-v1";
 const STORAGE_KEY_OFFLINE_QUEUE = "satmi-ads-offline-queue-v1";
 
+export function isAdFlowLinkedTask(task: Task): boolean {
+  return Boolean(task.adId || task.creativeName || task.id.startsWith("ad-"));
+}
+
 export function isTaskAdflow(task: Task): boolean {
   // Only target actual AdFlow creative entities, NEVER filter out regular daily tasks
   return Boolean(
-    task.adId ||
-    task.id.startsWith("ad-") ||
+    isAdFlowLinkedTask(task) ||
     task.tags?.includes("AdFlow") ||
     task.tags?.includes("Active Creative")
   );
@@ -307,7 +314,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [currentUserId, setCurrentUserId] = useState<string>("");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
-  const [hasLoadedInitialTasks, setHasLoadedInitialTasks] = useState<boolean>(false);
   const [activeSection, setActiveSectionState] = useState<"overview" | "notepad" | "reminders">("overview");
   const [viewMode, setViewModeState] = useState<ViewMode>("board");
   const [boardLayout, setBoardLayoutState] = useState<BoardLayout>("columns");
@@ -327,7 +333,13 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
-  const [isAdsManagementConnected, setIsAdsManagementConnectedState] = useState<boolean>(false);
+  const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings>({
+    adflowSyncEnabled: null,
+    defaultView: null,
+    density: null,
+  });
+  const [isWorkspaceSettingsLoading, setIsWorkspaceSettingsLoading] = useState(true);
+  const isAdsManagementConnected = workspaceSettings.adflowSyncEnabled === true;
   const [adsSyncMode, setAdsSyncModeState] = useState<AdsSyncMode>("realtime");
   const [enforceCanonicalLock, setEnforceCanonicalLockState] = useState<boolean>(true);
   const [autoMaterializeRulesOnSync, setAutoMaterializeRulesOnSyncState] = useState<boolean>(true);
@@ -559,10 +571,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       const savedDensity = localStorage.getItem(STORAGE_KEY_DENSITY) as DensityMode;
       if (savedDensity === "comfortable" || savedDensity === "compact") {
         setDensityState(savedDensity);
-      }
-      const savedConnected = localStorage.getItem(STORAGE_KEY_ADS_CONNECTED);
-      if (savedConnected !== null) {
-        setIsAdsManagementConnectedState(savedConnected === "true");
       }
       const savedMode = localStorage.getItem(STORAGE_KEY_ADS_SYNC_MODE) as AdsSyncMode;
       if (savedMode === "realtime" || savedMode === "interval" || savedMode === "manual") {
@@ -817,7 +825,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error("fetchTasks error:", err);
     } finally {
-      setHasLoadedInitialTasks(true);
       if (showIndicator) setIsSyncing(false);
     }
   }, []);
@@ -879,7 +886,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const saveAdflowStageMapping = useCallback(
-    async (updates: Partial<AdFlowStageMappingConfig>): Promise<boolean> => {
+    async (updates: AdFlowStageMappingUpdate): Promise<boolean> => {
       try {
         const res = await fetch("/api/adflow/stage-mapping", {
           method: "POST",
@@ -921,14 +928,15 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, [fetchTasks]);
 
-  // Initial load
   useEffect(() => {
+    if (!isAuthenticated) return;
     fetchTasks(true);
     fetchDelegatorRules();
     fetchTemplates();
     fetchWebhookConfig();
     fetchAdflowStageMapping();
   }, [
+    isAuthenticated,
     fetchTasks,
     fetchDelegatorRules,
     fetchTemplates,
@@ -942,122 +950,28 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentUserId, fetchNotifications]);
 
-  const hasCompletedInitialAuthRef = useRef<boolean>(false);
-
-  // Authenticate user session once on initial load (prevents remounting/jitter on task polls)
   useEffect(() => {
-    if (hasCompletedInitialAuthRef.current) {
-      return;
-    }
-
+    const controller = new AbortController();
     async function checkAuthSession() {
-      const syncServerCookie = (userId: string) => {
-        fetch("/api/auth", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ switchUserId: userId }),
-        }).catch(() => {});
-      };
-
       try {
-        setIsAuthLoading(true);
-
-        // 0. Check server-side signed session cookie first
-        try {
-          const cookieRes = await fetch("/api/auth", { cache: "no-store" });
-          if (cookieRes.ok) {
-            const cookieData = await cookieRes.json();
-            if (cookieData.ok && cookieData.user?.id) {
-              const matched = users.find((u) => u.id === cookieData.user.id);
-              if (matched && matched.active !== false && !matched.deletedAt) {
-                setCurrentUserId(matched.id);
-                setIsAuthenticated(true);
-                hasCompletedInitialAuthRef.current = true;
-                setIsAuthLoading(false);
-                return;
-              }
-            }
-          }
-        } catch {}
-
-        // 1. Check Supabase auth session
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user?.email) {
-          const userEmail = session.user.email.toLowerCase();
-          const matched = users.find((u) => u.email.toLowerCase() === userEmail);
-          if (matched && matched.active !== false && !matched.deletedAt) {
-            setCurrentUserId(matched.id);
-            setIsAuthenticated(true);
-            syncServerCookie(matched.id);
-            hasCompletedInitialAuthRef.current = true;
-            setIsAuthLoading(false);
-            return;
-          }
+        const res = await fetch("/api/auth", { cache: "no-store", signal: controller.signal });
+        if (!res.ok) return;
+        const { user } = await res.json();
+        if (user?.id && !controller.signal.aborted) {
+          setUsers([user]);
+          setCurrentUserId(user.id);
+          setIsAuthenticated(true);
         }
-
-        // 2. Check stored authenticated profile
-        const storedUser = localStorage.getItem("satmi-auth-user");
-        if (storedUser) {
-          try {
-            const parsed = JSON.parse(storedUser);
-            if (parsed?.id) {
-              const matched = users.find((u) => u.id === parsed.id);
-              if (matched && matched.active !== false && !matched.deletedAt) {
-                setCurrentUserId(matched.id);
-                setIsAuthenticated(true);
-                syncServerCookie(matched.id);
-                hasCompletedInitialAuthRef.current = true;
-                setIsAuthLoading(false);
-                return;
-              }
-            }
-          } catch {}
-        }
-
-        // 3. Auto-authenticate workspace admin/developer if no explicit logout
-        const explicitLogout = localStorage.getItem("satmi-explicit-logout");
-        if (!explicitLogout) {
-          const defaultAdmin =
-            users.find(
-              (u) =>
-                (u.role === "developer" || u.role === "admin") &&
-                u.active !== false &&
-                !u.deletedAt
-            ) || users[0];
-
-          if (defaultAdmin) {
-            setCurrentUserId(defaultAdmin.id);
-            setIsAuthenticated(true);
-            syncServerCookie(defaultAdmin.id);
-            try {
-              localStorage.setItem("satmi-auth-user", JSON.stringify(defaultAdmin));
-              localStorage.setItem(STORAGE_KEY_USER, defaultAdmin.id);
-            } catch {}
-            hasCompletedInitialAuthRef.current = true;
-            setIsAuthLoading(false);
-            return;
-          }
-        }
-
-        // No active verified session
-        setIsAuthenticated(false);
-        hasCompletedInitialAuthRef.current = true;
       } catch (err) {
-        console.error("Auth session check error:", err);
-        setIsAuthenticated(false);
-        hasCompletedInitialAuthRef.current = true;
+        if (!controller.signal.aborted) console.error("Auth session check error:", err);
       } finally {
-        setIsAuthLoading(false);
+        if (!controller.signal.aborted) setIsAuthLoading(false);
       }
     }
 
-    if (users.length > 0) {
-      checkAuthSession();
-    } else if (hasLoadedInitialTasks) {
-      hasCompletedInitialAuthRef.current = true;
-      setIsAuthLoading(false);
-    }
-  }, [users, hasLoadedInitialTasks]);
+    void checkAuthSession();
+    return () => controller.abort();
+  }, []);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -1082,11 +996,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
           });
           setCurrentUserId(data.user.id);
           setIsAuthenticated(true);
-          try {
-            localStorage.setItem("satmi-auth-user", JSON.stringify(data.user));
-            localStorage.setItem(STORAGE_KEY_USER, data.user.id);
-            localStorage.removeItem("satmi-explicit-logout");
-          } catch {}
           return { success: true };
         }
 
@@ -1101,32 +1010,13 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
-      await Promise.allSettled([
-        supabase.auth.signOut(),
-        fetch("/api/auth", { method: "DELETE" }),
-      ]);
+      const res = await fetch("/api/auth", { method: "DELETE" });
+      if (!res.ok) throw new Error("Could not end your session.");
+      window.location.reload();
     } catch (err) {
-      console.warn("Sign out error:", err);
+      console.error("Sign out error:", err);
+      window.alert("Could not sign out. Please try again.");
     }
-    try {
-      localStorage.removeItem("satmi-auth-user");
-      localStorage.removeItem(STORAGE_KEY_USER);
-      localStorage.setItem("satmi-explicit-logout", "true");
-    } catch {}
-    setCurrentUserId("");
-    setIsAuthenticated(false);
-  }, []);
-
-  const switchUser = useCallback((userId: string) => {
-    setCurrentUserId(userId);
-    try {
-      localStorage.setItem(STORAGE_KEY_USER, userId);
-    } catch {}
-    fetch("/api/auth", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ switchUserId: userId }),
-    }).catch(() => {});
   }, []);
 
   const createUser = useCallback(
@@ -1162,92 +1052,75 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const updateUserColor = useCallback(async (userId: string, color: string) => {
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, color } : u)));
-    try {
-      await fetch("/api/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: userId, color }),
-      });
-    } catch (err) {
-      console.error("updateUserColor error:", err);
-    }
-  }, []);
-
   const updateUser = useCallback(async (userId: string, updates: Partial<User>) => {
-    setUsers((prev) => prev.map((u) => (u.id === userId ? { ...u, ...updates } : u)));
     try {
-      await fetch("/api/users", {
+      const res = await fetch("/api/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: userId, ...updates }),
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Could not save team member changes.");
+      setUsers((prev) => prev.map((u) => (u.id === userId ? data.user : u)));
     } catch (err) {
-      console.error("updateUser error:", err);
+      window.alert(err instanceof Error ? err.message : "Could not save team member changes.");
     }
   }, []);
 
+  const updateUserColor = useCallback((userId: string, color: string) => {
+    return updateUser(userId, { color });
+  }, [updateUser]);
+
   const deleteUser = useCallback(async (userId: string) => {
-    setUsers((prev) => prev.filter((u) => u.id !== userId));
     try {
       const res = await fetch(`/api/users?id=${encodeURIComponent(userId)}`, {
         method: "DELETE",
       });
-      return res.ok;
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Could not deactivate this team member.");
+      }
+      setUsers((prev) => prev.filter((u) => u.id !== userId));
+      return true;
     } catch (err) {
-      console.error("deleteUser error:", err);
+      window.alert(err instanceof Error ? err.message : "Could not deactivate this team member.");
       return false;
     }
   }, []);
 
-  const updateUserCapacity = useCallback(async (userId: string, units: number) => {
-    const validUnits = Math.max(1, Math.min(24, Math.round(units)));
-    setUsers((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, dailyCapacityUnits: validUnits } : u))
-    );
-    try {
-      await fetch("/api/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: userId, dailyCapacityUnits: validUnits }),
-      });
-    } catch (err) {
-      console.error("updateUserCapacity error:", err);
-    }
+  const updateUserCapacity = useCallback((userId: string, units: number) => {
+    return updateUser(userId, { dailyCapacityUnits: Math.max(1, Math.min(24, Math.round(units))) });
+  }, [updateUser]);
+
+  const writeWorkspaceSettings = useCallback(async (
+    updates: Partial<WorkspaceSettings>,
+    initializeSync = false,
+    signal?: AbortSignal
+  ): Promise<WorkspaceSettings> => {
+    const res = await fetch("/api/workspace-settings", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...updates, initializeSync }),
+      signal,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Could not save workspace settings.");
+    return data.settings;
   }, []);
 
-  const setIsAdsManagementConnected = useCallback(
-    (connected: boolean) => {
-      setIsAdsManagementConnectedState(connected);
-      try {
-        localStorage.setItem(STORAGE_KEY_ADS_CONNECTED, String(connected));
-      } catch {}
-      if (connected) {
-        replayOfflineQueue().then(() => {
-          fetchTasks(true);
-          fetchDelegatorRules();
-        });
-      }
-    },
-    [replayOfflineQueue, fetchTasks, fetchDelegatorRules]
-  );
-
-  const toggleAdsManagementConnection = useCallback(() => {
-    setIsAdsManagementConnectedState((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(STORAGE_KEY_ADS_CONNECTED, String(next));
-      } catch {}
-      if (next) {
-        replayOfflineQueue().then(() => {
-          fetchTasks(true);
-          fetchDelegatorRules();
-        });
-      }
-      return next;
-    });
-  }, [replayOfflineQueue, fetchTasks, fetchDelegatorRules]);
+  const saveWorkspaceSettings = useCallback(async (updates: Partial<WorkspaceSettings>) => {
+    const settings = await writeWorkspaceSettings(updates);
+    setWorkspaceSettings(settings);
+    if (updates.defaultView && settings.defaultView) {
+      setViewModeState(settings.defaultView);
+      try { localStorage.removeItem(STORAGE_KEY_VIEW_MODE); } catch {}
+    }
+    if (updates.density && settings.density) {
+      setDensityState(settings.density);
+      try { localStorage.removeItem(STORAGE_KEY_DENSITY); } catch {}
+    }
+    if (updates.adflowSyncEnabled) await fetchTasks(true);
+  }, [writeWorkspaceSettings, fetchTasks]);
 
   const setAdsSyncMode = useCallback((mode: AdsSyncMode) => {
     setAdsSyncModeState(mode);
@@ -1395,7 +1268,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   // Background Heartbeat (only when AdFlow Sync is enabled)
   useEffect(() => {
-    if (!isAdsManagementConnected) {
+    if (!isAuthenticated || !isAdsManagementConnected) {
       return;
     }
 
@@ -1431,16 +1304,16 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("focus", handleFocusOrVisibility);
       document.removeEventListener("visibilitychange", handleFocusOrVisibility);
     };
-  }, [isAdsManagementConnected, adsSyncMode, fetchTasks, fetchNotifications]);
+  }, [isAuthenticated, isAdsManagementConnected, adsSyncMode, fetchTasks, fetchNotifications]);
 
-  const currentUser = useMemo(() => {
+  const currentUser = useMemo<User>(() => {
     return (
       users.find((u) => u.id === currentUserId) ||
-      users[0] || {
+      {
         id: "default",
         name: "Loading...",
         email: "user@satmi.in",
-        role: "admin",
+        role: "member",
         avatar: "US",
         department: "Operations",
         dailyCapacityUnits: 6,
@@ -1454,6 +1327,49 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const isManager = currentUser.role === "manager";
   const isManagerOrAdmin = isAdmin || isManager || isDeveloper;
   const isAdminOrDeveloper = isAdmin || isDeveloper;
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const controller = new AbortController();
+
+    async function loadWorkspaceSettings() {
+      try {
+        const res = await fetch("/api/workspace-settings", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error("Could not load workspace settings.");
+        let { settings }: { settings: WorkspaceSettings } = await res.json();
+
+        if (settings.adflowSyncEnabled === null && isAdmin) {
+          const legacySync = localStorage.getItem(STORAGE_KEY_ADS_CONNECTED);
+          if (legacySync === "true" || legacySync === "false") {
+            settings = await writeWorkspaceSettings(
+              { adflowSyncEnabled: legacySync === "true" },
+              true,
+              controller.signal
+            );
+          }
+        }
+
+        if (controller.signal.aborted) return;
+        setWorkspaceSettings(settings);
+        if (settings.defaultView && !localStorage.getItem(STORAGE_KEY_VIEW_MODE)) {
+          setViewModeState(settings.defaultView === "analytics" && !isAdmin ? "board" : settings.defaultView);
+        }
+        if (settings.density && !localStorage.getItem(STORAGE_KEY_DENSITY)) {
+          setDensityState(settings.density);
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) console.error("Workspace settings error:", err);
+      } finally {
+        if (!controller.signal.aborted) setIsWorkspaceSettingsLoading(false);
+      }
+    }
+
+    void loadWorkspaceSettings();
+    return () => controller.abort();
+  }, [isAuthenticated, isAdmin, writeWorkspaceSettings]);
 
   const setFilter = useCallback((updates: Partial<FilterState>) => {
     setFilterState((prev) => ({ ...prev, ...updates }));
@@ -1643,7 +1559,18 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
   // 2. Update Task
   const updateTask = useCallback(
-    async (taskId: string, updates: Partial<Task>) => {
+    async (
+      taskId: string,
+      updates: Partial<Task>,
+      workflowAction?: TaskWorkflowAction,
+      revisionTarget?: "creator" | "editor"
+    ) => {
+      const target = tasks.find((t) => t.id === taskId);
+      const changesStatus = updates.status !== undefined || updates.productionStage !== undefined ||
+        updates.isRevisionRequested !== undefined || updates.subColumnId !== undefined ||
+        updates.parentColumnId !== undefined;
+      if (target && isAdFlowLinkedTask(target) && changesStatus && !workflowAction) return;
+
       // Optimistic state update
       let finalCompletedQuantity: number | undefined;
 
@@ -1744,7 +1671,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         })
       );
 
-      const target = tasks.find((t) => t.id === taskId);
       const isStandard = target ? isCanonicalAdflowTask(target.title) : false;
 
       if (
@@ -1758,7 +1684,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       }
 
       const patchPayload = {
-        actorId: currentUserId,
+        workflowAction,
+        revisionTarget,
         status: updates.status,
         productionStage: updates.productionStage,
         priority: updates.priority,
@@ -1792,19 +1719,21 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       };
 
       try {
-        await fetch("/api/tasks", {
+        const res = await fetch("/api/tasks", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: taskId,
-            ...patchPayload,
-          }),
+          body: JSON.stringify({ id: taskId, ...patchPayload }),
         });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || "Could not save task changes.");
+        }
       } catch (err) {
-        console.error("updateTask sync error:", err);
+        await fetchTasks(false);
+        window.alert(err instanceof Error ? err.message : "Could not save task changes.");
       }
     },
-    [currentUserId, users, tasks]
+    [currentUserId, currentUser.name, users, tasks, fetchTasks]
   );
 
   // 3. Delete Task (Soft-delete / Archive: ensures pipeline targets are never permanently dropped)
@@ -2049,6 +1978,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
             nextStatus = "todo";
           }
 
+          if (isAdFlowLinkedTask(t)) nextStatus = t.status;
+
           let nextStageHistory = t.stageHistory || [
             {
               stage: t.status,
@@ -2111,7 +2042,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         revisionReason: undefined,
         revisionNotes: undefined,
         completedQuantity: task.targetQuantity,
-      });
+      }, "approve");
       await fetchTasks(false);
     },
     [tasks, updateTask, fetchTasks]
@@ -2135,7 +2066,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         isRevisionRequested: true,
         revisionReason: reason,
         revisionNotes: notes,
-      });
+      }, "request_changes", targetStage === "creator_changes_requested" ? "creator" : "editor");
       await fetchTasks(false);
     },
     [updateTask, fetchTasks]
@@ -2147,9 +2078,10 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         status: "in_review",
         deliverableUrl,
         deliverableAsset: asset,
-      });
+      }, "submit_for_review");
+      await fetchTasks(false);
     },
-    [updateTask]
+    [updateTask, fetchTasks]
   );
 
   const attachDeliverableAsset = useCallback(
@@ -3019,8 +2951,9 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         isSettingsModalOpen,
         setIsSettingsModalOpen,
         isAdsManagementConnected,
-        setIsAdsManagementConnected,
-        toggleAdsManagementConnection,
+        workspaceSettings,
+        isWorkspaceSettingsLoading,
+        saveWorkspaceSettings,
         adsSyncMode,
         setAdsSyncMode,
         enforceCanonicalLock,
@@ -3038,7 +2971,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         adflowStageMapping,
         saveAdflowStageMapping,
         resetAdflowStageMapping,
-        switchUser,
         isAuthenticated,
         isAuthLoading,
         login,

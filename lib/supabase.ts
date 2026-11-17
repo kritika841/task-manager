@@ -3,9 +3,6 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 const DEFAULT_ADFLOW_URL = "https://ads.satmi.in";
 const DEFAULT_ADFLOW_ANON_KEY =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkZmxvdy12cHMiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTc4MzU4NTI5MSwiZXhwIjoyMDk5MTYxMjkxfQ.PNmYQFpq0Yu7QwCq08JAivVQ9WCS3rWzT09CwPs8xZg";
-const DEFAULT_ADFLOW_SERVICE_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkZmxvdy12cHMiLCJyb2xlIjoic2VydmljZV9yb2xlIiwiaWF0IjoxNzgzNTg1MjkxLCJleHAiOjIwOTkxNjEyOTF9.kcaaZgkR7f_65dSnvynjZ22cqdU451Q934r0JwvnU-8";
-
 const envUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const isLegacyDeadUrl = envUrl.includes("qexjnswuvbyjenfrbwvj");
 
@@ -15,10 +12,7 @@ export const ADFLOW_SUPABASE_ANON_KEY =
   !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || isLegacyDeadUrl
     ? DEFAULT_ADFLOW_ANON_KEY
     : process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-export const ADFLOW_SUPABASE_SERVICE_KEY =
-  !process.env.SUPABASE_SERVICE_ROLE_KEY || isLegacyDeadUrl
-    ? DEFAULT_ADFLOW_SERVICE_KEY
-    : process.env.SUPABASE_SERVICE_ROLE_KEY;
+export const ADFLOW_SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 
 const supabaseUrl = ADFLOW_SUPABASE_URL;
 const supabaseAnonKey = ADFLOW_SUPABASE_ANON_KEY;
@@ -31,17 +25,26 @@ function createServerAdminClient(): SupabaseClient {
   if (typeof window !== "undefined") {
     return supabase;
   }
-  const serviceKey = ADFLOW_SUPABASE_SERVICE_KEY;
+  return createServerClient(ADFLOW_SUPABASE_SERVICE_KEY || supabaseAnonKey);
+}
+
+// Sign-in must have its own auth state. Server database requests share a separate client.
+export function createPasswordAuthClient(): SupabaseClient {
+  return createServerClient(supabaseAnonKey);
+}
+
+function createServerClient(key: string): SupabaseClient {
 
   // Use resilient fetch wrapper on the server so if Supabase DNS/network is offline,
   // API routes seamlessly fall back to the persistent local database store.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { resilientSupabaseFetch } = require("./local-supabase-fallback");
 
-  return createClient(supabaseUrl, serviceKey, {
+  return createClient(supabaseUrl, key, {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+      detectSessionInUrl: false,
     },
     global: {
       fetch: resilientSupabaseFetch,

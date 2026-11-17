@@ -30,6 +30,7 @@ import {
   type AdFlowProductionStage,
 } from "@/lib/adflow-bridge";
 import { cn, getUserColor, getEmployeeCode, CURATED_COLOR_OPTIONS } from "@/lib/utils";
+import type { WorkspaceSettings } from "@/lib/workspace-settings";
 import { Button } from "./ui/button";
 
 export function SettingsModal() {
@@ -37,7 +38,9 @@ export function SettingsModal() {
     isSettingsModalOpen,
     setIsSettingsModalOpen,
     isAdsManagementConnected,
-    toggleAdsManagementConnection,
+    workspaceSettings,
+    isWorkspaceSettingsLoading,
+    saveWorkspaceSettings,
     viewMode,
     setViewMode,
     density,
@@ -58,8 +61,20 @@ export function SettingsModal() {
   } = useTasks();
 
   const [activeTab, setActiveTab] = useState<"general" | "adflow" | "team">("general");
+  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [isSavingMapping, setIsSavingMapping] = useState(false);
-  const [mappingStatusMsg, setMappingStatusMsg] = useState<string | null>(null);
+  const [mappingError, setMappingError] = useState<string | null>(null);
+
+  const saveMapping = async (save: () => Promise<boolean>) => {
+    setIsSavingMapping(true);
+    setMappingError(null);
+    try {
+      if (!(await save())) setMappingError("Could not save the AdFlow stage template.");
+    } finally {
+      setIsSavingMapping(false);
+    }
+  };
 
   // Team Management state (Admin)
   const [isAddingMember, setIsAddingMember] = useState(false);
@@ -75,6 +90,18 @@ export function SettingsModal() {
   const [memberActionError, setMemberActionError] = useState<string | null>(null);
 
   if (!isSettingsModalOpen) return null;
+
+  const handleSaveWorkspace = async (updates: Partial<WorkspaceSettings>) => {
+    setIsSavingWorkspace(true);
+    setWorkspaceError(null);
+    try {
+      await saveWorkspaceSettings(updates);
+    } catch (err) {
+      setWorkspaceError(err instanceof Error ? err.message : "Could not save workspace settings.");
+    } finally {
+      setIsSavingWorkspace(false);
+    }
+  };
 
   const handleCreateMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -240,7 +267,8 @@ export function SettingsModal() {
                     type="button"
                     role="switch"
                     aria-checked={isAdsManagementConnected}
-                    onClick={toggleAdsManagementConnection}
+                    disabled={!isAdmin || isWorkspaceSettingsLoading || isSavingWorkspace}
+                    onClick={() => handleSaveWorkspace({ adflowSyncEnabled: !isAdsManagementConnected })}
                     className={cn(
                       "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
                       isAdsManagementConnected
@@ -259,6 +287,8 @@ export function SettingsModal() {
                 </div>
               </div>
 
+              {workspaceError && <p role="alert" className="text-xs text-destructive">{workspaceError}</p>}
+
               {/* Default View Mode */}
               <div className="rounded-xl border border-border bg-card p-4 space-y-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
@@ -275,12 +305,15 @@ export function SettingsModal() {
                       : []),
                   ].map((v) => {
                     const Icon = v.icon;
-                    const isSelected = viewMode === v.id;
+                    const isSelected = (isAdmin ? workspaceSettings.defaultView || viewMode : viewMode) === v.id;
                     return (
                       <button
                         key={v.id}
                         type="button"
-                        onClick={() => setViewMode(v.id as ViewMode)}
+                        disabled={isWorkspaceSettingsLoading || isSavingWorkspace}
+                        onClick={() => isAdmin
+                          ? handleSaveWorkspace({ defaultView: v.id as ViewMode })
+                          : setViewMode(v.id as ViewMode)}
                         className={cn(
                           "flex items-center gap-2.5 p-3 rounded-lg border text-left text-xs transition cursor-pointer",
                           isSelected
@@ -304,10 +337,11 @@ export function SettingsModal() {
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => setDensity("comfortable")}
+                    disabled={isWorkspaceSettingsLoading || isSavingWorkspace}
+                    onClick={() => isAdmin ? handleSaveWorkspace({ density: "comfortable" }) : setDensity("comfortable")}
                     className={cn(
                       "flex items-center gap-3 p-3 rounded-lg border text-left text-xs transition cursor-pointer",
-                      density === "comfortable"
+                      (isAdmin ? workspaceSettings.density || density : density) === "comfortable"
                         ? "border-primary bg-primary/10 text-primary font-semibold"
                         : "border-border bg-muted/20 text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
@@ -318,10 +352,11 @@ export function SettingsModal() {
 
                   <button
                     type="button"
-                    onClick={() => setDensity("compact")}
+                    disabled={isWorkspaceSettingsLoading || isSavingWorkspace}
+                    onClick={() => isAdmin ? handleSaveWorkspace({ density: "compact" }) : setDensity("compact")}
                     className={cn(
                       "flex items-center gap-3 p-3 rounded-lg border text-left text-xs transition cursor-pointer",
-                      density === "compact"
+                      (isAdmin ? workspaceSettings.density || density : density) === "compact"
                         ? "border-primary bg-primary/10 text-primary font-semibold"
                         : "border-border bg-muted/20 text-muted-foreground hover:bg-muted hover:text-foreground"
                     )}
@@ -371,15 +406,11 @@ export function SettingsModal() {
                     type="button"
                     role="switch"
                     aria-checked={adflowStageMapping.autoCreateBlankCreative}
-                    disabled={isSavingMapping}
+                    disabled={!isAdmin || isSavingMapping}
                     onClick={async () => {
-                      setIsSavingMapping(true);
-                      await saveAdflowStageMapping({
+                      await saveMapping(() => saveAdflowStageMapping({
                         autoCreateBlankCreative: !adflowStageMapping.autoCreateBlankCreative,
-                      });
-                      setIsSavingMapping(false);
-                      setMappingStatusMsg("Saved auto-create blank creative setting.");
-                      setTimeout(() => setMappingStatusMsg(null), 2500);
+                      }));
                     }}
                     className={cn(
                       "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
@@ -405,16 +436,12 @@ export function SettingsModal() {
                   </span>
                   <select
                     value={adflowStageMapping.defaultBlankCreativeStage}
-                    disabled={isSavingMapping}
+                    disabled={!isAdmin || isSavingMapping}
                     onChange={async (e) => {
                       const nextStage = e.target.value as AdFlowProductionStage;
-                      setIsSavingMapping(true);
-                      await saveAdflowStageMapping({
+                      await saveMapping(() => saveAdflowStageMapping({
                         defaultBlankCreativeStage: nextStage,
-                      });
-                      setIsSavingMapping(false);
-                      setMappingStatusMsg(`Default initial stage set to "${nextStage.replace(/_/g, " ")}".`);
-                      setTimeout(() => setMappingStatusMsg(null), 2500);
+                      }));
                     }}
                     className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground cursor-pointer"
                   >
@@ -435,20 +462,16 @@ export function SettingsModal() {
                       AdFlow Stage Mapping Template (10 AdFlow Stages ↔ 5 Board Columns)
                     </h4>
                     <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Control which Tasks Dashboard column each AdFlow stage belongs to, and which AdFlow stage is assigned when moving a task into a column.
+                      Choose which board column displays each AdFlow stage and which stage labels appear on local tasks.
                     </p>
                   </div>
                   <Button
                     type="button"
                     variant="secondary"
                     size="sm"
-                    disabled={isSavingMapping}
+                    disabled={!isAdmin || isSavingMapping}
                     onClick={async () => {
-                      setIsSavingMapping(true);
-                      await resetAdflowStageMapping();
-                      setIsSavingMapping(false);
-                      setMappingStatusMsg("Reset to default AdFlow stage template.");
-                      setTimeout(() => setMappingStatusMsg(null), 2500);
+                      await saveMapping(() => resetAdflowStageMapping());
                     }}
                     className="text-xs h-7 gap-1 shrink-0"
                   >
@@ -457,12 +480,7 @@ export function SettingsModal() {
                   </Button>
                 </div>
 
-                {mappingStatusMsg && (
-                  <div className="rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-3 py-2 text-xs font-medium text-emerald-500 flex items-center gap-1.5">
-                    <Check className="size-3.5" />
-                    <span>{mappingStatusMsg}</span>
-                  </div>
-                )}
+                {mappingError && <p role="alert" className="text-xs text-destructive">{mappingError}</p>}
 
                 {/* Part A: Map each of the 10 AdFlow stages to a Tasks Dashboard Status */}
                 <div className="space-y-2">
@@ -495,21 +513,12 @@ export function SettingsModal() {
 
                           <select
                             value={assignedCol}
-                            disabled={isSavingMapping}
+                            disabled={!isAdmin || isSavingMapping}
                             onChange={async (e) => {
                               const newCol = e.target.value as TaskStatus;
-                              setIsSavingMapping(true);
-                              await saveAdflowStageMapping({
-                                stageToColumn: {
-                                  ...adflowStageMapping.stageToColumn,
-                                  [stg.id]: newCol,
-                                },
-                              });
-                              setIsSavingMapping(false);
-                              setMappingStatusMsg(
-                                `Mapped "${stg.label}" → ${newCol.replace("_", " ").toUpperCase()}`
-                              );
-                              setTimeout(() => setMappingStatusMsg(null), 2500);
+                              await saveMapping(() => saveAdflowStageMapping({
+                                stageToColumn: { [stg.id]: newCol },
+                              }));
                             }}
                             className="rounded-lg border border-border bg-muted/30 px-2.5 py-1 text-xs font-semibold text-foreground cursor-pointer shrink-0"
                           >
@@ -528,7 +537,7 @@ export function SettingsModal() {
                 {/* Part B: Default AdFlow stage when moving a card into a Tasks column */}
                 <div className="space-y-2 pt-2">
                   <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                    2. Default AdFlow Stage When Moving a Task to a Board Column
+                    2. Default Stage Label for Local Task Columns
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {(
@@ -553,21 +562,12 @@ export function SettingsModal() {
                           </span>
                           <select
                             value={currentDefault}
-                            disabled={isSavingMapping}
+                            disabled={!isAdmin || isSavingMapping}
                             onChange={async (e) => {
                               const nextStg = e.target.value as AdFlowProductionStage;
-                              setIsSavingMapping(true);
-                              await saveAdflowStageMapping({
-                                columnDefaultStage: {
-                                  ...adflowStageMapping.columnDefaultStage,
-                                  [col.id]: nextStg,
-                                },
-                              });
-                              setIsSavingMapping(false);
-                              setMappingStatusMsg(
-                                `Default AdFlow stage for ${col.label} set to "${nextStg.replace(/_/g, " ")}"`
-                              );
-                              setTimeout(() => setMappingStatusMsg(null), 2500);
+                              await saveMapping(() => saveAdflowStageMapping({
+                                columnDefaultStage: { [col.id]: nextStg },
+                              }));
                             }}
                             className="rounded border border-border bg-card px-2 py-1 text-[11px] font-semibold text-foreground cursor-pointer"
                           >

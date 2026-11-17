@@ -10,7 +10,7 @@ import {
   ChevronDown,
   Layers,
 } from "lucide-react";
-import { useTasks } from "@/lib/store";
+import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
 import { TaskStatus } from "@/lib/types";
 import { Button } from "./ui/button";
 import { Select, Input } from "./ui/field";
@@ -24,6 +24,7 @@ export function BulkActionsToolbar() {
     bulkReschedule,
     bulkDelete,
     users,
+    tasks,
     getMemberCapacity,
   } = useTasks();
 
@@ -33,6 +34,10 @@ export function BulkActionsToolbar() {
   const [rescheduleDate, setRescheduleDate] = useState("");
 
   if (selectedTaskIds.length === 0) return null;
+
+  const includesLinkedCreative = tasks.some(
+    (task) => selectedTaskIds.includes(task.id) && isAdFlowLinkedTask(task)
+  );
 
   const handleReassignSubmit = async (userId: string) => {
     if (!userId) return;
@@ -100,6 +105,8 @@ export function BulkActionsToolbar() {
         {/* Status Dropdown */}
         <Select
           value=""
+          disabled={includesLinkedCreative}
+          title={includesLinkedCreative ? "Use the creative’s review actions to change its status." : undefined}
           onChange={(e) => {
             if (e.target.value) bulkMoveStatus(e.target.value as TaskStatus);
           }}

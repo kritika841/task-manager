@@ -7,7 +7,7 @@ import {
   legacyAdStatusForStage,
 } from "@/lib/adflow-bridge";
 import { loadLocalDb, saveLocalDb } from "@/lib/local-supabase-fallback";
-import { resolveRequestActor } from "@/lib/auth-server";
+import { canReviewTasks, resolveRequestActor } from "@/lib/auth-server";
 import { StageHistoryEntry, TaskStatus } from "@/lib/types";
 
 function parseDriveId(url: string | undefined | null): {
@@ -40,6 +40,8 @@ function getStageLabel(stageId: string): string {
 
 export async function GET(req: Request) {
   try {
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     const { searchParams } = new URL(req.url);
     const adId = searchParams.get("adId")?.replace(/^ad-/, "") || "";
     const creativeName = searchParams.get("creativeName")?.trim() || "";
@@ -127,7 +129,6 @@ export async function POST(req: Request) {
       adId: rawAdId,
       taskId,
       creativeName,
-      actorId: bodyActorId,
       note = "",
       target = "editor", // "creator" | "editor"
       productionStage,
@@ -144,12 +145,12 @@ export async function POST(req: Request) {
       editingFreeze,
     } = body;
 
-    const auth = await resolveRequestActor(req, bodyActorId);
-    const actorId =
-      auth.actor?.id ||
-      bodyActorId ||
-      "4a206a68-c5a4-4d12-be76-90468ea3df44"; // Default Admin (Kritika)
-    const actorName = auth.actor?.name || "Admin";
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    if (!canReviewTasks(actor.role)) {
+      return NextResponse.json({ error: "Review permissions are required." }, { status: 403 });
+    }
+    const { id: actorId, name: actorName } = actor;
     const headers = {
       ...getAdFlowHeaders(),
       Prefer: "return=representation",
@@ -304,7 +305,7 @@ export async function POST(req: Request) {
     const prevStage = existingAd.production_stage;
     const patch: Record<string, any> = {
       updated_at: nowIso,
-      workflow_status_changed_at: nowIso,
+      ...(action !== "assign_editor" && { workflow_status_changed_at: nowIso }),
     };
 
     let reviewDecision: "approve" | "request_changes" | "reject" | null = null;
@@ -417,8 +418,21 @@ export async function POST(req: Request) {
       notifyUserIds = [existingAd.creator_id, existingAd.editor_id].filter(Boolean);
       notifyTitle = `Creative Rejected: ${existingAd.name}`;
       notifyBody = note.trim();
+    } else if (action === "assign_editor") {
+      if (editorId !== null && (typeof editorId !== "string" || !editorId.trim())) {
+        return NextResponse.json({ error: "Select an editor or clear the assignment." }, { status: 400 });
+      }
+      patch.editor_id = editorId;
+      if (editorId !== existingAd.editor_id) patch.assigned_at = editorId ? nowIso : null;
+      activityMeta = { ...activityMeta, editor_id: editorId };
     } else if (action === "update_stage") {
-      const nextStage = productionStage || existingAd.production_stage;
+      const nextStage = productionStage;
+      if (
+        !ADFLOW_PRODUCTION_STAGES.some((stage) => stage.id === nextStage) ||
+        ["approved", "creator_changes_requested", "changes_requested"].includes(nextStage)
+      ) {
+        return NextResponse.json({ error: "Choose a production stage or use the review actions." }, { status: 400 });
+      }
       const stageIdx = ADFLOW_PRODUCTION_STAGES.findIndex((s) => s.id === nextStage);
       patch.production_stage = nextStage;
       patch.status = legacyAdStatusForStage(nextStage);
@@ -553,12 +567,36 @@ export async function POST(req: Request) {
     }
 
     // 5. Synchronize Task Manager state (`ad_overrides` & linked `daily_team_targets` row)
-    syncTaskManagerWithAdFlowCreative(updatedAd, actorName, {
-      action,
-      note: note.trim(),
-      target,
-      taskId,
-    });
+    if (action !== "assign_editor") {
+      syncTaskManagerWithAdFlowCreative(updatedAd, actorName, {
+        action,
+        note: note.trim(),
+        target,
+        taskId,
+      });
+    } else {
+      const db = loadLocalDb();
+      const override = db.ad_overrides[updatedAd.id];
+      if (override?.assigneeId && override.assigneeId === existingAd.editor_id) {
+        override.assigneeId = updatedAd.editor_id || updatedAd.creator_id;
+      }
+      for (const row of db.daily_team_targets) {
+        let meta;
+        try {
+          meta = typeof row.notes === "string" && row.notes.startsWith("{") ? JSON.parse(row.notes) : {};
+        } catch {
+          continue;
+        }
+        if (
+          (meta?.adId === updatedAd.id ||
+            String(meta?.creativeName || "").toUpperCase() === String(updatedAd.name).toUpperCase()) &&
+          row.user_id === existingAd.editor_id
+        ) {
+          row.user_id = updatedAd.editor_id || updatedAd.creator_id || row.user_id;
+        }
+      }
+      saveLocalDb(db);
+    }
 
     return NextResponse.json({
       ok: true,
@@ -571,6 +609,8 @@ export async function POST(req: Request) {
           ? `Sent revision request to ${target} for ${updatedAd.name}.`
           : action === "reject"
           ? `Rejected ${updatedAd.name} in AdFlow.`
+          : action === "assign_editor"
+          ? `Updated the editor assignment for ${updatedAd.name}.`
           : `Updated ${updatedAd.name} stage to ${getStageLabel(updatedAd.production_stage)}.`,
     });
   } catch (error: any) {

@@ -17,7 +17,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { Task, Subtask, TaskStatus } from "@/lib/types";
-import { useTasks } from "@/lib/store";
+import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
 import { StatusBadge, PriorityBadge } from "./ui/badge";
 import { ProgressBar } from "./ui/progress-bar";
 import { Button } from "./ui/button";
@@ -158,6 +158,7 @@ export function TaskList() {
                 <div className="relative" onClick={(e) => e.stopPropagation()}>
                   <StatusBadge status={task.status} />
                   <select
+                    disabled={isAdFlowLinkedTask(task)}
                     value={task.status}
                     onChange={(e) =>
                       updateTask(task.id, { status: e.target.value as TaskStatus })

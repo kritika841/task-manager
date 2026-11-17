@@ -41,6 +41,21 @@ jobs:
           chmod 600 ~/.ssh/id_deploy
           ssh-keyscan -p "${{ secrets.VPS_PORT || 22 }}" -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Check AdFlow key on VPS before replacing the app
+        run: |
+          ssh -i ~/.ssh/id_deploy -p ${{ secrets.VPS_PORT || 22 }} \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "APP_DIR=$APP_DIR bash -se" <<'REMOTE'
+          cd "$APP_DIR"
+          NODE_ENV=production node <<'NODE'
+          const { loadEnvConfig } = require('@next/env');
+          loadEnvConfig(process.cwd());
+          if (!process.env.SUPABASE_SERVICE_ROLE_KEY?.trim()) {
+            console.error('Set SUPABASE_SERVICE_ROLE_KEY in the Task Manager server environment before deploying.');
+            process.exit(1);
+          }
+          NODE
+          REMOTE
+
       - name: Sync build to VPS
         run: |
           SSH="ssh -i ~/.ssh/id_deploy -p ${{ secrets.VPS_PORT || 22 }}"

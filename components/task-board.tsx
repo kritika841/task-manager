@@ -28,7 +28,7 @@ import {
   History,
 } from "lucide-react";
 import { Task, TaskStatus, User, RoleTemplate } from "@/lib/types";
-import { useTasks } from "@/lib/store";
+import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
 import { dateInTargetTimeZone } from "@/lib/supabase";
 import {
   ADFLOW_PRODUCTION_STAGES,
@@ -164,10 +164,14 @@ export function TaskBoard() {
   };
 
   // Drag and drop handlers
-  const handleDragStart = (e: React.DragEvent, taskId: string) => {
-    draggedTaskIdRef.current = taskId;
-    setDraggedTaskId(taskId);
-    e.dataTransfer.setData("text/plain", taskId);
+  const handleDragStart = (e: React.DragEvent, task: Task) => {
+    if (isAdFlowLinkedTask(task)) {
+      e.preventDefault();
+      return;
+    }
+    draggedTaskIdRef.current = task.id;
+    setDraggedTaskId(task.id);
+    e.dataTransfer.setData("text/plain", task.id);
     e.dataTransfer.effectAllowed = "move";
   };
 
@@ -178,6 +182,7 @@ export function TaskBoard() {
   };
 
   const handleDragOver = (e: React.DragEvent, key: string) => {
+    if (!draggedTaskIdRef.current) return;
     e.preventDefault();
     e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
@@ -196,13 +201,13 @@ export function TaskBoard() {
     e.preventDefault();
     e.stopPropagation();
     setDragOverColumn(null);
-    const taskId = e.dataTransfer.getData("text/plain") || draggedTaskIdRef.current || draggedTaskId;
+    const taskId = draggedTaskIdRef.current;
     draggedTaskIdRef.current = null;
     setDraggedTaskId(null);
 
     if (taskId) {
       const taskObj = tasks.find((t) => t.id === taskId);
-      if (taskObj) {
+      if (taskObj && !isAdFlowLinkedTask(taskObj)) {
         if (
           taskObj.status === columnId &&
           (!targetUserId || taskObj.assigneeId === targetUserId) &&
@@ -250,6 +255,7 @@ export function TaskBoard() {
     const isExpanded = !!expandedTaskIds[task.id];
     const nextStatus = nextStatusMap[task.status];
     const prevStatus = prevStatusMap[task.status];
+    const linked = isAdFlowLinkedTask(task);
     const isBeingDragged = draggedTaskId === task.id;
     const isSelected = selectedTaskIds.includes(task.id);
     const { blocked, blockingTasks } = isTaskBlocked(task);
@@ -257,8 +263,9 @@ export function TaskBoard() {
     return (
       <div
         key={task.id}
-        draggable
-        onDragStart={(e) => handleDragStart(e, task.id)}
+        draggable={!linked}
+        title={linked ? "Open the creative to use its workflow actions." : undefined}
+        onDragStart={(e) => handleDragStart(e, task)}
         onDragEnd={handleDragEnd}
         onDragOver={(e) => {
           e.preventDefault();
@@ -271,7 +278,8 @@ export function TaskBoard() {
         }}
         onClick={() => setSelectedTaskId(task.id)}
         className={cn(
-          "group relative rounded-xl border bg-card p-3 shadow-soft transition-all duration-150 hover:border-primary/40 hover:shadow-md cursor-grab active:cursor-grabbing",
+          "group relative rounded-xl border bg-card p-3 shadow-soft transition-all duration-150 hover:border-primary/40 hover:shadow-md",
+          linked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
           isSelected ? "border-primary ring-2 ring-primary/20 bg-primary/5" : "border-border",
           isBeingDragged && "opacity-40 scale-95 border-primary"
         )}
@@ -749,6 +757,7 @@ export function TaskBoard() {
 
               {/* Native transparent select for 1-click updates (5 Main Statuses + All 10 AdFlow Statuses) */}
               <select
+                disabled={linked}
                 value={task.productionStage ? `adflow:${task.productionStage}` : task.status}
                 onChange={(e) => {
                   e.stopPropagation();
@@ -818,7 +827,7 @@ export function TaskBoard() {
             </div>
 
             {/* Quick advance shortcut */}
-            {task.status === "todo" && (
+            {!linked && task.status === "todo" && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -833,7 +842,7 @@ export function TaskBoard() {
               </button>
             )}
 
-            {task.status === "in_progress" && (
+            {!linked && task.status === "in_progress" && (
               <button
                 type="button"
                 onClick={(e) => {
@@ -848,7 +857,7 @@ export function TaskBoard() {
               </button>
             )}
 
-            {task.status === "backlog" && (
+            {!linked && task.status === "backlog" && (
               <button
                 type="button"
                 onClick={(e) => {
