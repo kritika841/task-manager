@@ -1403,6 +1403,22 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    let lastFocusFetch = Date.now();
+    const handleFocusOrVisibility = () => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        const now = Date.now();
+        // Throttle refetches on focus so rapid tab-switching doesn't spam (min 8 seconds)
+        if (now - lastFocusFetch > 8000) {
+          lastFocusFetch = now;
+          fetchTasks(false);
+          fetchNotifications();
+        }
+      }
+    };
+
+    window.addEventListener("focus", handleFocusOrVisibility);
+    document.addEventListener("visibilitychange", handleFocusOrVisibility);
+
     const interval = setInterval(() => {
       if (typeof document !== "undefined" && !document.hidden) {
         fetchTasks(false);
@@ -1412,6 +1428,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       clearInterval(interval);
+      window.removeEventListener("focus", handleFocusOrVisibility);
+      document.removeEventListener("visibilitychange", handleFocusOrVisibility);
     };
   }, [isAdsManagementConnected, adsSyncMode, fetchTasks, fetchNotifications]);
 
