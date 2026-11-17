@@ -40,6 +40,10 @@ import {
   setSoundMuted as setSoundMutedStorage,
   toggleSoundMuted,
 } from "./sound";
+import {
+  DEFAULT_ADFLOW_STAGE_MAPPING,
+  type AdFlowStageMappingConfig,
+} from "./adflow-bridge";
 
 interface TaskContextType {
   tasks: Task[];
@@ -224,6 +228,12 @@ interface TaskContextType {
   testWebhookEndpoint: (
     overrideUrl?: string
   ) => Promise<{ ok: boolean; status?: number; latencyMs: number; error?: string }>;
+  // AdFlow Stage Mapping Template
+  adflowStageMapping: AdFlowStageMappingConfig;
+  saveAdflowStageMapping: (
+    updates: Partial<AdFlowStageMappingConfig>
+  ) => Promise<boolean>;
+  resetAdflowStageMapping: () => Promise<boolean>;
 }
 
 const defaultFilter: FilterState = {
@@ -344,6 +354,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [templates, setTemplates] = useState<RoleTemplate[]>([]);
   const [activeTemplateId, setActiveTemplateIdState] = useState<string | null>(null);
   const [isRoleTemplateModalOpen, setIsRoleTemplateModalOpen] = useState<boolean>(false);
+  const [adflowStageMapping, setAdflowStageMapping] =
+    useState<AdFlowStageMappingConfig>(DEFAULT_ADFLOW_STAGE_MAPPING);
 
   // Notification Sound State
   const [soundMuted, setSoundMutedState] = useState<boolean>(false);
@@ -852,13 +864,77 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  // Fetch AdFlow Stage Mapping Template
+  const fetchAdflowStageMapping = useCallback(async () => {
+    try {
+      const res = await fetch("/api/adflow/stage-mapping", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.mapping) {
+        setAdflowStageMapping(data.mapping);
+      }
+    } catch (err) {
+      console.error("fetchAdflowStageMapping error:", err);
+    }
+  }, []);
+
+  const saveAdflowStageMapping = useCallback(
+    async (updates: Partial<AdFlowStageMappingConfig>): Promise<boolean> => {
+      try {
+        const res = await fetch("/api/adflow/stage-mapping", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        });
+        if (!res.ok) return false;
+        const data = await res.json();
+        if (data.mapping) {
+          setAdflowStageMapping(data.mapping);
+        }
+        await fetchTasks(false);
+        return true;
+      } catch (err) {
+        console.error("saveAdflowStageMapping error:", err);
+        return false;
+      }
+    },
+    [fetchTasks]
+  );
+
+  const resetAdflowStageMapping = useCallback(async (): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/adflow/stage-mapping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reset: true }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (data.mapping) {
+        setAdflowStageMapping(data.mapping);
+      }
+      await fetchTasks(false);
+      return true;
+    } catch (err) {
+      console.error("resetAdflowStageMapping error:", err);
+      return false;
+    }
+  }, [fetchTasks]);
+
   // Initial load
   useEffect(() => {
     fetchTasks(true);
     fetchDelegatorRules();
     fetchTemplates();
     fetchWebhookConfig();
-  }, [fetchTasks, fetchDelegatorRules, fetchTemplates, fetchWebhookConfig]);
+    fetchAdflowStageMapping();
+  }, [
+    fetchTasks,
+    fetchDelegatorRules,
+    fetchTemplates,
+    fetchWebhookConfig,
+    fetchAdflowStageMapping,
+  ]);
 
   useEffect(() => {
     if (currentUserId) {
@@ -2941,6 +3017,9 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         webhookConfig,
         saveWebhookSettings,
         testWebhookEndpoint,
+        adflowStageMapping,
+        saveAdflowStageMapping,
+        resetAdflowStageMapping,
         switchUser,
         isAuthenticated,
         isAuthLoading,

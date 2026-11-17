@@ -32,7 +32,8 @@ import { useTasks } from "@/lib/store";
 import { dateInTargetTimeZone } from "@/lib/supabase";
 import {
   ADFLOW_PRODUCTION_STAGES,
-  ADFLOW_STATUSES_BY_COLUMN,
+  getAdFlowStatusesByColumn,
+  type AdFlowProductionStage,
 } from "@/lib/adflow-bridge";
 import { StatusBadge, PriorityBadge } from "./ui/badge";
 import { ProgressBar } from "./ui/progress-bar";
@@ -111,7 +112,10 @@ export function TaskBoard() {
     archiveCompletedTasks,
     filter,
     setFilter,
+    adflowStageMapping,
   } = useTasks();
+
+  const statusesByColumn = getAdFlowStatusesByColumn(adflowStageMapping);
 
   const [expandedTaskIds, setExpandedTaskIds] = useState<Record<string, boolean>>({});
   const [collapsedSwimlanes, setCollapsedSwimlanes] = useState<Record<string, boolean>>({});
@@ -750,10 +754,13 @@ export function TaskBoard() {
                   e.stopPropagation();
                   const val = e.target.value;
                   if (val.startsWith("adflow:")) {
-                    const stgId = val.replace("adflow:", "");
+                    const stgId = val.replace("adflow:", "") as AdFlowProductionStage;
                     const stgDef = ADFLOW_PRODUCTION_STAGES.find((s) => s.id === stgId);
+                    const mappedStatus =
+                      adflowStageMapping?.stageToColumn?.[stgId] ||
+                      (stgDef ? stgDef.taskStatus : task.status);
                     updateTask(task.id, {
-                      status: stgDef ? stgDef.taskStatus : task.status,
+                      status: mappedStatus,
                       productionStage: stgId,
                       isRevisionRequested:
                         stgId === "creator_changes_requested" || stgId === "changes_requested",
@@ -773,35 +780,35 @@ export function TaskBoard() {
                   <option value="completed">Done</option>
                 </optgroup>
                 <optgroup label="Backlog · AdFlow Statuses">
-                  {ADFLOW_STATUSES_BY_COLUMN.backlog.map((s) => (
+                  {statusesByColumn.backlog.map((s) => (
                     <option key={s.id} value={`adflow:${s.id}`}>
                       {s.label}
                     </option>
                   ))}
                 </optgroup>
                 <optgroup label="To Do · AdFlow Statuses">
-                  {ADFLOW_STATUSES_BY_COLUMN.todo.map((s) => (
+                  {statusesByColumn.todo.map((s) => (
                     <option key={s.id} value={`adflow:${s.id}`}>
                       {s.label}
                     </option>
                   ))}
                 </optgroup>
                 <optgroup label="In Progress · AdFlow Statuses">
-                  {ADFLOW_STATUSES_BY_COLUMN.in_progress.map((s) => (
+                  {statusesByColumn.in_progress.map((s) => (
                     <option key={s.id} value={`adflow:${s.id}`}>
                       {s.label}
                     </option>
                   ))}
                 </optgroup>
                 <optgroup label="In Review · AdFlow Statuses">
-                  {ADFLOW_STATUSES_BY_COLUMN.in_review.map((s) => (
+                  {statusesByColumn.in_review.map((s) => (
                     <option key={s.id} value={`adflow:${s.id}`}>
                       {s.label}
                     </option>
                   ))}
                 </optgroup>
                 <optgroup label="Done · AdFlow Statuses">
-                  {ADFLOW_STATUSES_BY_COLUMN.completed.map((s) => (
+                  {statusesByColumn.completed.map((s) => (
                     <option key={s.id} value={`adflow:${s.id}`}>
                       {s.label}
                     </option>
@@ -982,7 +989,7 @@ export function TaskBoard() {
           {COLUMNS.map((column) => {
             const allColumnTasks = filteredTasks.filter((t) => t.status === column.id);
             const columnTasks = activeStageFilter &&
-              ADFLOW_STATUSES_BY_COLUMN[column.id].some((s) => s.id === activeStageFilter)
+              statusesByColumn[column.id].some((s) => s.id === activeStageFilter)
               ? allColumnTasks.filter((t) => t.productionStage === activeStageFilter)
               : allColumnTasks;
             const isHovered = dragOverColumn === column.id;
@@ -1061,7 +1068,7 @@ export function TaskBoard() {
 
                   {/* AdFlow Statuses mapped inside this column (Drop Targets & Quick Filters) */}
                   <div className="flex flex-wrap gap-1 pt-0.5">
-                    {ADFLOW_STATUSES_BY_COLUMN[column.id].map((stg) => {
+                    {statusesByColumn[column.id].map((stg) => {
                       const stageCount = allColumnTasks.filter(
                         (t) => t.productionStage === stg.id
                       ).length;
@@ -1150,7 +1157,7 @@ export function TaskBoard() {
           parentColumns: COLUMNS.map((col) => ({
             id: col.id,
             label: col.label,
-            subColumns: ADFLOW_STATUSES_BY_COLUMN[col.id].map((stg, idx) => ({
+            subColumns: statusesByColumn[col.id].map((stg, idx) => ({
               id: stg.id,
               label: stg.label,
               parentStatus: col.id,

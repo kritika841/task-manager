@@ -77,6 +77,86 @@ export const ADFLOW_PRODUCTION_STAGES = [
 
 export type AdFlowProductionStage = (typeof ADFLOW_PRODUCTION_STAGES)[number]["id"];
 
+export interface AdFlowStageMappingConfig {
+  stageToColumn: Record<AdFlowProductionStage, TaskStatus>;
+  columnDefaultStage: Record<TaskStatus, AdFlowProductionStage>;
+  autoCreateBlankCreative: boolean;
+  defaultBlankCreativeStage: AdFlowProductionStage;
+}
+
+export const DEFAULT_ADFLOW_STAGE_MAPPING: AdFlowStageMappingConfig = {
+  stageToColumn: {
+    script_writing: "backlog",
+    ready_to_shoot: "todo",
+    ready_for_edit: "todo",
+    shoot_complete: "in_progress",
+    editing: "in_progress",
+    creator_changes_requested: "in_progress",
+    changes_requested: "in_progress",
+    creator_review: "in_review",
+    final_review: "in_review",
+    approved: "completed",
+  },
+  columnDefaultStage: {
+    backlog: "script_writing",
+    todo: "ready_to_shoot",
+    in_progress: "editing",
+    in_review: "final_review",
+    completed: "approved",
+  },
+  autoCreateBlankCreative: true,
+  defaultBlankCreativeStage: "script_writing",
+};
+
+export function getAdFlowStageMappingConfig(
+  override?: Partial<AdFlowStageMappingConfig> | null
+): AdFlowStageMappingConfig {
+  let saved: Partial<AdFlowStageMappingConfig> | undefined = override || undefined;
+  if (!saved && typeof window === "undefined") {
+    try {
+      const db = loadLocalDb();
+      if (db.adflow_stage_mapping) {
+        saved = db.adflow_stage_mapping as Partial<AdFlowStageMappingConfig>;
+      }
+    } catch {}
+  }
+
+  return {
+    stageToColumn: {
+      ...DEFAULT_ADFLOW_STAGE_MAPPING.stageToColumn,
+      ...(saved?.stageToColumn || {}),
+    },
+    columnDefaultStage: {
+      ...DEFAULT_ADFLOW_STAGE_MAPPING.columnDefaultStage,
+      ...(saved?.columnDefaultStage || {}),
+    },
+    autoCreateBlankCreative:
+      saved?.autoCreateBlankCreative !== undefined
+        ? Boolean(saved.autoCreateBlankCreative)
+        : DEFAULT_ADFLOW_STAGE_MAPPING.autoCreateBlankCreative,
+    defaultBlankCreativeStage:
+      saved?.defaultBlankCreativeStage ||
+      DEFAULT_ADFLOW_STAGE_MAPPING.defaultBlankCreativeStage,
+  };
+}
+
+export function getAdFlowStatusesByColumn(
+  customMapping?: Partial<AdFlowStageMappingConfig> | null
+): Record<TaskStatus, Array<(typeof ADFLOW_PRODUCTION_STAGES)[number]>> {
+  const cfg = getAdFlowStageMappingConfig(customMapping);
+  const getForCol = (col: TaskStatus) =>
+    ADFLOW_PRODUCTION_STAGES.filter(
+      (s) => (cfg.stageToColumn[s.id] || s.taskStatus) === col
+    );
+  return {
+    backlog: getForCol("backlog"),
+    todo: getForCol("todo"),
+    in_progress: getForCol("in_progress"),
+    in_review: getForCol("in_review"),
+    completed: getForCol("completed"),
+  };
+}
+
 export const ADFLOW_STATUSES_BY_COLUMN: Record<
   TaskStatus,
   Array<(typeof ADFLOW_PRODUCTION_STAGES)[number]>
@@ -369,10 +449,15 @@ export async function getPendingCreativeIdsForCreator(creatorId: string): Promis
 
 export function mapAdFlowStageToTaskStatus(
   stage: string,
-  status?: string
+  status?: string,
+  customMapping?: Partial<AdFlowStageMappingConfig> | null
 ): TaskStatus {
-  const s = (stage || "").toLowerCase();
+  const s = (stage || "").toLowerCase() as AdFlowProductionStage;
   const st = (status || "").toLowerCase();
+  const cfg = getAdFlowStageMappingConfig(customMapping);
+  if (s && cfg.stageToColumn[s]) {
+    return cfg.stageToColumn[s];
+  }
   if (s === "approved" || st === "approved") return "completed";
   if (s === "creator_review" || s === "final_review" || st === "pending_review")
     return "in_review";
@@ -397,12 +482,23 @@ export function mapTaskStatusToDefaultAdFlowStage(
   status: TaskStatus,
   currentStage?: string,
   isRevisionRequested?: boolean,
-  revisionTarget?: "creator" | "editor"
+  revisionTarget?: "creator" | "editor",
+  customMapping?: Partial<AdFlowStageMappingConfig> | null
 ): AdFlowProductionStage {
   if (isRevisionRequested) {
     return revisionTarget === "creator"
       ? "creator_changes_requested"
       : "changes_requested";
+  }
+  const cfg = getAdFlowStageMappingConfig(customMapping);
+  if (
+    currentStage &&
+    cfg.stageToColumn[currentStage as AdFlowProductionStage] === status
+  ) {
+    return currentStage as AdFlowProductionStage;
+  }
+  if (cfg.columnDefaultStage[status]) {
+    return cfg.columnDefaultStage[status];
   }
   if (status === "completed") return "approved";
   if (status === "in_review") {
@@ -700,4 +796,172 @@ export async function syncTaskUpdateToAdFlow(params: {
   await revalidateAdFlowCache(existingAd.id);
 
   return { ok: true, ad: updatedAd };
+}
+
+/**
+ * Automatically creates an empty/blank pending creative in AdFlow whenever a creative task
+ * is assigned in Task Manager, so the user and admin see the creative immediately in AdFlow's
+ * Pending ("Preparing" / "In production") queue without having to select IDs manually.
+ */
+export async function createBlankAdFlowCreative(params: {
+  creativeName: string;
+  assigneeId: string;
+  assigneeRole?: string;
+  taskTitle?: string;
+  description?: string;
+  dueDate?: string;
+  productionStage?: string;
+  actorId?: string | null;
+}): Promise<{ ok: boolean; adId?: string; ad?: Record<string, any>; error?: string }> {
+  const cleanName = params.creativeName.trim().toUpperCase();
+  const headers = {
+    ...getAdFlowHeaders(),
+    Prefer: "return=representation",
+  };
+  const nowIso = new Date().toISOString();
+  const actorId = params.actorId || "4a206a68-c5a4-4d12-be76-90468ea3df44";
+
+  try {
+    // 1. Check if an AdFlow creative with this exact name already exists
+    const existingRes = await fetch(
+      `${ADFLOW_SUPABASE_URL}/rest/v1/ads?name=ilike.${encodeURIComponent(cleanName)}&deleted_at=is.null&select=*`,
+      { headers: getAdFlowHeaders() }
+    );
+    if (existingRes.ok) {
+      const existingRows = await existingRes.json();
+      if (Array.isArray(existingRows) && existingRows[0]?.id) {
+        return { ok: true, adId: existingRows[0].id, ad: existingRows[0] };
+      }
+    }
+
+    // 2. Resolve default active campaign & product
+    const [cRes, pRes] = await Promise.all([
+      fetch(
+        `${ADFLOW_SUPABASE_URL}/rest/v1/campaigns?active=eq.true&select=id&limit=1`,
+        { headers: getAdFlowHeaders() }
+      ),
+      fetch(
+        `${ADFLOW_SUPABASE_URL}/rest/v1/products?active=eq.true&select=id&limit=1`,
+        { headers: getAdFlowHeaders() }
+      ),
+    ]);
+    const cRows = cRes.ok ? await cRes.json() : [];
+    const pRows = pRes.ok ? await pRes.json() : [];
+    const resolvedCampaignId =
+      cRows[0]?.id || "246b4cb9-c725-4c45-b6bd-6b1b8604bc50";
+    const resolvedProductId =
+      pRows[0]?.id || "c5eb1ae4-5333-4a35-be3f-a5a7b7b984c6";
+
+    const role = (params.assigneeRole || "").toLowerCase();
+    const isEditorAssignee = role === "editor";
+    const cfg = getAdFlowStageMappingConfig();
+    const initialStage =
+      params.productionStage ||
+      cfg.defaultBlankCreativeStage ||
+      "script_writing";
+    const stageIdx = ADFLOW_PRODUCTION_STAGES.findIndex(
+      (s) => s.id === initialStage
+    );
+
+    const creatorId = isEditorAssignee ? actorId : params.assigneeId;
+    const editorId = isEditorAssignee ? params.assigneeId : null;
+
+    const noteContent = [
+      params.taskTitle ? `Task: ${params.taskTitle}` : "",
+      params.description ? params.description.trim() : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    const insertPayload: Record<string, any> = {
+      name: cleanName,
+      campaign_id: resolvedCampaignId,
+      product_id: resolvedProductId,
+      creator_id: creatorId,
+      editor_id: editorId,
+      assigned_at: editorId ? nowIso : null,
+      production_stage: initialStage,
+      status: legacyAdStatusForStage(initialStage),
+      approval_stage:
+        initialStage === "approved"
+          ? "complete"
+          : initialStage === "final_review"
+          ? "admin_final"
+          : "manager_review",
+      script_text: "",
+      script_html: null,
+      raw_footage_url: null,
+      drive_url: null,
+      drive_file_id: null,
+      preview_url: null,
+      thumbnail_url: null,
+      ad_type: "video",
+      platforms: ["Meta Ads", "Social Media"],
+      deadline: params.dueDate || null,
+      notes: noteContent || null,
+      script_ready_at: stageIdx >= 1 ? nowIso : null,
+      shoot_completed_at: stageIdx >= 2 ? nowIso : null,
+      raw_footage_shared_at: null,
+      editing_started_at: stageIdx >= 4 ? nowIso : null,
+      submitted_at: stageIdx >= 5 ? nowIso : null,
+      creator_reviewed_at: stageIdx >= 6 ? nowIso : null,
+      final_approved_at: initialStage === "approved" ? nowIso : null,
+      approved_at: initialStage === "approved" ? nowIso : null,
+    };
+
+    const createRes = await fetch(`${ADFLOW_SUPABASE_URL}/rest/v1/ads`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(insertPayload),
+    });
+
+    if (!createRes.ok) {
+      const errText = await createRes.text();
+      return { ok: false, error: errText };
+    }
+
+    const createdRows = await createRes.json();
+    const createdAd = Array.isArray(createdRows) ? createdRows[0] : createdRows;
+
+    if (createdAd?.id) {
+      await Promise.all([
+        fetch(`${ADFLOW_SUPABASE_URL}/rest/v1/activity_logs`, {
+          method: "POST",
+          headers: getAdFlowHeaders(),
+          body: JSON.stringify({
+            ad_id: createdAd.id,
+            actor_id: actorId,
+            action: "creator_item_created",
+            metadata: {
+              production_stage: initialStage,
+              new_stage: initialStage,
+              source: "task_manager_auto_blank",
+              creative_id: createdAd.name,
+            },
+          }),
+        }).catch(() => {}),
+        fetch(`${ADFLOW_SUPABASE_URL}/rest/v1/notifications`, {
+          method: "POST",
+          headers: getAdFlowHeaders(),
+          body: JSON.stringify({
+            user_id: params.assigneeId,
+            ad_id: createdAd.id,
+            title: `New Pending Creative Assigned: ${createdAd.name}`,
+            body: params.taskTitle
+              ? `${createdAd.name} (${params.taskTitle}) is ready in your AdFlow pending queue.`
+              : `${createdAd.name} is ready in your AdFlow pending queue.`,
+          }),
+        }).catch(() => {}),
+      ]);
+
+      await revalidateAdFlowCache(createdAd.id);
+    }
+
+    return { ok: true, adId: createdAd?.id, ad: createdAd };
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: err?.message || "Failed to auto-create blank AdFlow creative",
+    };
+  }
 }

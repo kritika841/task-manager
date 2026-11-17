@@ -20,9 +20,15 @@ import {
   Shield,
   LogOut,
   Zap,
+  RotateCcw,
+  Sparkles,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
-import { ViewMode, Role, type User } from "@/lib/types";
+import { ViewMode, Role, TaskStatus, type User } from "@/lib/types";
+import {
+  ADFLOW_PRODUCTION_STAGES,
+  type AdFlowProductionStage,
+} from "@/lib/adflow-bridge";
 import { cn, getUserColor, getEmployeeCode, CURATED_COLOR_OPTIONS } from "@/lib/utils";
 import { Button } from "./ui/button";
 
@@ -46,9 +52,14 @@ export function SettingsModal() {
     updateUserColor,
     updateUser,
     deleteUser,
+    adflowStageMapping,
+    saveAdflowStageMapping,
+    resetAdflowStageMapping,
   } = useTasks();
 
-  const [activeTab, setActiveTab] = useState<"general" | "team">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "adflow" | "team">("general");
+  const [isSavingMapping, setIsSavingMapping] = useState(false);
+  const [mappingStatusMsg, setMappingStatusMsg] = useState<string | null>(null);
 
   // Team Management state (Admin)
   const [isAddingMember, setIsAddingMember] = useState(false);
@@ -147,12 +158,12 @@ export function SettingsModal() {
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center gap-1 px-6 pt-2 border-b border-border bg-muted/10 shrink-0">
+        <div className="flex items-center gap-1 px-6 pt-2 border-b border-border bg-muted/10 shrink-0 overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab("general")}
             className={cn(
-              "flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer",
+              "flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer whitespace-nowrap",
               activeTab === "general"
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -164,9 +175,23 @@ export function SettingsModal() {
 
           <button
             type="button"
+            onClick={() => setActiveTab("adflow")}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer whitespace-nowrap",
+              activeTab === "adflow"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Layers className="size-3.5" />
+            <span>AdFlow Stage Template</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab("team")}
             className={cn(
-              "flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer",
+              "flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer whitespace-nowrap",
               activeTab === "team"
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -320,6 +345,243 @@ export function SettingsModal() {
                 >
                   View Shortcuts (?)
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: ADFLOW STAGE TEMPLATE & BLANK CREATIVE AUTOMATION */}
+          {activeTab === "adflow" && (
+            <div className="space-y-5">
+              {/* Auto-Create Blank Creative in AdFlow Pending */}
+              <div className="rounded-xl border border-primary/25 bg-primary/5 p-4 space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Sparkles className="size-4 text-primary" />
+                      <h3 className="text-sm font-bold text-foreground">
+                        Auto-Create Blank Creatives in AdFlow Pending
+                      </h3>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      When you assign a creative task (e.g. 4 scripts or creatives) to a Content Creator or any user in Task Manager, automatically generate their sequential Creative IDs and create blank pending creatives in AdFlow immediately so neither you nor the creator has to manually pick IDs.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={adflowStageMapping.autoCreateBlankCreative}
+                    disabled={isSavingMapping}
+                    onClick={async () => {
+                      setIsSavingMapping(true);
+                      await saveAdflowStageMapping({
+                        autoCreateBlankCreative: !adflowStageMapping.autoCreateBlankCreative,
+                      });
+                      setIsSavingMapping(false);
+                      setMappingStatusMsg("Saved auto-create blank creative setting.");
+                      setTimeout(() => setMappingStatusMsg(null), 2500);
+                    }}
+                    className={cn(
+                      "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
+                      adflowStageMapping.autoCreateBlankCreative
+                        ? "bg-emerald-500"
+                        : "bg-muted-foreground/30"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "pointer-events-none inline-block size-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out",
+                        adflowStageMapping.autoCreateBlankCreative
+                          ? "translate-x-5"
+                          : "translate-x-0"
+                      )}
+                    />
+                  </button>
+                </div>
+
+                <div className="pt-2 border-t border-border/50 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-medium text-foreground">
+                    Initial AdFlow Stage for New Assigned Tasks:
+                  </span>
+                  <select
+                    value={adflowStageMapping.defaultBlankCreativeStage}
+                    disabled={isSavingMapping}
+                    onChange={async (e) => {
+                      const nextStage = e.target.value as AdFlowProductionStage;
+                      setIsSavingMapping(true);
+                      await saveAdflowStageMapping({
+                        defaultBlankCreativeStage: nextStage,
+                      });
+                      setIsSavingMapping(false);
+                      setMappingStatusMsg(`Default initial stage set to "${nextStage.replace(/_/g, " ")}".`);
+                      setTimeout(() => setMappingStatusMsg(null), 2500);
+                    }}
+                    className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-semibold text-foreground cursor-pointer"
+                  >
+                    {ADFLOW_PRODUCTION_STAGES.map((stg) => (
+                      <option key={stg.id} value={stg.id}>
+                        {stg.label} ({stg.id})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Stage-to-Stage Mapping Template */}
+              <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+                <div className="flex items-center justify-between gap-2 pb-2 border-b border-border">
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                      AdFlow Stage Mapping Template (10 AdFlow Stages ↔ 5 Board Columns)
+                    </h4>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Control which Tasks Dashboard column each AdFlow stage belongs to, and which AdFlow stage is assigned when moving a task into a column.
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={isSavingMapping}
+                    onClick={async () => {
+                      setIsSavingMapping(true);
+                      await resetAdflowStageMapping();
+                      setIsSavingMapping(false);
+                      setMappingStatusMsg("Reset to default AdFlow stage template.");
+                      setTimeout(() => setMappingStatusMsg(null), 2500);
+                    }}
+                    className="text-xs h-7 gap-1 shrink-0"
+                  >
+                    <RotateCcw className="size-3" />
+                    <span>Reset Defaults</span>
+                  </Button>
+                </div>
+
+                {mappingStatusMsg && (
+                  <div className="rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-3 py-2 text-xs font-medium text-emerald-500 flex items-center gap-1.5">
+                    <Check className="size-3.5" />
+                    <span>{mappingStatusMsg}</span>
+                  </div>
+                )}
+
+                {/* Part A: Map each of the 10 AdFlow stages to a Tasks Dashboard Status */}
+                <div className="space-y-2">
+                  <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    1. Assign AdFlow Stages to Tasks Dashboard Columns
+                  </div>
+                  <div className="divide-y divide-border rounded-xl border border-border overflow-hidden">
+                    {ADFLOW_PRODUCTION_STAGES.map((stg) => {
+                      const assignedCol =
+                        adflowStageMapping.stageToColumn?.[stg.id] || stg.taskStatus;
+                      return (
+                        <div
+                          key={stg.id}
+                          className="flex items-center justify-between gap-3 px-3.5 py-2.5 bg-card hover:bg-muted/20 text-xs"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span
+                              className="size-2.5 rounded-full shrink-0"
+                              style={{ backgroundColor: stg.color }}
+                            />
+                            <div className="truncate">
+                              <span className="font-semibold text-foreground">
+                                {stg.label}
+                              </span>
+                              <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">
+                                ({stg.id})
+                              </span>
+                            </div>
+                          </div>
+
+                          <select
+                            value={assignedCol}
+                            disabled={isSavingMapping}
+                            onChange={async (e) => {
+                              const newCol = e.target.value as TaskStatus;
+                              setIsSavingMapping(true);
+                              await saveAdflowStageMapping({
+                                stageToColumn: {
+                                  ...adflowStageMapping.stageToColumn,
+                                  [stg.id]: newCol,
+                                },
+                              });
+                              setIsSavingMapping(false);
+                              setMappingStatusMsg(
+                                `Mapped "${stg.label}" → ${newCol.replace("_", " ").toUpperCase()}`
+                              );
+                              setTimeout(() => setMappingStatusMsg(null), 2500);
+                            }}
+                            className="rounded-lg border border-border bg-muted/30 px-2.5 py-1 text-xs font-semibold text-foreground cursor-pointer shrink-0"
+                          >
+                            <option value="backlog">Backlog</option>
+                            <option value="todo">To Do</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="in_review">In Review</option>
+                            <option value="completed">Done</option>
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Part B: Default AdFlow stage when moving a card into a Tasks column */}
+                <div className="space-y-2 pt-2">
+                  <div className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                    2. Default AdFlow Stage When Moving a Task to a Board Column
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {(
+                      [
+                        { id: "backlog", label: "Backlog" },
+                        { id: "todo", label: "To Do" },
+                        { id: "in_progress", label: "In Progress" },
+                        { id: "in_review", label: "In Review" },
+                        { id: "completed", label: "Done" },
+                      ] as { id: TaskStatus; label: string }[]
+                    ).map((col) => {
+                      const currentDefault =
+                        adflowStageMapping.columnDefaultStage?.[col.id] ||
+                        "script_writing";
+                      return (
+                        <div
+                          key={col.id}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/15 px-3 py-2 text-xs"
+                        >
+                          <span className="font-semibold text-foreground">
+                            {col.label}:
+                          </span>
+                          <select
+                            value={currentDefault}
+                            disabled={isSavingMapping}
+                            onChange={async (e) => {
+                              const nextStg = e.target.value as AdFlowProductionStage;
+                              setIsSavingMapping(true);
+                              await saveAdflowStageMapping({
+                                columnDefaultStage: {
+                                  ...adflowStageMapping.columnDefaultStage,
+                                  [col.id]: nextStg,
+                                },
+                              });
+                              setIsSavingMapping(false);
+                              setMappingStatusMsg(
+                                `Default AdFlow stage for ${col.label} set to "${nextStg.replace(/_/g, " ")}"`
+                              );
+                              setTimeout(() => setMappingStatusMsg(null), 2500);
+                            }}
+                            className="rounded border border-border bg-card px-2 py-1 text-[11px] font-semibold text-foreground cursor-pointer"
+                          >
+                            {ADFLOW_PRODUCTION_STAGES.map((s) => (
+                              <option key={s.id} value={s.id}>
+                                {s.shortLabel} ({s.label})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
           )}

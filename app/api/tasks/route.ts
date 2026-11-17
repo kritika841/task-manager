@@ -13,6 +13,8 @@ import {
   mapAdFlowStageToTaskStatus,
   mapTaskStatusToDefaultAdFlowStage,
   syncTaskUpdateToAdFlow,
+  createBlankAdFlowCreative,
+  getAdFlowStageMappingConfig,
 } from "@/lib/adflow-bridge";
 import {
   Task,
@@ -933,6 +935,7 @@ export async function POST(req: Request) {
           )));
 
     let generatedCreativeIds: string[] = [];
+    const stageMappingCfg = getAdFlowStageMappingConfig();
     if (isCreativeTask) {
       const generated = await generateNextCreativeIds(userId, splitUnitsCount);
       generatedCreativeIds = generated.creativeIds;
@@ -951,6 +954,35 @@ export async function POST(req: Request) {
         baseTags.unshift("AdFlow");
       }
 
+      const initialProdStage = assignedCreativeId
+        ? body.productionStage ||
+          stageMappingCfg.defaultBlankCreativeStage ||
+          "script_writing"
+        : undefined;
+
+      // Automatically create a blank/empty pending creative in AdFlow so the assignee & admin see it in Pending immediately
+      let autoCreatedAdId: string | undefined;
+      if (assignedCreativeId && stageMappingCfg.autoCreateBlankCreative !== false) {
+        const blankRes = await createBlankAdFlowCreative({
+          creativeName: assignedCreativeId,
+          assigneeId: userId,
+          assigneeRole,
+          taskTitle: baseUnitName,
+          description: body.description || "",
+          dueDate: targetDate,
+          productionStage: initialProdStage,
+          actorId: assignedBy,
+        });
+        if (blankRes.ok && blankRes.adId) {
+          autoCreatedAdId = blankRes.adId;
+        }
+      }
+
+      const effectiveInitialStatus: TaskStatus =
+        assignedCreativeId && initialProdStage
+          ? mapAdFlowStageToTaskStatus(initialProdStage)
+          : initialStatus;
+
       const notesMeta: ParsedNotes = {
         description: body.description || "",
         priority: body.priority || "medium",
@@ -959,20 +991,29 @@ export async function POST(req: Request) {
         deliverableUrl: body.deliverableUrl,
         deliverableAsset: body.deliverableAsset,
         blockedByTaskIds: body.blockedByTaskIds,
-        statusOverride: initialStatus,
+        statusOverride: effectiveInitialStatus,
         customSubtasks: body.customSubtasks,
         startDate: body.startDate,
         dueTime: body.dueTime,
         estimatedHours: body.estimatedHours,
         subColumnId: body.subColumnId,
-        parentColumnId: body.parentColumnId || initialStatus,
+        parentColumnId: body.parentColumnId || effectiveInitialStatus,
         templateRole: body.templateRole,
-        stageHistory: [initialStageEntry],
-        completedAt: initialStatus === "completed" ? nowIso : undefined,
+        stageHistory: [
+          {
+            ...initialStageEntry,
+            stage: effectiveInitialStatus,
+            label: formatStageLabel(
+              effectiveInitialStatus,
+              body.subColumnId,
+              initialProdStage
+            ),
+          },
+        ],
+        completedAt: effectiveInitialStatus === "completed" ? nowIso : undefined,
         creativeName: assignedCreativeId,
-        productionStage: assignedCreativeId
-          ? body.productionStage || "script_writing"
-          : undefined,
+        adId: autoCreatedAdId,
+        productionStage: initialProdStage,
       };
 
       const initialCompleted = initialStatus === "completed" ? 1 : 0;

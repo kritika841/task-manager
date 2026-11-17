@@ -70,6 +70,7 @@ export function TaskDrawer() {
     isAdsManagementConnected,
     enforceCanonicalLock,
     refreshAll,
+    adflowStageMapping,
   } = useTasks();
 
   const [revisionReasonInput, setRevisionReasonInput] = useState("");
@@ -443,6 +444,8 @@ export function TaskDrawer() {
                         <div className="flex flex-wrap gap-1">
                           {ADFLOW_PRODUCTION_STAGES.map((stg) => {
                             const isStageActive = task.productionStage === stg.id;
+                            const mappedCol =
+                              adflowStageMapping?.stageToColumn?.[stg.id] || stg.taskStatus;
                             return (
                               <button
                                 key={stg.id}
@@ -455,7 +458,7 @@ export function TaskDrawer() {
                                     });
                                   } else {
                                     await updateTask(task.id, {
-                                      status: stg.taskStatus,
+                                      status: mappedCol,
                                       productionStage: stg.id,
                                     });
                                   }
@@ -466,7 +469,7 @@ export function TaskDrawer() {
                                     ? "bg-primary/20 text-primary border-primary/50 ring-1 ring-primary/30 font-bold shadow-2xs"
                                     : "border-border/50 bg-card/60 text-muted-foreground hover:bg-muted hover:text-foreground"
                                 )}
-                                title={`Move to ${stg.label} (${stg.taskStatus.replace("_", " ")})`}
+                                title={`Move to ${stg.label} (${mappedCol.replace("_", " ")})`}
                               >
                                 <span
                                   className="size-1.5 rounded-full shrink-0"

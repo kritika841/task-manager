@@ -20,6 +20,7 @@ export interface LocalDbSchema {
   personal_notes: Record<string, any>[];
   reminders: Record<string, any>[];
   feature_requests: Record<string, any>[];
+  adflow_stage_mapping?: Record<string, any>;
 }
 
 function todayIST(): string {
@@ -199,6 +200,10 @@ export function loadLocalDb(): LocalDbSchema {
       personal_notes: parsed.personal_notes || [],
       reminders: parsed.reminders || [],
       feature_requests: parsed.feature_requests || [],
+      adflow_stage_mapping:
+        parsed.adflow_stage_mapping && typeof parsed.adflow_stage_mapping === "object"
+          ? parsed.adflow_stage_mapping
+          : undefined,
     };
   } catch {
     return createInitialSeed();
