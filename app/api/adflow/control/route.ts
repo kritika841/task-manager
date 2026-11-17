@@ -42,6 +42,9 @@ export async function GET(req: Request) {
   try {
     const { actor } = await resolveRequestActor(req);
     if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    if (!canReviewTasks(actor.role)) {
+      return NextResponse.json({ error: "Review permissions are required." }, { status: 403 });
+    }
     const { searchParams } = new URL(req.url);
     const adId = searchParams.get("adId")?.replace(/^ad-/, "") || "";
     const creativeName = searchParams.get("creativeName")?.trim() || "";

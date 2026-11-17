@@ -7,6 +7,8 @@ import {
 } from "@/lib/comments-store";
 import { supabaseAdmin } from "@/lib/supabase";
 import { dispatchWebhookEvent } from "@/lib/webhooks-store";
+import { canReviewTasks, resolveRequestActor } from "@/lib/auth-server";
+import { canAccessTaskById } from "@/lib/task-access";
 
 export async function GET(
   req: Request,
@@ -14,6 +16,11 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    if (!(await canAccessTaskById(actor, id))) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
     if (!id) {
       return NextResponse.json({ error: "Task ID is required" }, { status: 400 });
     }
@@ -35,12 +42,18 @@ export async function POST(
 ) {
   try {
     const { id } = await params;
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    if (!(await canAccessTaskById(actor, id))) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
     const body = await req.json();
-    const { userId, content, mentions } = body;
+    const { content, mentions } = body;
+    const userId = actor.id;
 
-    if (!id || !userId || !content?.trim()) {
+    if (!id || !content?.trim()) {
       return NextResponse.json(
-        { error: "Task ID, user ID, and comment content are required" },
+        { error: "Task ID and comment content are required" },
         { status: 400 }
       );
     }
@@ -182,17 +195,22 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    if (!(await canAccessTaskById(actor, id))) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
     const body = await req.json();
-    const { commentId, userId, emoji } = body;
+    const { commentId, emoji } = body;
 
-    if (!id || !commentId || !userId || !emoji) {
+    if (!id || !commentId || !emoji) {
       return NextResponse.json(
-        { error: "Task ID, commentId, userId, and emoji are required" },
+        { error: "Task ID, commentId, and emoji are required" },
         { status: 400 }
       );
     }
 
-    const updated = await toggleCommentReaction(id, commentId, userId, emoji);
+    const updated = await toggleCommentReaction(id, commentId, actor.id, emoji);
     if (!updated) {
       return NextResponse.json({ error: "Comment not found" }, { status: 404 });
     }
@@ -213,11 +231,23 @@ export async function DELETE(
 ) {
   try {
     const { id } = await params;
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+    if (!(await canAccessTaskById(actor, id))) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
     const { searchParams } = new URL(req.url);
     const commentId = searchParams.get("commentId");
 
     if (!id || !commentId) {
       return NextResponse.json({ error: "Missing id or commentId" }, { status: 400 });
+    }
+
+    if (!canReviewTasks(actor.role)) {
+      const comments = await getCommentsForTask(id);
+      if (!comments.some((comment) => comment.id === commentId && comment.userId === actor.id)) {
+        return NextResponse.json({ error: "Comment not found" }, { status: 404 });
+      }
     }
 
     const success = await deleteCommentFromTask(id, commentId);

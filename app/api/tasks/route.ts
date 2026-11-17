@@ -31,6 +31,13 @@ import {
 import { getAllCommentsMap } from "@/lib/comments-store";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
 import { canReviewTasks, resolveRequestActor } from "@/lib/auth-server";
+import {
+  canAccessStandaloneCreative,
+  canAccessTask,
+  getCreativeAssignee,
+  isCreatorStage,
+  readTaskNotesMetadata,
+} from "@/lib/task-access";
 import { dispatchWebhookEvent } from "@/lib/webhooks-store";
 
 function getDepartment(role: string): string {
@@ -124,43 +131,38 @@ interface ParsedNotes {
 }
 
 function parseNotes(raw: string | null): ParsedNotes {
-  if (!raw) return { description: "" };
-  try {
-    if (raw.startsWith("{") && raw.includes('"__meta__":true')) {
-      const parsed = JSON.parse(raw);
-      return {
-        description: parsed.desc || "",
-        priority: parsed.priority,
-        project: parsed.project,
-        tags: Array.isArray(parsed.tags) ? parsed.tags : undefined,
-        deliverableUrl: parsed.deliverableUrl,
-        deliverableAsset: parsed.deliverableAsset,
-        isRevisionRequested: parsed.isRevisionRequested,
-        revisionReason: parsed.revisionReason,
-        revisionNotes: parsed.revisionNotes,
-        blockedByTaskIds: parsed.blockedByTaskIds,
-        statusOverride: parsed.statusOverride,
-        customSubtasks: parsed.customSubtasks,
-        startDate: parsed.startDate,
-        dueTime: parsed.dueTime,
-        estimatedHours: parsed.estimatedHours,
-        actualHours: parsed.actualHours,
-        timeTracking: parsed.timeTracking,
-        isArchived: Boolean(parsed.isArchived),
-        archivedAt: parsed.archivedAt,
-        archivedBy: parsed.archivedBy,
-        subColumnId: parsed.subColumnId,
-        parentColumnId: parsed.parentColumnId,
-        templateRole: parsed.templateRole,
-        stageHistory: Array.isArray(parsed.stageHistory) ? parsed.stageHistory : undefined,
-        completedAt: parsed.completedAt,
-        creativeName: parsed.creativeName,
-        adId: parsed.adId,
-        productionStage: parsed.productionStage,
-      };
-    }
-  } catch {}
-  return { description: raw };
+  const parsed = readTaskNotesMetadata(raw);
+  if (!parsed) return { description: raw || "" };
+  return {
+    description: parsed.desc || "",
+    priority: parsed.priority,
+    project: parsed.project,
+    tags: Array.isArray(parsed.tags) ? parsed.tags : undefined,
+    deliverableUrl: parsed.deliverableUrl,
+    deliverableAsset: parsed.deliverableAsset,
+    isRevisionRequested: parsed.isRevisionRequested,
+    revisionReason: parsed.revisionReason,
+    revisionNotes: parsed.revisionNotes,
+    blockedByTaskIds: parsed.blockedByTaskIds,
+    statusOverride: parsed.statusOverride,
+    customSubtasks: parsed.customSubtasks,
+    startDate: parsed.startDate,
+    dueTime: parsed.dueTime,
+    estimatedHours: parsed.estimatedHours,
+    actualHours: parsed.actualHours,
+    timeTracking: parsed.timeTracking,
+    isArchived: Boolean(parsed.isArchived),
+    archivedAt: parsed.archivedAt,
+    archivedBy: parsed.archivedBy,
+    subColumnId: parsed.subColumnId,
+    parentColumnId: parsed.parentColumnId,
+    templateRole: parsed.templateRole,
+    stageHistory: Array.isArray(parsed.stageHistory) ? parsed.stageHistory : undefined,
+    completedAt: parsed.completedAt,
+    creativeName: parsed.creativeName,
+    adId: parsed.adId,
+    productionStage: parsed.productionStage,
+  };
 }
 
 function stringifyNotes(meta: ParsedNotes): string {
@@ -456,11 +458,9 @@ export async function GET(req: Request) {
       const resolvedCreativeName = parsedNotes.creativeName
         ? parsedNotes.creativeName.trim().toUpperCase()
         : undefined;
-      const matchedAd = resolvedCreativeName
-        ? adsByName.get(resolvedCreativeName)
-        : parsedNotes.adId
-        ? adsById.get(parsedNotes.adId)
-        : undefined;
+      const matchedAd =
+        (parsedNotes.adId ? adsById.get(parsedNotes.adId) : undefined) ||
+        (resolvedCreativeName ? adsByName.get(resolvedCreativeName) : undefined);
 
       if (matchedAd?.id) {
         mergedAdIds.add(matchedAd.id);
@@ -612,24 +612,11 @@ export async function GET(req: Request) {
       const stage = (ad.production_stage || override.productionStage || "").toLowerCase();
       const statusRaw = (ad.status || "").toLowerCase();
 
-      const isShootStage =
-        stage === "script_writing" ||
-        stage === "ready_to_shoot" ||
-        stage === "ready_for_shoot" ||
-        stage === "shoot_complete" ||
-        stage === "shooting" ||
-        stage === "creator_changes_requested";
+      const isShootStage = isCreatorStage(stage);
       const isEditStage =
         stage === "ready_for_edit" ||
         stage === "editing" ||
         stage === "changes_requested";
-
-      let defaultAssigneeId = "";
-      if (isShootStage) {
-        defaultAssigneeId = ad.creator_id || ad.editor_id || (users[0]?.id || "");
-      } else {
-        defaultAssigneeId = ad.editor_id || ad.creator_id || (users[0]?.id || "");
-      }
 
       let defaultStatus: TaskStatus = "todo";
       let stageLabel = "Ad Creative";
@@ -704,7 +691,7 @@ export async function GET(req: Request) {
         else if (override.status === "backlog") stageLabel = "Backlog";
       }
 
-      const assigneeId: string = override.assigneeId || defaultAssigneeId;
+      const assigneeId = getCreativeAssignee(ad, override);
       const assignee = users.find((u) => u.id === assigneeId);
       const dueDate: string = override.dueDate || ad.deadline || today;
       const defaultPriority: TaskPriority =
@@ -758,7 +745,7 @@ export async function GET(req: Request) {
         status,
         priority,
         assigneeId,
-        creatorId: ad.creator_id || (users[0]?.id || ""),
+        creatorId: ad.creator_id || "",
         dueDate,
         subtasks,
         customSubtasks,
@@ -843,9 +830,18 @@ export async function GET(req: Request) {
     });
 
     const allTasks = [...adCreativeTasks, ...targetTasks];
-    const tasks = includeArchived ? allTasks : allTasks.filter((t) => !t.isArchived);
+    const tasks = allTasks.filter((task) =>
+      (includeArchived || !task.isArchived) && canAccessTask(actor, task.assigneeId)
+    );
+    const visibleTaskIds = new Set(tasks.map((task) => task.id));
+    const visibleAuditLogs = canReviewTasks(actor.role)
+      ? auditLogs
+      : auditLogs.filter((entry) => visibleTaskIds.has(entry.targetId));
 
-    return NextResponse.json({ tasks, users, auditLogs, today });
+    return NextResponse.json(
+      { tasks, users, auditLogs: visibleAuditLogs, today },
+      { headers: { "Cache-Control": "private, no-store" } }
+    );
   } catch (error: any) {
     console.error("GET /api/tasks error:", error);
     return NextResponse.json({ error: error.message || "Unknown error" }, { status: 500 });
@@ -1105,6 +1101,12 @@ export async function PATCH(req: Request) {
     if (!standaloneAdId && !existing) {
       return NextResponse.json({ error: "Target not found" }, { status: 404 });
     }
+    const hasTaskAccess = standaloneAdId
+      ? await canAccessStandaloneCreative(actor, standaloneAdId)
+      : canAccessTask(actor, existing?.user_id);
+    if (!hasTaskAccess) {
+      return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
     let currentNotesMeta = parseNotes(existing?.notes);
     const adId = standaloneAdId || currentNotesMeta.adId;
     const creativeName = currentNotesMeta.creativeName;
@@ -1143,19 +1145,11 @@ export async function PATCH(req: Request) {
           body.productionStage = body.revisionTarget === "creator" ? "creator_changes_requested" : "changes_requested";
           body.isRevisionRequested = true;
           break;
-        case "submit_for_review": {
-          const db = standaloneAdId ? loadLocalDb() : null;
-          const cachedAd = db?.ads.find((ad) => ad.id === standaloneAdId);
-          const assignee = existing?.user_id ||
-            (standaloneAdId ? db?.ad_overrides[standaloneAdId]?.assigneeId : undefined) || cachedAd?.editor_id || cachedAd?.creator_id;
-          if (actor.id !== assignee && !canReviewTasks(actor.role)) {
-            return NextResponse.json({ error: "Only the assignee or a reviewer can submit this task." }, { status: 403 });
-          }
+        case "submit_for_review":
           body.status = "in_review";
           body.productionStage = "final_review";
           body.isRevisionRequested = false;
           break;
-        }
         default:
           return NextResponse.json({ error: "Unknown workflow action." }, { status: 400 });
       }
@@ -1707,6 +1701,9 @@ export async function DELETE(req: Request) {
     // If AdFlow creative task: archive locally in `ad_overrides` (NEVER touch `ads` table!)
     if (id.startsWith("ad-")) {
       const realAdId = id.replace(/^ad-/, "");
+      if (!(await canAccessStandaloneCreative(actor, realAdId))) {
+        return NextResponse.json({ error: "Task not found" }, { status: 404 });
+      }
       const db = loadLocalDb();
       if (!db.ad_overrides) db.ad_overrides = {};
 
@@ -1734,7 +1731,7 @@ export async function DELETE(req: Request) {
       .eq("id", id)
       .single();
 
-    if (!existing) {
+    if (!existing || !canAccessTask(actor, existing.user_id)) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
