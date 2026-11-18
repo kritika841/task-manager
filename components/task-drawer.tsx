@@ -25,11 +25,14 @@ import {
   Sparkles,
   ExternalLink,
   Loader2,
+  Play,
+  Snowflake,
 } from "lucide-react";
 import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
 import { TaskPriority, TaskStatus } from "@/lib/types";
 import { isCanonicalAdflowTask } from "@/lib/supabase";
 import { ADFLOW_PRODUCTION_STAGES } from "@/lib/adflow-bridge";
+import { parseGoogleDriveVideoFileUrl } from "@/lib/drive-urls";
 import { Button } from "./ui/button";
 import { Input, Textarea, Select } from "./ui/field";
 import { Markdown } from "./ui/markdown";
@@ -83,6 +86,10 @@ export function TaskDrawer() {
   const [adflowNote, setAdflowNote] = useState("");
   const [adflowBusy, setAdflowBusy] = useState(false);
   const [adflowMessage, setAdflowMessage] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [editorDriveUrl, setEditorDriveUrl] = useState("");
+  const [editorDriveError, setEditorDriveError] = useState<string | null>(null);
+  const [editorNotes, setEditorNotes] = useState("");
+  const [changesConfirmed, setChangesConfirmed] = useState(false);
 
   if (!selectedTaskId) return null;
 
@@ -103,6 +110,15 @@ export function TaskDrawer() {
   const downstreamBlockedTasks = tasks.filter((t) => t.blockedByTaskIds?.includes(task.id));
 
   const completedSubtasksCount = task.subtasks.filter((s) => s.completed).length;
+
+  const isReviewer =
+    currentUser.role === "admin" ||
+    currentUser.role === "manager" ||
+    currentUser.role === "developer";
+  const isAssignedEditor =
+    currentUser.id === task.adEditorId ||
+    currentUser.id === task.assigneeId ||
+    currentUser.role === "editor";
 
   const handleRevisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -135,7 +151,17 @@ export function TaskDrawer() {
   const isAdFlowTask = linked || isStandardAdflow;
 
   const executeAdFlowControl = async (
-    action: "approve" | "request_changes" | "reject" | "update_stage" | "assign_editor" | "create_creative",
+    action:
+      | "approve"
+      | "request_changes"
+      | "reject"
+      | "update_stage"
+      | "assign_editor"
+      | "create_creative"
+      | "start_editing"
+      | "submit_edit"
+      | "unfreeze_editing"
+      | "freeze_editing",
     extra?: Record<string, any>
   ) => {
     setAdflowBusy(true);
@@ -772,122 +798,295 @@ export function TaskDrawer() {
                         </Button>
                       </div>
                     ) : (
-                      <div className="space-y-3 pt-1">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <div>
-                            <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
-                              Route Revision / Changes To
-                            </label>
-                            <Select
-                              value={adflowTarget}
-                              onChange={(e) =>
-                                setAdflowTarget(e.target.value as "creator" | "editor")
-                              }
-                              className="w-full text-xs h-8 bg-card"
-                            >
-                              <option value="editor">
-                                Editor (changes_requested)
-                              </option>
-                              <option value="creator">
-                                Content Creator (creator_changes_requested)
-                              </option>
-                            </Select>
-                          </div>
-                          <div>
-                            <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
-                              Assign / Reassign Editor
-                            </label>
-                            <Select
-                              value={task.adEditorId || ""}
-                              onChange={(e) =>
-                                executeAdFlowControl("assign_editor", { editorId: e.target.value || null })
-                              }
-                              className="w-full text-xs h-8 bg-card"
-                            >
-                              <option value="">Unassigned Editor</option>
-                              {users
-                                .filter((u) => u.role === "editor")
-                                .map((ed) => (
-                                  <option key={ed.id} value={ed.id}>
-                                    {ed.name}
-                                  </option>
-                                ))}
-                            </Select>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
-                            Review Note / Revision Instructions / Rejection Reason
-                          </label>
-                          <Textarea
-                            rows={2}
-                            placeholder="Enter approval note, revision instructions for creator/editor, or rejection reason..."
-                            value={adflowNote}
-                            onChange={(e) => setAdflowNote(e.target.value)}
-                            className="w-full text-xs bg-card"
-                          />
-                        </div>
-
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="primary"
-                            disabled={adflowBusy}
-                            onClick={() => executeAdFlowControl("approve")}
-                            className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600 cursor-pointer"
-                          >
-                            {adflowBusy ? (
-                              <Loader2 className="size-3.5 animate-spin" />
-                            ) : (
-                              <Check className="size-3.5" />
+                      <div className="space-y-3.5 pt-1">
+                        {/* 1. Frozen Status Notice */}
+                        {task.editingFreeze === "frozen" && (
+                          <div className="rounded-lg border border-primary/30 bg-primary/10 p-3 text-xs text-foreground flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Snowflake className="size-4 text-primary shrink-0" />
+                              <span><strong>Editing is frozen by a manager.</strong> Work is paused until unfrozen.</span>
+                            </div>
+                            {isReviewer && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                disabled={adflowBusy}
+                                onClick={() => executeAdFlowControl("unfreeze_editing")}
+                                className="h-7 text-[11px] gap-1 cursor-pointer"
+                              >
+                                Unfreeze
+                              </Button>
                             )}
-                            <span>
-                              {task.productionStage === "approved"
-                                ? "Re-Approve in AdFlow"
-                                : "Approve in AdFlow"}
-                            </span>
-                          </Button>
+                          </div>
+                        )}
 
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            disabled={adflowBusy || !adflowNote.trim()}
-                            onClick={() => executeAdFlowControl("request_changes")}
-                            title={
-                              !adflowNote.trim()
-                                ? "Enter a review note above to send revisions"
-                                : undefined
-                            }
-                            className="h-8 text-xs gap-1.5 border-amber-500/40 text-amber-500 hover:bg-amber-500/10 cursor-pointer"
-                          >
-                            <RotateCcw className="size-3.5" />
-                            <span>
-                              {task.productionStage === "approved"
-                                ? `Reopen & Send to ${adflowTarget === "creator" ? "Creator" : "Editor"}`
-                                : `Send Revisions (${adflowTarget === "creator" ? "Creator" : "Editor"})`}
-                            </span>
-                          </Button>
+                        {/* 2. Editor Flow: Ready to Edit -> Start Editing */}
+                        {task.productionStage === "ready_for_edit" && (
+                          <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3.5 flex items-center justify-between gap-3">
+                            <div>
+                              <div className="font-semibold text-xs text-blue-400 flex items-center gap-1.5">
+                                <Play className="size-3.5" />
+                                <span>Ready for Video Editing</span>
+                              </div>
+                              <p className="text-[11px] text-muted-foreground mt-0.5">
+                                Start editing session in AdFlow to transition stage to In Progress.
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="primary"
+                              size="sm"
+                              disabled={adflowBusy || task.editingFreeze === "frozen"}
+                              onClick={() => executeAdFlowControl("start_editing")}
+                              className="bg-blue-600 hover:bg-blue-500 text-white gap-1.5 h-8 text-xs font-semibold cursor-pointer shrink-0"
+                            >
+                              {adflowBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+                              <span>Start Editing</span>
+                            </Button>
+                          </div>
+                        )}
 
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            disabled={adflowBusy || !adflowNote.trim()}
-                            onClick={() => executeAdFlowControl("reject")}
-                            title={
-                              !adflowNote.trim()
-                                ? "Enter a rejection reason above to reject"
-                                : undefined
-                            }
-                            className="h-8 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 cursor-pointer"
-                          >
-                            <XCircle className="size-3.5" />
-                            <span>Reject Creative</span>
-                          </Button>
-                        </div>
+                        {/* 3. Editor Flow: Active Editing or Changes Requested -> Submit Video */}
+                        {(task.productionStage === "editing" || task.productionStage === "changes_requested") && (
+                          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3.5 space-y-2.5">
+                            <div className="flex items-center justify-between">
+                              <div className="font-semibold text-xs flex items-center gap-1.5 text-foreground">
+                                <Send className="size-3.5 text-primary" />
+                                <span>Submit Edited Video to AdFlow</span>
+                              </div>
+                              {task.productionStage === "changes_requested" && (
+                                <span className="text-[10px] font-semibold text-amber-500 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/30">
+                                  Re-submission after Changes
+                                </span>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                                Google Drive Single Video File URL *
+                              </label>
+                              <Input
+                                type="url"
+                                placeholder="https://drive.google.com/file/d/.../view"
+                                value={editorDriveUrl}
+                                onChange={(e) => {
+                                  setEditorDriveUrl(e.target.value);
+                                  const val = parseGoogleDriveVideoFileUrl(e.target.value);
+                                  setEditorDriveError(e.target.value.trim() ? val.error : null);
+                                }}
+                                className="text-xs h-8 bg-card"
+                              />
+                              {editorDriveError ? (
+                                <p className="text-[10px] text-destructive mt-1 font-medium">{editorDriveError}</p>
+                              ) : editorDriveUrl.trim() ? (
+                                <p className="text-[10px] text-emerald-500 mt-1 flex items-center gap-1 font-medium">
+                                  <Check className="size-3" /> Valid Google Drive video link
+                                </p>
+                              ) : (
+                                <p className="text-[10px] text-muted-foreground mt-0.5">
+                                  Paste the direct link to the video file in Google Drive (not a folder).
+                                </p>
+                              )}
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                                Editor Notes for Reviewer
+                              </label>
+                              <Textarea
+                                rows={2}
+                                placeholder="Add notes on cuts, music, pacing, or revisions addressed..."
+                                value={editorNotes}
+                                onChange={(e) => setEditorNotes(e.target.value)}
+                                className="text-xs bg-card"
+                              />
+                            </div>
+
+                            {task.productionStage === "changes_requested" && (
+                              <label className="flex items-center gap-2 text-[11px] text-foreground cursor-pointer pt-1 select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={changesConfirmed}
+                                  onChange={(e) => setChangesConfirmed(e.target.checked)}
+                                  className="rounded border-border text-primary focus:ring-primary size-3.5"
+                                />
+                                <span>I confirm that all requested revisions have been completed.</span>
+                              </label>
+                            )}
+
+                            <Button
+                              type="button"
+                              variant="primary"
+                              size="sm"
+                              disabled={
+                                adflowBusy ||
+                                Boolean(editorDriveError) ||
+                                !editorDriveUrl.trim() ||
+                                (task.productionStage === "changes_requested" && !changesConfirmed)
+                              }
+                              onClick={() =>
+                                executeAdFlowControl("submit_edit", {
+                                  driveUrl: editorDriveUrl.trim(),
+                                  note: editorNotes.trim(),
+                                  changesConfirmed,
+                                })
+                              }
+                              className="w-full h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold cursor-pointer"
+                            >
+                              {adflowBusy ? (
+                                <Loader2 className="size-3.5 animate-spin" />
+                              ) : (
+                                <Send className="size-3.5" />
+                              )}
+                              <span>Submit Video to Creator Review</span>
+                            </Button>
+                          </div>
+                        )}
+
+                        {/* 4. Manager Review & Pipeline Controls */}
+                        {isReviewer && (
+                          <div className="space-y-3 pt-2 border-t border-border/60">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
+                                Review & Admin Controls
+                              </span>
+                              <div className="flex items-center gap-1.5">
+                                {task.editingFreeze !== "unfrozen" ? (
+                                  <button
+                                    type="button"
+                                    disabled={adflowBusy}
+                                    onClick={() => executeAdFlowControl("unfreeze_editing")}
+                                    className="text-[10px] font-semibold text-blue-400 hover:underline cursor-pointer"
+                                    title="Unfreeze active edit concurrency limit for this creative"
+                                  >
+                                    Unfreeze Edit Limit
+                                  </button>
+                                ) : (
+                                  <span className="text-[10px] font-mono text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                    Limit Unfrozen
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                              <div>
+                                <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                                  Route Revision / Changes To
+                                </label>
+                                <Select
+                                  value={adflowTarget}
+                                  onChange={(e) =>
+                                    setAdflowTarget(e.target.value as "creator" | "editor")
+                                  }
+                                  className="w-full text-xs h-8 bg-card"
+                                >
+                                  <option value="editor">
+                                    Editor (changes_requested)
+                                  </option>
+                                  <option value="creator">
+                                    Content Creator (creator_changes_requested)
+                                  </option>
+                                </Select>
+                              </div>
+                              <div>
+                                <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                                  Assign / Reassign Editor
+                                </label>
+                                <Select
+                                  value={task.adEditorId || ""}
+                                  onChange={(e) =>
+                                    executeAdFlowControl("assign_editor", { editorId: e.target.value || null })
+                                  }
+                                  className="w-full text-xs h-8 bg-card"
+                                >
+                                  <option value="">Unassigned Editor</option>
+                                  {users
+                                    .filter((u) => u.role === "editor")
+                                    .map((ed) => (
+                                      <option key={ed.id} value={ed.id}>
+                                        {ed.name}
+                                      </option>
+                                    ))}
+                                </Select>
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                                Review Note / Revision Instructions / Rejection Reason
+                              </label>
+                              <Textarea
+                                rows={2}
+                                placeholder="Enter approval note, revision instructions for creator/editor, or rejection reason..."
+                                value={adflowNote}
+                                onChange={(e) => setAdflowNote(e.target.value)}
+                                className="w-full text-xs bg-card"
+                              />
+                            </div>
+
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="primary"
+                                disabled={adflowBusy}
+                                onClick={() => executeAdFlowControl("approve")}
+                                className="h-8 text-xs gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white border-emerald-600 cursor-pointer"
+                              >
+                                {adflowBusy ? (
+                                  <Loader2 className="size-3.5 animate-spin" />
+                                ) : (
+                                  <Check className="size-3.5" />
+                                )}
+                                <span>
+                                  {task.productionStage === "approved"
+                                    ? "Re-Approve in AdFlow"
+                                    : "Approve in AdFlow"}
+                                </span>
+                              </Button>
+
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                disabled={adflowBusy || !adflowNote.trim()}
+                                onClick={() => executeAdFlowControl("request_changes")}
+                                title={
+                                  !adflowNote.trim()
+                                    ? "Enter a review note above to send revisions"
+                                    : undefined
+                                }
+                                className="h-8 text-xs gap-1.5 border-amber-500/40 text-amber-500 hover:bg-amber-500/10 cursor-pointer"
+                              >
+                                <RotateCcw className="size-3.5" />
+                                <span>
+                                  {task.productionStage === "approved"
+                                    ? `Reopen & Send to ${adflowTarget === "creator" ? "Creator" : "Editor"}`
+                                    : `Send Revisions (${adflowTarget === "creator" ? "Creator" : "Editor"})`}
+                                </span>
+                              </Button>
+
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                disabled={adflowBusy || !adflowNote.trim()}
+                                onClick={() => executeAdFlowControl("reject")}
+                                title={
+                                  !adflowNote.trim()
+                                    ? "Enter a rejection reason above to reject"
+                                    : undefined
+                                }
+                                className="h-8 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 cursor-pointer"
+                              >
+                                <XCircle className="size-3.5" />
+                                <span>Reject Creative</span>
+                              </Button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 

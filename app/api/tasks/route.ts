@@ -944,8 +944,9 @@ export async function POST(req: Request) {
 
       const initialProdStage = assignedCreativeId
         ? body.productionStage ||
-          stageMappingCfg.defaultBlankCreativeStage ||
-          "script_writing"
+          (assigneeRole === "editor"
+            ? "ready_for_edit"
+            : stageMappingCfg.defaultBlankCreativeStage || "script_writing")
         : undefined;
 
       // Automatically create a blank/empty pending creative in AdFlow so the assignee & admin see it in Pending immediately

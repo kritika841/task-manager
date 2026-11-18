@@ -42,11 +42,30 @@ function getDailyCapacity(role: string): number {
   }
 }
 
+function toDatabaseRole(role: string): "admin" | "manager" | "editor" | "content_creator" | "media_buyer" {
+  switch (role) {
+    case "admin":
+    case "developer":
+      return "admin";
+    case "manager":
+      return "manager";
+    case "content_creator":
+      return "content_creator";
+    case "media_buyer":
+      return "media_buyer";
+    case "editor":
+    case "member":
+    default:
+      return "editor";
+  }
+}
+
 function parseUserMetadata(avatarUrl: string | null, name: string, role: string) {
   let color: string | undefined;
   let employeeCode: string | undefined;
   let dailyCapacityUnits: number | undefined;
-  let passwordHash: string | undefined;
+  let realAvatarUrl: string | undefined;
+  let appRole: Role | undefined;
 
   if (avatarUrl) {
     try {
@@ -55,11 +74,18 @@ function parseUserMetadata(avatarUrl: string | null, name: string, role: string)
         color = parsed.color;
         employeeCode = parsed.employeeCode;
         dailyCapacityUnits = parsed.dailyCapacityUnits;
-        passwordHash = parsed.passwordHash;
+        appRole = parsed.appRole;
+        realAvatarUrl = parsed.realAvatarUrl;
       } else if (avatarUrl.startsWith("#")) {
         color = avatarUrl;
+      } else if (avatarUrl.startsWith("http") || avatarUrl.startsWith("/")) {
+        realAvatarUrl = avatarUrl;
       }
-    } catch {}
+    } catch {
+      if (avatarUrl.startsWith("http") || avatarUrl.startsWith("/")) {
+        realAvatarUrl = avatarUrl;
+      }
+    }
   }
 
   const code = getEmployeeCode(name, employeeCode);
@@ -73,7 +99,8 @@ function parseUserMetadata(avatarUrl: string | null, name: string, role: string)
     employeeCode: code,
     color: resolvedColor,
     dailyCapacityUnits: resolvedCapacity,
-    passwordHash,
+    realAvatarUrl,
+    appRole: appRole || (role as Role),
   };
 }
 
@@ -97,7 +124,7 @@ export async function GET(req: Request) {
     }
 
     const users: User[] = (rows || []).map((p) => {
-      const { employeeCode, color, dailyCapacityUnits } = parseUserMetadata(
+      const { employeeCode, color, dailyCapacityUnits, appRole } = parseUserMetadata(
         p.avatar_url,
         p.name || p.email,
         p.role
@@ -106,9 +133,9 @@ export async function GET(req: Request) {
         id: p.id,
         name: p.name || p.email.split("@")[0],
         email: p.email,
-        role: (p.role as Role) || "member",
+        role: appRole || (p.role as Role) || "member",
         avatar: employeeCode.slice(0, 2),
-        department: getDepartment(p.role),
+        department: getDepartment(appRole || p.role),
         active: p.active !== false && !p.deleted_at,
         dailyCapacityUnits,
         employeeCode,
@@ -143,6 +170,7 @@ export async function POST(req: Request) {
     const name = (body.name || "").trim();
     const email = (body.email || "").trim().toLowerCase();
     const role = (body.role as Role) || "member";
+    const dbRole = toDatabaseRole(role);
     const employeeCode = (body.employeeCode || getEmployeeCode(name)).trim().toUpperCase();
     const color = body.color || getUserColor(employeeCode);
     const capacityUnits = Number(body.dailyCapacityUnits) || getDailyCapacity(role);
@@ -159,7 +187,7 @@ export async function POST(req: Request) {
         email,
         password,
         email_confirm: true,
-        user_metadata: { name, role },
+        user_metadata: { name, role: dbRole },
       });
 
       if (authData?.user) {
@@ -180,10 +208,8 @@ export async function POST(req: Request) {
       color,
       employeeCode,
       dailyCapacityUnits: capacityUnits,
+      appRole: role,
     };
-    if (password) {
-      metaObj.passwordHash = hashPassword(password);
-    }
     const meta = JSON.stringify(metaObj);
 
     // 2. Check if user already exists in profiles table
@@ -199,7 +225,7 @@ export async function POST(req: Request) {
         .from("profiles")
         .update({
           name,
-          role,
+          role: dbRole,
           active: true,
           deleted_at: null,
           avatar_url: meta,
@@ -217,9 +243,9 @@ export async function POST(req: Request) {
         id: reactivated.id,
         name: reactivated.name,
         email: reactivated.email,
-        role: reactivated.role,
+        role: role,
         avatar: employeeCode.slice(0, 2),
-        department: getDepartment(reactivated.role),
+        department: getDepartment(role),
         active: true,
         dailyCapacityUnits: capacityUnits,
         employeeCode,
@@ -234,7 +260,7 @@ export async function POST(req: Request) {
     const insertPayload: Record<string, any> = {
       name,
       email,
-      role,
+      role: dbRole,
       active: true,
       avatar_url: meta,
       created_at: new Date().toISOString(),
@@ -322,7 +348,7 @@ export async function PATCH(req: Request) {
     };
 
     if (name) updates.name = name.trim();
-    if (role) updates.role = role;
+    if (role) updates.role = toDatabaseRole(role);
     if (active !== undefined) updates.active = active;
 
     const currentMeta = parseUserMetadata(current.avatar_url, current.name, current.role);
@@ -330,18 +356,15 @@ export async function PATCH(req: Request) {
     const finalColor = color || currentMeta.color;
     const finalCapacity =
       dailyCapacityUnits !== undefined ? Number(dailyCapacityUnits) : currentMeta.dailyCapacityUnits;
-    const finalPasswordHash =
-      password && typeof password === "string" && password.trim()
-        ? hashPassword(password.trim())
-        : currentMeta.passwordHash;
 
     const metaPayload: Record<string, any> = {
       color: finalColor,
       employeeCode: finalCode,
       dailyCapacityUnits: finalCapacity,
+      appRole: role || currentMeta.appRole,
     };
-    if (finalPasswordHash) {
-      metaPayload.passwordHash = finalPasswordHash;
+    if (currentMeta.realAvatarUrl) {
+      metaPayload.realAvatarUrl = currentMeta.realAvatarUrl;
     }
 
     updates.avatar_url = JSON.stringify(metaPayload);
@@ -361,9 +384,9 @@ export async function PATCH(req: Request) {
       id: updated.id,
       name: updated.name,
       email: updated.email,
-      role: updated.role,
+      role: (metaPayload.appRole as Role) || (updated.role as Role),
       avatar: finalCode.slice(0, 2),
-      department: getDepartment(updated.role),
+      department: getDepartment(metaPayload.appRole || updated.role),
       active: updated.active !== false && !updated.deleted_at,
       dailyCapacityUnits: finalCapacity,
       employeeCode: finalCode,

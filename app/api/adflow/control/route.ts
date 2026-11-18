@@ -9,6 +9,7 @@ import {
 import { loadLocalDb, saveLocalDb } from "@/lib/local-supabase-fallback";
 import { canReviewTasks, resolveRequestActor } from "@/lib/auth-server";
 import { StageHistoryEntry, TaskStatus } from "@/lib/types";
+import { parseGoogleDriveVideoFileUrl } from "@/lib/drive-urls";
 
 function parseDriveId(url: string | undefined | null): {
   fileId: string | null;
@@ -42,9 +43,6 @@ export async function GET(req: Request) {
   try {
     const { actor } = await resolveRequestActor(req);
     if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-    if (!canReviewTasks(actor.role)) {
-      return NextResponse.json({ error: "Review permissions are required." }, { status: 403 });
-    }
     const { searchParams } = new URL(req.url);
     const adId = searchParams.get("adId")?.replace(/^ad-/, "") || "";
     const creativeName = searchParams.get("creativeName")?.trim() || "";
@@ -150,7 +148,8 @@ export async function POST(req: Request) {
 
     const { actor } = await resolveRequestActor(req);
     if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-    if (!canReviewTasks(actor.role)) {
+    const isEditorAction = action === "start_editing" || action === "submit_edit";
+    if (!canReviewTasks(actor.role) && !isEditorAction) {
       return NextResponse.json({ error: "Review permissions are required." }, { status: 403 });
     }
     const { id: actorId, name: actorName } = actor;
@@ -498,6 +497,88 @@ export async function POST(req: Request) {
         editor_id: patch.editor_id ?? existingAd.editor_id,
         note: note.trim() || null,
       };
+    } else if (action === "start_editing") {
+      if (actor.id !== existingAd.editor_id && !canReviewTasks(actor.role)) {
+        return NextResponse.json(
+          { error: "Only the assigned editor or a manager can start editing." },
+          { status: 403 }
+        );
+      }
+      if (existingAd.editing_freeze === "frozen") {
+        return NextResponse.json(
+          { error: "Editing is frozen for this creative by a manager." },
+          { status: 400 }
+        );
+      }
+      patch.production_stage = "editing";
+      patch.status = "draft";
+      patch.editing_started_at = nowIso;
+      activityAction = "editing_started";
+      activityMeta = {
+        ...activityMeta,
+        previous_stage: prevStage,
+        production_stage: "editing",
+      };
+      notifyUserIds = [existingAd.creator_id].filter(Boolean);
+      notifyTitle = "Editing started";
+      notifyBody = `${actorName} started editing ${existingAd.name}.`;
+    } else if (action === "submit_edit") {
+      if (actor.id !== existingAd.editor_id && !canReviewTasks(actor.role)) {
+        return NextResponse.json(
+          { error: "Only the assigned editor or a manager can submit this video." },
+          { status: 403 }
+        );
+      }
+      if (!driveUrl || typeof driveUrl !== "string" || !driveUrl.trim()) {
+        return NextResponse.json(
+          { error: "A Google Drive video file URL is required." },
+          { status: 400 }
+        );
+      }
+      const driveResult = parseGoogleDriveVideoFileUrl(driveUrl);
+      if (driveResult.error || !driveResult.result) {
+        return NextResponse.json(
+          { error: driveResult.error || "Please provide a valid single Google Drive video file URL." },
+          { status: 400 }
+        );
+      }
+      if (existingAd.production_stage === "changes_requested" && !body.changesConfirmed) {
+        return NextResponse.json(
+          { error: "Please confirm that all requested changes were addressed before submitting." },
+          { status: 400 }
+        );
+      }
+      patch.drive_url = driveUrl.trim();
+      patch.drive_file_id = driveResult.result.fileId;
+      patch.preview_url = driveResult.result.previewUrl;
+      patch.thumbnail_url = driveResult.result.thumbnailUrl || existingAd.thumbnail_url;
+      patch.editor_notes = (note || "").trim() || null;
+      patch.production_stage = "creator_review";
+      patch.approval_stage = "manager_review";
+      patch.submitted_at = nowIso;
+      patch.creator_reviewed_at = null;
+      patch.final_approved_at = null;
+      activityAction =
+        prevStage === "changes_requested"
+          ? "edited_video_resubmitted"
+          : "edited_video_submitted";
+      activityMeta = {
+        ...activityMeta,
+        previous_stage: prevStage,
+        production_stage: "creator_review",
+        drive_url: driveUrl.trim(),
+      };
+      notifyUserIds = [existingAd.creator_id].filter(Boolean);
+      notifyTitle = "Video submitted for review";
+      notifyBody = `${actorName} submitted the edited video for ${existingAd.name}.`;
+    } else if (action === "unfreeze_editing") {
+      patch.editing_freeze = "unfrozen";
+      activityAction = "editor_unfreeze_override";
+      activityMeta = { ...activityMeta, editing_freeze: "unfrozen" };
+    } else if (action === "freeze_editing") {
+      patch.editing_freeze = "frozen";
+      activityAction = "editor_freeze_override";
+      activityMeta = { ...activityMeta, editing_freeze: "frozen" };
     } else {
       return NextResponse.json({ error: `Unsupported action: ${action}` }, { status: 400 });
     }
@@ -614,6 +695,14 @@ export async function POST(req: Request) {
           ? `Rejected ${updatedAd.name} in AdFlow.`
           : action === "assign_editor"
           ? `Updated the editor assignment for ${updatedAd.name}.`
+          : action === "start_editing"
+          ? `Started editing ${updatedAd.name}.`
+          : action === "submit_edit"
+          ? `Submitted edited video for ${updatedAd.name} for review.`
+          : action === "unfreeze_editing"
+          ? `Unfroze editing limit for ${updatedAd.name}.`
+          : action === "freeze_editing"
+          ? `Frozen editing for ${updatedAd.name}.`
           : `Updated ${updatedAd.name} stage to ${getStageLabel(updatedAd.production_stage)}.`,
     });
   } catch (error: any) {

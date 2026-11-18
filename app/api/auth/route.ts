@@ -169,6 +169,22 @@ export async function POST(req: Request) {
       );
     }
 
+    // 1. Primary Authentication: Authenticate against Supabase Auth (Shared Org Identity)
+    let authenticatedUserId: string | null = null;
+
+    try {
+      const { data: authData, error: authErr } =
+        await createPasswordAuthClient().auth.signInWithPassword({
+          email: cleanEmail,
+          password: cleanPassword,
+        });
+
+      if (!authErr && authData?.user?.id) {
+        authenticatedUserId = authData.user.id;
+      }
+    } catch {}
+
+    // 2. Fetch the corresponding profile from public.profiles
     const { data: resolvedProfile } = await supabaseAdmin
       .from("profiles")
       .select("*")
@@ -190,22 +206,25 @@ export async function POST(req: Request) {
       );
     }
 
-    const meta = parseUserMetadata(
-      resolvedProfile.avatar_url,
-      resolvedProfile.name || resolvedProfile.email,
-      resolvedProfile.role
-    );
+    // 3. Fallback: If Supabase Auth didn't match, check legacy hash in Task Manager metadata
+    if (!authenticatedUserId) {
+      const meta = parseUserMetadata(
+        resolvedProfile.avatar_url,
+        resolvedProfile.name || resolvedProfile.email,
+        resolvedProfile.role
+      );
 
-    if (!verifyPasswordHash(cleanPassword, meta.passwordHash)) {
-      // A Task Manager password takes precedence if an admin has set one.
-      const { data, error } = meta.passwordHash
-        ? { data: null, error: null }
-        : await createPasswordAuthClient().auth.signInWithPassword({
-            email: resolvedProfile.email,
+      if (meta.passwordHash && verifyPasswordHash(cleanPassword, meta.passwordHash)) {
+        // Upgrade legacy password to Supabase Auth so it is 100% unified going forward
+        authenticatedUserId = resolvedProfile.id;
+        try {
+          await supabaseAdmin.auth.admin.updateUserById(resolvedProfile.id, {
             password: cleanPassword,
           });
-
-      if (error || data?.user?.email?.toLowerCase() !== cleanEmail) {
+        } catch (syncErr) {
+          console.warn("Legacy password upgrade warning:", syncErr);
+        }
+      } else {
         return NextResponse.json({ ok: false, error: "Invalid email or password." }, { status: 401 });
       }
     }

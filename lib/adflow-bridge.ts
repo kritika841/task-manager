@@ -839,8 +839,7 @@ export async function createBlankAdFlowCreative(params: {
     const cfg = getAdFlowStageMappingConfig();
     const initialStage =
       params.productionStage ||
-      cfg.defaultBlankCreativeStage ||
-      "script_writing";
+      (isEditorAssignee ? "ready_for_edit" : cfg.defaultBlankCreativeStage || "script_writing");
     const stageIdx = ADFLOW_PRODUCTION_STAGES.findIndex(
       (s) => s.id === initialStage
     );
@@ -862,6 +861,7 @@ export async function createBlankAdFlowCreative(params: {
       creator_id: creatorId,
       editor_id: editorId,
       assigned_at: editorId ? nowIso : null,
+      editing_freeze: isEditorAssignee ? "unfrozen" : null,
       production_stage: initialStage,
       status: legacyAdStatusForStage(initialStage),
       approval_stage:
