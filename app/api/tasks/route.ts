@@ -316,19 +316,21 @@ export async function GET(req: Request) {
       };
     });
 
-    // 3. Fetch active ad creatives from Supabase Ads Management
+    // 3. Fetch active ad creatives + recently approved creatives (last 14 days) from Supabase Ads Management
+    const recentApprovedCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
     const { data: activeAds } = await supabaseAdmin
       .from("ads")
       .select(
         "id, name, status, approval_stage, production_stage, editor_id, creator_id, editing_started_at, shoot_completed_at, submitted_at, approved_at, drive_url, raw_footage_url, script_text, editing_freeze, deadline, notes, created_at, updated_at"
       )
-      .or("status.neq.approved,production_stage.neq.approved")
+      .or(`status.neq.approved,production_stage.neq.approved,approved_at.gte.${recentApprovedCutoff}`)
       .is("deleted_at", null)
       .order("updated_at", { ascending: false });
 
-    // Load local overrides for AdFlow creatives
+    // Load local overrides & stage mapping config for AdFlow creatives
     const localDb = loadLocalDb();
     const adOverrides = localDb.ad_overrides || {};
+    const stageMapping = getAdFlowStageMappingConfig();
 
     // 4. Fetch daily team targets
     const { data: targetRows, error: targetErr } = await supabaseAdmin
@@ -449,12 +451,6 @@ export async function GET(req: Request) {
         }
       }
 
-      const assignee = users.find((u) => u.id === row.user_id);
-      const project = parsedNotes.project || assignee?.department || "Operations";
-      const empCode = assignee?.employeeCode || getEmployeeCode(assignee?.name || "EMP");
-
-      userTargetCounts[empCode] = (userTargetCounts[empCode] || 0) + 1;
-
       const resolvedCreativeName = parsedNotes.creativeName
         ? parsedNotes.creativeName.trim().toUpperCase()
         : undefined;
@@ -466,19 +462,28 @@ export async function GET(req: Request) {
         mergedAdIds.add(matchedAd.id);
       }
 
+      // If linked to a live AdFlow creative, synchronize status, assignee & productionStage from AdFlow
+      const liveProdStage = matchedAd?.production_stage || parsedNotes.productionStage;
+      const liveAdStatus = matchedAd?.status;
+
+      const resolvedAssigneeId = matchedAd
+        ? getCreativeAssignee(matchedAd, { productionStage: liveProdStage }) || row.user_id
+        : row.user_id;
+      const assignee = users.find((u) => u.id === resolvedAssigneeId);
+      const project = parsedNotes.project || assignee?.department || "Operations";
+      const empCode = assignee?.employeeCode || getEmployeeCode(assignee?.name || "EMP");
+
+      userTargetCounts[empCode] = (userTargetCounts[empCode] || 0) + 1;
+
       const taskNumber =
         resolvedCreativeName ||
         matchedAd?.name ||
         `${empCode}-${String(userTargetCounts[empCode]).padStart(2, "0")}`;
 
-      // If linked to a live AdFlow creative, synchronize status & productionStage from AdFlow
-      const liveProdStage = matchedAd?.production_stage || parsedNotes.productionStage;
-      const liveAdStatus = matchedAd?.status;
-
       if (matchedAd) {
-        status = mapAdFlowStageToTaskStatus(matchedAd.production_stage, matchedAd.status);
+        status = mapAdFlowStageToTaskStatus(matchedAd.production_stage, matchedAd.status, stageMapping);
       } else if (parsedNotes.productionStage) {
-        status = mapAdFlowStageToTaskStatus(parsedNotes.productionStage);
+        status = mapAdFlowStageToTaskStatus(parsedNotes.productionStage, undefined, stageMapping);
       }
 
       const tags: string[] =
@@ -510,7 +515,7 @@ export async function GET(req: Request) {
               : `Unit ${i} of ${row.task_name.replace(/\s*\(carried forward\)/i, "")}`,
             completed: isDone,
             completedAt: isDone ? row.updated_at : undefined,
-            assignedTo: row.user_id,
+            assignedTo: resolvedAssigneeId,
             sortOrder: i,
             isCustom: false,
           });
@@ -543,7 +548,7 @@ export async function GET(req: Request) {
         description: parsedNotes.description,
         status,
         priority,
-        assigneeId: row.user_id,
+        assigneeId: resolvedAssigneeId,
         creatorId: row.assigned_by || row.user_id,
         dueDate: row.target_date,
         subtasks,
@@ -681,7 +686,7 @@ export async function GET(req: Request) {
       }
 
       const status = ad.production_stage || ad.status
-        ? mapAdFlowStageToTaskStatus(ad.production_stage, ad.status)
+        ? mapAdFlowStageToTaskStatus(ad.production_stage, ad.status, stageMapping)
         : override.status || defaultStatus;
       if (!ad.production_stage && !ad.status && override.status) {
         if (override.status === "completed") stageLabel = "Approved";
@@ -831,7 +836,8 @@ export async function GET(req: Request) {
 
     const allTasks = [...adCreativeTasks, ...targetTasks];
     const tasks = allTasks.filter((task) =>
-      (includeArchived || !task.isArchived) && canAccessTask(actor, task.assigneeId)
+      (includeArchived || !task.isArchived) &&
+      canAccessTask(actor, task.assigneeId, task.adCreatorId, task.adEditorId)
     );
     const visibleTaskIds = new Set(tasks.map((task) => task.id));
     const visibleAuditLogs = canReviewTasks(actor.role)
@@ -1102,14 +1108,23 @@ export async function PATCH(req: Request) {
     if (!standaloneAdId && !existing) {
       return NextResponse.json({ error: "Target not found" }, { status: 404 });
     }
+    let currentNotesMeta = parseNotes(existing?.notes);
+    const adId = standaloneAdId || currentNotesMeta.adId;
+    let linkedAdRecord: { creator_id?: string | null; editor_id?: string | null } | null = null;
+    if (!standaloneAdId && adId) {
+      const { data: ad } = await supabaseAdmin
+        .from("ads")
+        .select("creator_id, editor_id")
+        .eq("id", adId)
+        .maybeSingle();
+      linkedAdRecord = ad;
+    }
     const hasTaskAccess = standaloneAdId
       ? await canAccessStandaloneCreative(actor, standaloneAdId)
-      : canAccessTask(actor, existing?.user_id);
+      : canAccessTask(actor, existing?.user_id, linkedAdRecord?.creator_id, linkedAdRecord?.editor_id);
     if (!hasTaskAccess) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
-    let currentNotesMeta = parseNotes(existing?.notes);
-    const adId = standaloneAdId || currentNotesMeta.adId;
     const creativeName = currentNotesMeta.creativeName;
     const linked = Boolean(adId || creativeName);
     const isStatusEdit =

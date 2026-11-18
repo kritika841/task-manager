@@ -9,9 +9,17 @@ const dataDir = join(process.cwd(), "data");
 const settingsPath = join(dataDir, "workspace-settings.json");
 
 function readSettings(): WorkspaceSettings {
-  const defaults = { adflowSyncEnabled: null, defaultView: null, density: null };
+  const defaults: WorkspaceSettings = { adflowSyncEnabled: true, defaultView: null, density: null };
   try {
-    return { ...defaults, ...JSON.parse(readFileSync(settingsPath, "utf8")) };
+    const parsed = JSON.parse(readFileSync(settingsPath, "utf8"));
+    return {
+      ...defaults,
+      ...parsed,
+      adflowSyncEnabled:
+        typeof parsed?.adflowSyncEnabled === "boolean"
+          ? parsed.adflowSyncEnabled
+          : true,
+    };
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return defaults;
     throw err;

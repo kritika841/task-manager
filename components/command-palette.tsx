@@ -44,6 +44,7 @@ export function CommandPalette() {
     materializeDelegatorNow,
     currentUserId,
     isAdmin,
+    isManagerOrAdmin,
   } = useTasks();
 
   const [query, setQuery] = useState("");
@@ -62,16 +63,20 @@ export function CommandPalette() {
 
   // Actions list
   const actions = [
-    {
-      id: "open-settings",
-      title: "Open Dashboard Settings",
-      category: "Settings",
-      icon: Settings,
-      run: () => {
-        setIsSettingsModalOpen(true);
-        setIsCommandPaletteOpen(false);
-      },
-    },
+    ...(isAdmin
+      ? [
+          {
+            id: "open-settings",
+            title: "Open Dashboard Settings",
+            category: "Settings",
+            icon: Settings,
+            run: () => {
+              setIsSettingsModalOpen(true);
+              setIsCommandPaletteOpen(false);
+            },
+          },
+        ]
+      : []),
     {
       id: "create-task",
       title: "Create New Task",
@@ -82,26 +87,30 @@ export function CommandPalette() {
         setIsCommandPaletteOpen(false);
       },
     },
-    {
-      id: "auto-delegator",
-      title: "Open Auto Delegator Rules",
-      category: "Automation",
-      icon: Zap,
-      run: () => {
-        setIsAutoDelegatorOpen(true);
-        setIsCommandPaletteOpen(false);
-      },
-    },
-    {
-      id: "run-delegator",
-      title: "Run Auto Delegator for Today",
-      category: "Automation",
-      icon: Zap,
-      run: () => {
-        materializeDelegatorNow();
-        setIsCommandPaletteOpen(false);
-      },
-    },
+    ...(isManagerOrAdmin
+      ? [
+          {
+            id: "auto-delegator",
+            title: "Open Auto Delegator Rules",
+            category: "Automation",
+            icon: Zap,
+            run: () => {
+              setIsAutoDelegatorOpen(true);
+              setIsCommandPaletteOpen(false);
+            },
+          },
+          {
+            id: "run-delegator",
+            title: "Run Auto Delegator for Today",
+            category: "Automation",
+            icon: Zap,
+            run: () => {
+              materializeDelegatorNow();
+              setIsCommandPaletteOpen(false);
+            },
+          },
+        ]
+      : []),
     {
       id: "view-board",
       title: "Switch to Board View",
@@ -132,16 +141,20 @@ export function CommandPalette() {
         setIsCommandPaletteOpen(false);
       },
     },
-    {
-      id: "view-analytics",
-      title: "Switch to Overview / Stats View",
-      category: "Navigation",
-      icon: BarChart3,
-      run: () => {
-        setViewMode("analytics");
-        setIsCommandPaletteOpen(false);
-      },
-    },
+    ...(isAdmin
+      ? [
+          {
+            id: "view-analytics",
+            title: "Switch to Overview / Stats View",
+            category: "Navigation",
+            icon: BarChart3,
+            run: () => {
+              setViewMode("analytics");
+              setIsCommandPaletteOpen(false);
+            },
+          },
+        ]
+      : []),
     {
       id: "view-calendar",
       title: "Switch to Calendar View",

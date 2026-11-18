@@ -5,18 +5,22 @@ import { X, Keyboard } from "lucide-react";
 import { useTasks } from "@/lib/store";
 
 export function ShortcutsModal() {
-  const { isShortcutsModalOpen, setIsShortcutsModalOpen } = useTasks();
+  const { isShortcutsModalOpen, setIsShortcutsModalOpen, isAdmin } = useTasks();
 
   if (!isShortcutsModalOpen) return null;
 
   const shortcuts = [
     { key: "⌘ + K", description: "Open Command Palette / Instant Search" },
-    { key: "S / ⌘ ,", description: "Open Settings & Ads Management Connection" },
+    ...(isAdmin
+      ? [{ key: "S / ⌘ ,", description: "Open Settings & Ads Management Connection" }]
+      : []),
     { key: "C", description: "Create & Assign New Daily Task" },
     { key: "B", description: "Switch to Board View (Kanban & Swimlanes)" },
     { key: "T", description: "Switch to Table View (Dense Grid & Multi-Select)" },
     { key: "L", description: "Switch to Checklist View (Unit Stepper)" },
-    { key: "O", description: "Switch to Overview / Analytics & Capacity" },
+    ...(isAdmin
+      ? [{ key: "O", description: "Switch to Overview / Analytics & Capacity" }]
+      : []),
     { key: "D", description: "Switch to Calendar View" },
     { key: "Esc", description: "Close active modal/drawer / Clear task selection" },
     { key: "?", description: "Show this Keyboard Shortcuts cheat sheet" },

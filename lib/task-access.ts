@@ -10,8 +10,18 @@ type CreativeAssignment = {
   editor_id?: string | null;
 };
 
-export function canAccessTask(actor: TaskActor, assigneeId?: string | null): boolean {
-  return canReviewTasks(actor.role) || actor.id === assigneeId;
+export function canAccessTask(
+  actor: TaskActor,
+  assigneeId?: string | null,
+  adCreatorId?: string | null,
+  adEditorId?: string | null
+): boolean {
+  return (
+    canReviewTasks(actor.role) ||
+    actor.id === assigneeId ||
+    (Boolean(adCreatorId) && actor.id === adCreatorId) ||
+    (Boolean(adEditorId) && actor.id === adEditorId)
+  );
 }
 
 export function isCreatorStage(stage?: string | null): boolean {
@@ -22,6 +32,7 @@ export function isCreatorStage(stage?: string | null): boolean {
     "shoot_complete",
     "shooting",
     "creator_changes_requested",
+    "creator_review",
   ].includes(stage?.toLowerCase() || "");
 }
 
@@ -65,7 +76,12 @@ export async function canAccessStandaloneCreative(actor: TaskActor, adId: string
       Boolean(name && typeof notes?.creativeName === "string" && notes.creativeName.trim().toUpperCase() === name);
   });
   if (hasLinkedTask) return false;
-  return canAccessTask(actor, getCreativeAssignee(ad, db.ad_overrides[adId] || db.ad_overrides[`ad-${adId}`]));
+  return canAccessTask(
+    actor,
+    getCreativeAssignee(ad, db.ad_overrides[adId] || db.ad_overrides[`ad-${adId}`]),
+    ad.creator_id,
+    ad.editor_id
+  );
 }
 
 export async function canAccessTaskById(actor: TaskActor, taskId: string): Promise<boolean> {
@@ -74,8 +90,18 @@ export async function canAccessTaskById(actor: TaskActor, taskId: string): Promi
 
   const { data: task } = await supabaseAdmin
     .from("daily_team_targets")
-    .select("user_id")
+    .select("user_id, notes")
     .eq("id", taskId)
     .maybeSingle();
-  return canAccessTask(actor, task?.user_id);
+  if (canAccessTask(actor, task?.user_id)) return true;
+  const notes = readTaskNotesMetadata(task?.notes);
+  if (notes?.adId) {
+    const { data: ad } = await supabaseAdmin
+      .from("ads")
+      .select("creator_id, editor_id")
+      .eq("id", notes.adId)
+      .maybeSingle();
+    return canAccessTask(actor, task?.user_id, ad?.creator_id, ad?.editor_id);
+  }
+  return false;
 }

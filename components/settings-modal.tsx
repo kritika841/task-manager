@@ -89,7 +89,7 @@ export function SettingsModal() {
   const [isSavingMember, setIsSavingMember] = useState(false);
   const [memberActionError, setMemberActionError] = useState<string | null>(null);
 
-  if (!isSettingsModalOpen) return null;
+  if (!isSettingsModalOpen || !isAdmin) return null;
 
   const handleSaveWorkspace = async (updates: Partial<WorkspaceSettings>) => {
     setIsSavingWorkspace(true);

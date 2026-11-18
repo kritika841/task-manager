@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   X,
   Calendar,
@@ -90,6 +90,22 @@ export function TaskDrawer() {
   const [editorDriveError, setEditorDriveError] = useState<string | null>(null);
   const [editorNotes, setEditorNotes] = useState("");
   const [changesConfirmed, setChangesConfirmed] = useState(false);
+  const [creatorRawFootageUrl, setCreatorRawFootageUrl] = useState("");
+  const [creatorScriptText, setCreatorScriptText] = useState("");
+
+  const activeTaskForSync = selectedTaskId
+    ? tasks.find((t) => t.id === selectedTaskId)
+    : undefined;
+
+  useEffect(() => {
+    setAdflowMessage(null);
+    setEditorDriveUrl("");
+    setEditorDriveError(null);
+    setEditorNotes("");
+    setChangesConfirmed(false);
+    setCreatorRawFootageUrl(activeTaskForSync?.rawFootageUrl || "");
+    setCreatorScriptText(activeTaskForSync?.scriptText || "");
+  }, [selectedTaskId, activeTaskForSync?.rawFootageUrl, activeTaskForSync?.scriptText]);
 
   if (!selectedTaskId) return null;
 
@@ -117,8 +133,10 @@ export function TaskDrawer() {
     currentUser.role === "developer";
   const isAssignedEditor =
     currentUser.id === task.adEditorId ||
-    currentUser.id === task.assigneeId ||
-    currentUser.role === "editor";
+    (currentUser.role === "editor" && currentUser.id === task.assigneeId);
+  const isAssignedCreator =
+    currentUser.id === task.adCreatorId ||
+    (currentUser.role === "content_creator" && currentUser.id === task.assigneeId);
 
   const handleRevisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -414,7 +432,7 @@ export function TaskDrawer() {
                 />
 
                 {/* Submit for Review trigger if deliverable attached */}
-                {task.status !== "in_review" && task.status !== "completed" && task.deliverableUrl && (
+                {!linked && task.status !== "in_review" && task.status !== "completed" && task.deliverableUrl && (
                   <div className="rounded-xl border border-primary/20 bg-primary/5 p-3 flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">Deliverable attached. Ready for manager review?</span>
                     <Button
@@ -507,7 +525,7 @@ export function TaskDrawer() {
                   </div>
 
                   {/* Production Stage (for AdFlow / Creative pipeline tasks) */}
-                  {isAdFlowTask && (
+                  {isAdFlowTask && isReviewer && (
                     <div className="grid grid-cols-3 items-center">
                       <span className="text-muted-foreground font-medium">AdFlow Stage</span>
                       <div className="col-span-2">
@@ -573,6 +591,7 @@ export function TaskDrawer() {
                     <div className="col-span-2">
                       <Select
                         value={task.assigneeId}
+                        disabled={!isManagerOrAdmin}
                         onChange={(e) =>
                           updateTask(task.id, { assigneeId: e.target.value })
                         }
@@ -724,8 +743,8 @@ export function TaskDrawer() {
                   )}
                 </div>
 
-                {/* AdFlow Creative Control & Review Gate */}
-                {isAdFlowTask && isManagerOrAdmin && (
+                {/* AdFlow Creative Control & Workflow Gate */}
+                {isAdFlowTask && (
                   <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3 text-xs">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
@@ -766,6 +785,17 @@ export function TaskDrawer() {
                       </div>
                     )}
 
+                    {task.scriptText && (
+                      <div className="rounded-lg bg-card/80 border border-border px-3 py-2 space-y-1">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block">
+                          AdFlow Script
+                        </span>
+                        <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed max-h-36 overflow-y-auto">
+                          {task.scriptText}
+                        </p>
+                      </div>
+                    )}
+
                     {!task.adId ? (
                       <div className="flex items-center justify-between gap-3 rounded-lg bg-card/80 border border-border p-3">
                         <div className="space-y-0.5">
@@ -773,29 +803,31 @@ export function TaskDrawer() {
                             Creative ID <span className="font-mono text-primary">{task.creativeName || task.taskNumber}</span> is reserved for AdFlow
                           </p>
                           <p className="text-[11px] text-muted-foreground">
-                            When the creator creates a creative in AdFlow, it will automatically pick up this ID — or click to create it in AdFlow now.
+                            When the creator creates a creative in AdFlow, it will automatically pick up this ID — or create it in AdFlow now.
                           </p>
                         </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="primary"
-                          disabled={adflowBusy}
-                          onClick={() =>
-                            executeAdFlowControl("create_creative", {
-                              productionStage: task.productionStage || "script_writing",
-                              scriptText: task.description || task.title,
-                            })
-                          }
-                          className="shrink-0 text-xs h-8 gap-1.5"
-                        >
-                          {adflowBusy ? (
-                            <Loader2 className="size-3.5 animate-spin" />
-                          ) : (
-                            <Sparkles className="size-3.5" />
-                          )}
-                          <span>Create in AdFlow</span>
-                        </Button>
+                        {isReviewer && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="primary"
+                            disabled={adflowBusy}
+                            onClick={() =>
+                              executeAdFlowControl("create_creative", {
+                                productionStage: task.productionStage || "script_writing",
+                                scriptText: task.description || task.title,
+                              })
+                            }
+                            className="shrink-0 text-xs h-8 gap-1.5"
+                          >
+                            {adflowBusy ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <Sparkles className="size-3.5" />
+                            )}
+                            <span>Create in AdFlow</span>
+                          </Button>
+                        )}
                       </div>
                     ) : (
                       <div className="space-y-3.5 pt-1">
@@ -821,8 +853,129 @@ export function TaskDrawer() {
                           </div>
                         )}
 
+                        {/* 1b. Content Creator Flow: Script / Shoot / Handoff to Editing */}
+                        {(isAssignedCreator || isReviewer) &&
+                          ["script_writing", "ready_to_shoot", "shoot_complete", "creator_changes_requested"].includes(
+                            task.productionStage || ""
+                          ) && (
+                            <div className="rounded-lg border border-sky-500/30 bg-sky-500/5 p-3.5 space-y-2.5">
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+                                  <Sparkles className="size-3.5 text-sky-500" />
+                                  <span>Creator Production Handoff</span>
+                                </span>
+                                <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-sky-500/15 text-sky-500">
+                                  {(task.productionStage || "script_writing").replace(/_/g, " ")}
+                                </span>
+                              </div>
+
+                              <div>
+                                <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                                  Script Text (Optional update)
+                                </label>
+                                <Textarea
+                                  rows={2}
+                                  placeholder="Paste or update the ad script..."
+                                  value={creatorScriptText}
+                                  onChange={(e) => setCreatorScriptText(e.target.value)}
+                                  className="text-xs bg-card"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                                  Raw Footage Google Drive Link
+                                </label>
+                                <Input
+                                  type="url"
+                                  placeholder="https://drive.google.com/drive/folders/..."
+                                  value={creatorRawFootageUrl}
+                                  onChange={(e) => setCreatorRawFootageUrl(e.target.value)}
+                                  className="text-xs h-8 bg-card"
+                                />
+                              </div>
+
+                              <div className="flex items-center gap-2 flex-wrap pt-1">
+                                {(task.productionStage === "script_writing" ||
+                                  task.productionStage === "creator_changes_requested") && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={adflowBusy}
+                                    onClick={() =>
+                                      executeAdFlowControl("update_stage", {
+                                        productionStage: "ready_to_shoot",
+                                        ...(creatorScriptText.trim()
+                                          ? { scriptText: creatorScriptText.trim() }
+                                          : {}),
+                                        ...(creatorRawFootageUrl.trim()
+                                          ? { rawFootageUrl: creatorRawFootageUrl.trim() }
+                                          : {}),
+                                      })
+                                    }
+                                    className="h-8 text-xs cursor-pointer"
+                                  >
+                                    Mark Ready to Shoot
+                                  </Button>
+                                )}
+
+                                {(task.productionStage === "script_writing" ||
+                                  task.productionStage === "ready_to_shoot" ||
+                                  task.productionStage === "creator_changes_requested") && (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    disabled={adflowBusy}
+                                    onClick={() =>
+                                      executeAdFlowControl("update_stage", {
+                                        productionStage: "shoot_complete",
+                                        ...(creatorScriptText.trim()
+                                          ? { scriptText: creatorScriptText.trim() }
+                                          : {}),
+                                        ...(creatorRawFootageUrl.trim()
+                                          ? { rawFootageUrl: creatorRawFootageUrl.trim() }
+                                          : {}),
+                                      })
+                                    }
+                                    className="h-8 text-xs cursor-pointer"
+                                  >
+                                    Mark Shoot Complete
+                                  </Button>
+                                )}
+
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="primary"
+                                  disabled={adflowBusy}
+                                  onClick={() =>
+                                    executeAdFlowControl("update_stage", {
+                                      productionStage: "ready_for_edit",
+                                      ...(creatorScriptText.trim()
+                                        ? { scriptText: creatorScriptText.trim() }
+                                        : {}),
+                                      ...(creatorRawFootageUrl.trim()
+                                        ? { rawFootageUrl: creatorRawFootageUrl.trim() }
+                                        : {}),
+                                    })
+                                  }
+                                  className="h-8 text-xs gap-1.5 cursor-pointer"
+                                >
+                                  {adflowBusy ? (
+                                    <Loader2 className="size-3.5 animate-spin" />
+                                  ) : (
+                                    <Send className="size-3.5" />
+                                  )}
+                                  <span>Ready for Editing</span>
+                                </Button>
+                              </div>
+                            </div>
+                          )}
+
                         {/* 2. Editor Flow: Ready to Edit -> Start Editing */}
-                        {task.productionStage === "ready_for_edit" && (
+                        {(isAssignedEditor || isReviewer) && task.productionStage === "ready_for_edit" && (
                           <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3.5 flex items-center justify-between gap-3">
                             <div>
                               <div className="font-semibold text-xs text-blue-400 flex items-center gap-1.5">
@@ -848,7 +1001,8 @@ export function TaskDrawer() {
                         )}
 
                         {/* 3. Editor Flow: Active Editing or Changes Requested -> Submit Video */}
-                        {(task.productionStage === "editing" || task.productionStage === "changes_requested") && (
+                        {(isAssignedEditor || isReviewer) &&
+                          (task.productionStage === "editing" || task.productionStage === "changes_requested") && (
                           <div className="rounded-lg border border-primary/30 bg-primary/5 p-3.5 space-y-2.5">
                             <div className="flex items-center justify-between">
                               <div className="font-semibold text-xs flex items-center gap-1.5 text-foreground">

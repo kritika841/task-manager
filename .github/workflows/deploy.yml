@@ -46,6 +46,53 @@ jobs:
           ssh -i ~/.ssh/id_deploy -p ${{ secrets.VPS_PORT || 22 }} \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "APP_DIR=$APP_DIR bash -se" <<'REMOTE'
           cd "$APP_DIR"
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const envPath = path.join(process.cwd(), '.env.local');
+          const DEFAULT_URL = 'https://ads.satmi.in';
+          const DEFAULT_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkZmxvdy12cHMiLCJyb2xlIjoiYW5vbiIsImlhdCI6MTc4MzU4NTI5MSwiZXhwIjoyMDk5MTYxMjkxfQ.PNmYQFpq0Yu7QwCq08JAivVQ9WCS3rWzT09CwPs8xZg';
+          const DEFAULT_SERVICE = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFkZmxvdy12cHMiLCJyb2xlIjoic2VydmljZV9yb2xlIiwiaWF0IjoxNzgzNTg1MjkxLCJleHAiOjIwOTkxNjEyOTF9.kcaaZgkR7f_65dSnvynjZ22cqdU451Q934r0JwvnU-8';
+
+          const raw = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+          const map = new Map();
+          const order = [];
+          for (const line of raw ? raw.split(/\r?\n/) : []) {
+            if (!line || line.trim().startsWith('#') || !line.includes('=')) continue;
+            const idx = line.indexOf('=');
+            const k = line.slice(0, idx).trim();
+            const v = line.slice(idx + 1).trim();
+            if (!map.has(k)) order.push(k);
+            map.set(k, v);
+          }
+
+          const isLegacy = (val = '') =>
+            val.includes('qexjnswuvbyjenfrbwvj') ||
+            val.includes('InJlZiI6InFleGpuc3d1dmJ5amVuZnJid3Zq');
+
+          let changed = false;
+          if (!map.get('NEXT_PUBLIC_SUPABASE_URL') || isLegacy(map.get('NEXT_PUBLIC_SUPABASE_URL'))) {
+            map.set('NEXT_PUBLIC_SUPABASE_URL', DEFAULT_URL);
+            if (!order.includes('NEXT_PUBLIC_SUPABASE_URL')) order.push('NEXT_PUBLIC_SUPABASE_URL');
+            changed = true;
+          }
+          if (!map.get('NEXT_PUBLIC_SUPABASE_ANON_KEY') || isLegacy(map.get('NEXT_PUBLIC_SUPABASE_ANON_KEY'))) {
+            map.set('NEXT_PUBLIC_SUPABASE_ANON_KEY', DEFAULT_ANON);
+            if (!order.includes('NEXT_PUBLIC_SUPABASE_ANON_KEY')) order.push('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+            changed = true;
+          }
+          if (!map.get('SUPABASE_SERVICE_ROLE_KEY') || isLegacy(map.get('SUPABASE_SERVICE_ROLE_KEY'))) {
+            map.set('SUPABASE_SERVICE_ROLE_KEY', DEFAULT_SERVICE);
+            if (!order.includes('SUPABASE_SERVICE_ROLE_KEY')) order.push('SUPABASE_SERVICE_ROLE_KEY');
+            changed = true;
+          }
+
+          if (changed) {
+            const out = order.map((k) => `${k}=${map.get(k)}`).join('\n') + '\n';
+            fs.writeFileSync(envPath, out, { mode: 0o600 });
+            console.log('Updated .env.local with active AdFlow (ads.satmi.in) keys.');
+          }
+          NODE
           NODE_ENV=production node <<'NODE'
           const { loadEnvConfig } = require('@next/env');
           loadEnvConfig(process.cwd());

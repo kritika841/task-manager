@@ -343,12 +343,12 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState<boolean>(false);
   const [workspaceSettings, setWorkspaceSettings] = useState<WorkspaceSettings>({
-    adflowSyncEnabled: null,
+    adflowSyncEnabled: true,
     defaultView: null,
     density: null,
   });
   const [isWorkspaceSettingsLoading, setIsWorkspaceSettingsLoading] = useState(true);
-  const isAdsManagementConnected = workspaceSettings.adflowSyncEnabled === true;
+  const isAdsManagementConnected = workspaceSettings.adflowSyncEnabled !== false;
   const [adsSyncMode, setAdsSyncModeState] = useState<AdsSyncMode>("realtime");
   const [enforceCanonicalLock, setEnforceCanonicalLockState] = useState<boolean>(true);
   const [autoMaterializeRulesOnSync, setAutoMaterializeRulesOnSyncState] = useState<boolean>(true);
@@ -1252,6 +1252,28 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const currentUser = useMemo<User>(() => {
+    return (
+      users.find((u) => u.id === currentUserId) ||
+      {
+        id: "default",
+        name: "Loading...",
+        email: "user@satmi.in",
+        role: "member",
+        avatar: "US",
+        department: "Operations",
+        dailyCapacityUnits: 6,
+      }
+    );
+  }, [users, currentUserId]);
+
+  const isDeveloper = currentUser.role === "developer";
+  // Developer role has all the permissions that Admin has (for full task delegation & workspace management)
+  const isAdmin = currentUser.role === "admin" || isDeveloper;
+  const isManager = currentUser.role === "manager";
+  const isManagerOrAdmin = isAdmin || isManager || isDeveloper;
+  const isAdminOrDeveloper = isAdmin || isDeveloper;
+
   // Global Keyboard Shortcuts (Cmd+K, C, ?, Esc, 1-6)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1270,6 +1292,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       }
 
       if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        if (!isAdmin) return;
         e.preventDefault();
         setIsSettingsModalOpen((prev) => !prev);
         return;
@@ -1307,7 +1330,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       }
 
       if (!isInput && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        if (e.key === "s" || e.key === "S") {
+        if ((e.key === "s" || e.key === "S") && isAdmin) {
           e.preventDefault();
           setIsSettingsModalOpen((prev) => !prev);
         } else if (e.key === "c" || e.key === "C") {
@@ -1332,6 +1355,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
+    isAdmin,
     isSettingsModalOpen,
     isCommandPaletteOpen,
     isShortcutsModalOpen,
@@ -1382,28 +1406,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       document.removeEventListener("visibilitychange", handleFocusOrVisibility);
     };
   }, [isAuthenticated, isAdsManagementConnected, adsSyncMode, fetchTasks, fetchNotifications]);
-
-  const currentUser = useMemo<User>(() => {
-    return (
-      users.find((u) => u.id === currentUserId) ||
-      {
-        id: "default",
-        name: "Loading...",
-        email: "user@satmi.in",
-        role: "member",
-        avatar: "US",
-        department: "Operations",
-        dailyCapacityUnits: 6,
-      }
-    );
-  }, [users, currentUserId]);
-
-  const isDeveloper = currentUser.role === "developer";
-  // Developer role has all the permissions that Admin has (for full task delegation & workspace management)
-  const isAdmin = currentUser.role === "admin" || isDeveloper;
-  const isManager = currentUser.role === "manager";
-  const isManagerOrAdmin = isAdmin || isManager || isDeveloper;
-  const isAdminOrDeveloper = isAdmin || isDeveloper;
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -2942,7 +2944,12 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       }
 
       // 5. Assigned to me toggle
-      if (filter.onlyMyTasks && task.assigneeId !== currentUserId) {
+      if (
+        filter.onlyMyTasks &&
+        task.assigneeId !== currentUserId &&
+        task.adCreatorId !== currentUserId &&
+        task.adEditorId !== currentUserId
+      ) {
         return false;
       }
 

@@ -1,12 +1,12 @@
 import crypto from "node:crypto";
 import { Role } from "./types";
-import { supabaseAdmin } from "./supabase";
+import { ADFLOW_SUPABASE_SERVICE_KEY, supabaseAdmin } from "./supabase";
 
 export const SESSION_COOKIE_NAME = "satmi_session_v2";
 
 const SESSION_SECRET =
   process.env.SESSION_SECRET ||
-  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  ADFLOW_SUPABASE_SERVICE_KEY ||
   crypto.randomBytes(32).toString("hex");
 
 export interface SessionPayload {

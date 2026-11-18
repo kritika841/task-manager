@@ -46,6 +46,7 @@ function TaskDashboardContent() {
     tasks,
     filteredTasks,
     isAdmin,
+    isManagerOrAdmin,
     activeSection,
     setActiveSection,
     viewMode,
@@ -583,25 +584,27 @@ function TaskDashboardContent() {
                       </div>
                     </div>
 
-                    <div>
-                      <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
-                        Assigned Member
-                      </label>
-                      <Select
-                        value={filter.assigneeId}
-                        onChange={(e) =>
-                          setFilter({ assigneeId: e.target.value })
-                        }
-                        className="h-8 text-xs w-full bg-card"
-                      >
-                        <option value="all">All Members</option>
-                        {users.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.name} ({u.role.replace("_", " ")})
-                          </option>
-                        ))}
-                      </Select>
-                    </div>
+                    {isManagerOrAdmin && (
+                      <div>
+                        <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                          Assigned Member
+                        </label>
+                        <Select
+                          value={filter.assigneeId}
+                          onChange={(e) =>
+                            setFilter({ assigneeId: e.target.value })
+                          }
+                          className="h-8 text-xs w-full bg-card"
+                        >
+                          <option value="all">All Members</option>
+                          {users.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.name} ({u.role.replace("_", " ")})
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    )}
 
                     <div className="pt-1 flex justify-end">
                       <Button
@@ -661,17 +664,19 @@ function TaskDashboardContent() {
                       <span>Export CSV</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsImportModalOpen(true);
-                        setIsMoreMenuOpen(false);
-                      }}
-                      className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-foreground hover:bg-muted rounded-lg transition cursor-pointer"
-                    >
-                      <Upload className="size-3.5 text-muted-foreground" />
-                      <span>Import CSV</span>
-                    </button>
+                    {isManagerOrAdmin && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsImportModalOpen(true);
+                          setIsMoreMenuOpen(false);
+                        }}
+                        className="flex w-full items-center gap-2 px-2.5 py-1.5 text-xs text-foreground hover:bg-muted rounded-lg transition cursor-pointer"
+                      >
+                        <Upload className="size-3.5 text-muted-foreground" />
+                        <span>Import CSV</span>
+                      </button>
+                    )}
 
                     {activeDoneTasksCount > 0 && (
                       <button

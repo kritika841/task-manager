@@ -96,6 +96,7 @@ export function TaskBoard() {
     requestRevision,
     isTaskBlocked,
     getMemberCapacity,
+    isAdmin,
     isManagerOrAdmin,
     boardLayout,
     setBoardLayout,
@@ -1195,15 +1196,17 @@ export function TaskBoard() {
                 </span>
               </div>
 
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => setIsRoleTemplateModalOpen(true)}
-                className="text-xs h-7 gap-1"
-              >
-                <span>Templates</span>
-                <ChevronRight className="size-3" />
-              </Button>
+              {isAdmin && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setIsRoleTemplateModalOpen(true)}
+                  className="text-xs h-7 gap-1"
+                >
+                  <span>Templates</span>
+                  <ChevronRight className="size-3" />
+                </Button>
+              )}
             </div>
 
             {/* Parent Columns Grid with Nested Sub-Columns */}

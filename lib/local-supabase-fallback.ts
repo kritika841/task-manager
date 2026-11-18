@@ -686,7 +686,7 @@ async function syncUpstreamAdFlowProfiles(url: URL, init?: RequestInit) {
   if (Date.now() - lastProfilesSyncAt < 8_000) return;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2500);
+  const timeout = setTimeout(() => controller.abort(), 5000);
   try {
     const upstreamProfilesUrl = `${url.origin}/rest/v1/profiles?select=*`;
     const res = await fetch(upstreamProfilesUrl, {
@@ -804,7 +804,7 @@ export async function resilientSupabaseFetch(
   }
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 2000);
+  const timeout = setTimeout(() => controller.abort(), 6000);
 
   try {
     const res = await fetch(input, {
@@ -815,6 +815,23 @@ export async function resilientSupabaseFetch(
     clearTimeout(timeout);
     if (!res.ok) {
       return handleLocalSupabaseRequest(urlStr, init);
+    }
+    if (
+      !url.searchParams.has("id") &&
+      !url.searchParams.has("name") &&
+      !url.searchParams.has("limit")
+    ) {
+      const acceptHeader = new Headers(init?.headers || {}).get("accept") || "";
+      if (!acceptHeader.includes("application/vnd.pgrst.object+json")) {
+        try {
+          const rows = await res.clone().json();
+          if (Array.isArray(rows)) {
+            const db = loadLocalDb();
+            db.ads = rows;
+            saveLocalDb(db);
+          }
+        } catch {}
+      }
     }
     return res;
   } catch {

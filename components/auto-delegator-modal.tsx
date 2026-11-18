@@ -27,6 +27,7 @@ export function AutoDelegatorModal() {
   const {
     isAutoDelegatorOpen,
     setIsAutoDelegatorOpen,
+    isManagerOrAdmin,
     users,
     delegatorRules,
     saveDelegatorRule,
@@ -62,7 +63,7 @@ export function AutoDelegatorModal() {
     }
   }, [users, userId]);
 
-  if (!isAutoDelegatorOpen) return null;
+  if (!isAutoDelegatorOpen || !isManagerOrAdmin) return null;
 
   const selectedUser = users.find((u) => u.id === userId);
   const roleTaskOptions = taskOptionsForRole(selectedUser?.role);

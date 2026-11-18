@@ -149,7 +149,10 @@ export async function POST(req: Request) {
     const { actor } = await resolveRequestActor(req);
     if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     const isEditorAction = action === "start_editing" || action === "submit_edit";
-    if (!canReviewTasks(actor.role) && !isEditorAction) {
+    const isCreatorStageHandoff =
+      action === "update_stage" &&
+      ["ready_to_shoot", "shoot_complete", "ready_for_edit"].includes(String(productionStage || ""));
+    if (!canReviewTasks(actor.role) && !isEditorAction && !isCreatorStageHandoff) {
       return NextResponse.json({ error: "Review permissions are required." }, { status: 403 });
     }
     const { id: actorId, name: actorName } = actor;
@@ -435,6 +438,17 @@ export async function POST(req: Request) {
       ) {
         return NextResponse.json({ error: "Choose a production stage or use the review actions." }, { status: 400 });
       }
+      if (!canReviewTasks(actor.role)) {
+        if (
+          actor.id !== existingAd.creator_id ||
+          !["ready_to_shoot", "shoot_complete", "ready_for_edit"].includes(nextStage)
+        ) {
+          return NextResponse.json(
+            { error: "Only the assigned content creator or a manager can advance this creative stage." },
+            { status: 403 }
+          );
+        }
+      }
       const stageIdx = ADFLOW_PRODUCTION_STAGES.findIndex((s) => s.id === nextStage);
       patch.production_stage = nextStage;
       patch.status = legacyAdStatusForStage(nextStage);
@@ -456,7 +470,7 @@ export async function POST(req: Request) {
         patch.final_approved_at = existingAd.final_approved_at || nowIso;
       }
 
-      if (editorId !== undefined) {
+      if (canReviewTasks(actor.role) && editorId !== undefined) {
         patch.editor_id = editorId || null;
         if (editorId && editorId !== existingAd.editor_id) {
           patch.assigned_at = nowIso;
@@ -465,7 +479,7 @@ export async function POST(req: Request) {
       if (rawFootageUrl !== undefined) {
         patch.raw_footage_url = rawFootageUrl || null;
       }
-      if (driveUrl !== undefined) {
+      if (canReviewTasks(actor.role) && driveUrl !== undefined) {
         patch.drive_url = driveUrl || null;
         const parsedDrive = parseDriveId(driveUrl);
         if (parsedDrive.fileId) {
@@ -479,17 +493,19 @@ export async function POST(req: Request) {
         patch.script_text = cleanScript;
         patch.script_html = `<p>${cleanScript.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br/>")}</p>`;
       }
-      if (deadline !== undefined) {
+      if (canReviewTasks(actor.role) && deadline !== undefined) {
         patch.deadline = deadline || null;
       }
-      if (notes !== undefined) {
+      if (canReviewTasks(actor.role) && notes !== undefined) {
         patch.notes = notes || null;
       }
-      if (editingFreeze !== undefined) {
+      if (canReviewTasks(actor.role) && editingFreeze !== undefined) {
         patch.editing_freeze = editingFreeze;
       }
 
-      activityAction = "admin_creative_override";
+      activityAction = canReviewTasks(actor.role)
+        ? "admin_creative_override"
+        : "creator_stage_updated";
       activityMeta = {
         ...activityMeta,
         production_stage: nextStage,

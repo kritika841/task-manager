@@ -151,7 +151,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const myTasksCount = filter.onlyMyTasks
     ? filteredTasks.length
-    : baseVisibleTasks.filter((t) => t.assigneeId === currentUserId).length;
+    : baseVisibleTasks.filter(
+        (t) =>
+          t.assigneeId === currentUserId ||
+          t.adCreatorId === currentUserId ||
+          t.adEditorId === currentUserId
+      ).length;
   const inReviewCount =
     filter.status === "in_review"
       ? filteredTasks.length
@@ -469,19 +474,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  setIsRoleTemplateModalOpen(true);
-                  setMobileMenuOpen(false);
-                }}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <div className="flex items-center gap-2.5">
-                  <LayoutTemplate className="size-4 shrink-0 text-primary" />
-                  <span>Role Templates</span>
-                </div>
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRoleTemplateModalOpen(true);
+                    setMobileMenuOpen(false);
+                  }}
+                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <LayoutTemplate className="size-4 shrink-0 text-primary" />
+                    <span>Role Templates</span>
+                  </div>
+                </button>
+              )}
 
               {isManagerOrAdmin && (
                 <button
@@ -499,19 +506,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </button>
               )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  setIsSettingsModalOpen(true);
-                  setMobileMenuOpen(false);
-                }}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <div className="flex items-center gap-2.5">
-                  <Settings className="size-4 shrink-0 text-primary" />
-                  <span>Settings</span>
-                </div>
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsSettingsModalOpen(true);
+                    setMobileMenuOpen(false);
+                  }}
+                  className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <Settings className="size-4 shrink-0 text-primary" />
+                    <span>Settings</span>
+                  </div>
+                </button>
+              )}
             </nav>
 
             {/* Feedback to Developer / Request Feature — directly beneath Workspace Tools */}
@@ -593,17 +602,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
               {/* Quick Actions */}
               <div className="space-y-0.5 text-xs">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsSettingsModalOpen(true);
-                    setUserDropdownOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-muted cursor-pointer transition"
-                >
-                  <Settings className="size-3.5 text-muted-foreground" />
-                  <span>Settings & Team</span>
-                </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSettingsModalOpen(true);
+                      setUserDropdownOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-2.5 py-1.5 rounded-lg text-foreground hover:bg-muted cursor-pointer transition"
+                  >
+                    <Settings className="size-3.5 text-muted-foreground" />
+                    <span>Settings & Team</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -829,10 +840,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <BulkActionsToolbar />
       <ShortcutsModal />
       <SettingsModal />
-      <RoleTemplateModal
-        isOpen={isRoleTemplateModalOpen}
-        onClose={() => setIsRoleTemplateModalOpen(false)}
-      />
+      {isAdmin && (
+        <RoleTemplateModal
+          isOpen={isRoleTemplateModalOpen}
+          onClose={() => setIsRoleTemplateModalOpen(false)}
+        />
+      )}
       {/* Background due-reminder alert listener when not on the Reminders view */}
       {activeSection !== "reminders" && (
         <RemindersPanel

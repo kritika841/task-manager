@@ -67,6 +67,7 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
     tasks,
     currentUser,
     currentUserId,
+    isAdmin,
   } = useTasks();
 
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>(
@@ -305,7 +306,7 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
     setIsRoleTemplateModalOpen(false);
   };
 
-  if (!effectiveIsOpen) return null;
+  if (!effectiveIsOpen || !isAdmin) return null;
 
   return (
     <div
