@@ -42,30 +42,12 @@ function getDailyCapacity(role: string): number {
   }
 }
 
-function toDatabaseRole(role: string): "admin" | "manager" | "editor" | "content_creator" | "media_buyer" {
-  switch (role) {
-    case "admin":
-    case "developer":
-      return "admin";
-    case "manager":
-      return "manager";
-    case "content_creator":
-      return "content_creator";
-    case "media_buyer":
-      return "media_buyer";
-    case "editor":
-    case "member":
-    default:
-      return "editor";
-  }
-}
-
 function parseUserMetadata(avatarUrl: string | null, name: string, role: string) {
   let color: string | undefined;
   let employeeCode: string | undefined;
   let dailyCapacityUnits: number | undefined;
+  let passwordHash: string | undefined;
   let realAvatarUrl: string | undefined;
-  let appRole: Role | undefined;
 
   if (avatarUrl) {
     try {
@@ -74,7 +56,7 @@ function parseUserMetadata(avatarUrl: string | null, name: string, role: string)
         color = parsed.color;
         employeeCode = parsed.employeeCode;
         dailyCapacityUnits = parsed.dailyCapacityUnits;
-        appRole = parsed.appRole;
+        passwordHash = parsed.passwordHash;
         realAvatarUrl = parsed.realAvatarUrl;
       } else if (avatarUrl.startsWith("#")) {
         color = avatarUrl;
@@ -99,8 +81,8 @@ function parseUserMetadata(avatarUrl: string | null, name: string, role: string)
     employeeCode: code,
     color: resolvedColor,
     dailyCapacityUnits: resolvedCapacity,
+    passwordHash,
     realAvatarUrl,
-    appRole: appRole || (role as Role),
   };
 }
 
@@ -124,7 +106,7 @@ export async function GET(req: Request) {
     }
 
     const users: User[] = (rows || []).map((p) => {
-      const { employeeCode, color, dailyCapacityUnits, appRole } = parseUserMetadata(
+      const { employeeCode, color, dailyCapacityUnits } = parseUserMetadata(
         p.avatar_url,
         p.name || p.email,
         p.role
@@ -133,9 +115,9 @@ export async function GET(req: Request) {
         id: p.id,
         name: p.name || p.email.split("@")[0],
         email: p.email,
-        role: appRole || (p.role as Role) || "member",
+        role: (p.role as Role) || "member",
         avatar: employeeCode.slice(0, 2),
-        department: getDepartment(appRole || p.role),
+        department: getDepartment(p.role),
         active: p.active !== false && !p.deleted_at,
         dailyCapacityUnits,
         employeeCode,
@@ -170,7 +152,6 @@ export async function POST(req: Request) {
     const name = (body.name || "").trim();
     const email = (body.email || "").trim().toLowerCase();
     const role = (body.role as Role) || "member";
-    const dbRole = toDatabaseRole(role);
     const employeeCode = (body.employeeCode || getEmployeeCode(name)).trim().toUpperCase();
     const color = body.color || getUserColor(employeeCode);
     const capacityUnits = Number(body.dailyCapacityUnits) || getDailyCapacity(role);
@@ -180,14 +161,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Name and email are required" }, { status: 400 });
     }
 
-    // 1. Provision user in Supabase Auth if password provided
+    // 1. Provision user in local auth store if password provided (read-only wrt upstream AdFlow DB)
     let authUserId: string | null = null;
     if (password) {
       const { data: authData, error: authCreateErr } = await supabaseAdmin.auth.admin.createUser({
         email,
         password,
         email_confirm: true,
-        user_metadata: { name, role: dbRole },
+        user_metadata: { name, role },
       });
 
       if (authData?.user) {
@@ -208,8 +189,10 @@ export async function POST(req: Request) {
       color,
       employeeCode,
       dailyCapacityUnits: capacityUnits,
-      appRole: role,
     };
+    if (password) {
+      metaObj.passwordHash = hashPassword(password);
+    }
     const meta = JSON.stringify(metaObj);
 
     // 2. Check if user already exists in profiles table
@@ -220,12 +203,12 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (existing) {
-      // Reactivate or update
+      // Reactivate or update local profile override
       const { data: reactivated, error: reactivateErr } = await supabaseAdmin
         .from("profiles")
         .update({
           name,
-          role: dbRole,
+          role,
           active: true,
           deleted_at: null,
           avatar_url: meta,
@@ -243,9 +226,9 @@ export async function POST(req: Request) {
         id: reactivated.id,
         name: reactivated.name,
         email: reactivated.email,
-        role: role,
+        role: reactivated.role,
         avatar: employeeCode.slice(0, 2),
-        department: getDepartment(role),
+        department: getDepartment(reactivated.role),
         active: true,
         dailyCapacityUnits: capacityUnits,
         employeeCode,
@@ -256,11 +239,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, user });
     }
 
-    // 3. Insert new profile
+    // 3. Insert new local profile
     const insertPayload: Record<string, any> = {
       name,
       email,
-      role: dbRole,
+      role,
       active: true,
       avatar_url: meta,
       created_at: new Date().toISOString(),
@@ -348,7 +331,7 @@ export async function PATCH(req: Request) {
     };
 
     if (name) updates.name = name.trim();
-    if (role) updates.role = toDatabaseRole(role);
+    if (role) updates.role = role;
     if (active !== undefined) updates.active = active;
 
     const currentMeta = parseUserMetadata(current.avatar_url, current.name, current.role);
@@ -356,13 +339,19 @@ export async function PATCH(req: Request) {
     const finalColor = color || currentMeta.color;
     const finalCapacity =
       dailyCapacityUnits !== undefined ? Number(dailyCapacityUnits) : currentMeta.dailyCapacityUnits;
+    const finalPasswordHash =
+      password && typeof password === "string" && password.trim()
+        ? hashPassword(password.trim())
+        : currentMeta.passwordHash;
 
     const metaPayload: Record<string, any> = {
       color: finalColor,
       employeeCode: finalCode,
       dailyCapacityUnits: finalCapacity,
-      appRole: role || currentMeta.appRole,
     };
+    if (finalPasswordHash) {
+      metaPayload.passwordHash = finalPasswordHash;
+    }
     if (currentMeta.realAvatarUrl) {
       metaPayload.realAvatarUrl = currentMeta.realAvatarUrl;
     }
@@ -384,9 +373,9 @@ export async function PATCH(req: Request) {
       id: updated.id,
       name: updated.name,
       email: updated.email,
-      role: (metaPayload.appRole as Role) || (updated.role as Role),
+      role: updated.role,
       avatar: finalCode.slice(0, 2),
-      department: getDepartment(metaPayload.appRole || updated.role),
+      department: getDepartment(updated.role),
       active: updated.active !== false && !updated.deleted_at,
       dailyCapacityUnits: finalCapacity,
       employeeCode: finalCode,

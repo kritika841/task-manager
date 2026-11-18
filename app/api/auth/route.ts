@@ -206,7 +206,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3. Fallback: If Supabase Auth didn't match, check legacy hash in Task Manager metadata
+    // 3. Fallback: If Supabase Auth didn't match, check local password override in Task Manager metadata
     if (!authenticatedUserId) {
       const meta = parseUserMetadata(
         resolvedProfile.avatar_url,
@@ -215,15 +215,7 @@ export async function POST(req: Request) {
       );
 
       if (meta.passwordHash && verifyPasswordHash(cleanPassword, meta.passwordHash)) {
-        // Upgrade legacy password to Supabase Auth so it is 100% unified going forward
         authenticatedUserId = resolvedProfile.id;
-        try {
-          await supabaseAdmin.auth.admin.updateUserById(resolvedProfile.id, {
-            password: cleanPassword,
-          });
-        } catch (syncErr) {
-          console.warn("Legacy password upgrade warning:", syncErr);
-        }
       } else {
         return NextResponse.json({ ok: false, error: "Invalid email or password." }, { status: 401 });
       }
