@@ -325,24 +325,50 @@ export async function POST(req: Request) {
 
     if (action === "approve") {
       reviewDecision = "approve";
-      patch.production_stage = "approved";
-      patch.status = "approved";
-      patch.approval_stage = "complete";
-      patch.approved_at = nowIso;
-      patch.final_approved_at = nowIso;
-      patch.creator_reviewed_at = existingAd.creator_reviewed_at || nowIso;
-      activityAction = "final_approval_granted";
-      activityMeta = {
-        ...activityMeta,
-        production_stage: "approved",
-        new_stage: "approved",
-        note: note.trim() || null,
-      };
-      notifyUserIds = [existingAd.creator_id, existingAd.editor_id].filter(Boolean);
-      notifyTitle = "Ad approved";
-      notifyBody = note.trim()
-        ? `${actorName} approved ${existingAd.name}: "${note.trim()}"`
-        : `${actorName} approved ${existingAd.name} from Task Manager.`;
+      const isFinalReviewStage =
+        existingAd.production_stage === "final_review" ||
+        existingAd.approval_stage === "admin_final" ||
+        (actor.role === "admin" && body.finalApprove === true);
+
+      if (!isFinalReviewStage) {
+        patch.production_stage = "final_review";
+        patch.status = "pending_review";
+        patch.approval_stage = "admin_final";
+        patch.creator_reviewed_at = nowIso;
+        activityAction = "creator_review_approved";
+        activityMeta = {
+          ...activityMeta,
+          production_stage: "final_review",
+          new_stage: "final_review",
+          approval_stage: "admin_final",
+          note: note.trim() || null,
+        };
+        notifyUserIds = [existingAd.creator_id, existingAd.editor_id].filter(Boolean);
+        notifyTitle = "Moved to final review";
+        notifyBody = note.trim()
+          ? `${actorName} approved ${existingAd.name} for Final Review: "${note.trim()}"`
+          : `${actorName} approved ${existingAd.name} to Final Review.`;
+      } else {
+        patch.production_stage = "approved";
+        patch.status = "approved";
+        patch.approval_stage = "complete";
+        patch.approved_at = nowIso;
+        patch.final_approved_at = nowIso;
+        patch.creator_reviewed_at = existingAd.creator_reviewed_at || nowIso;
+        activityAction = "final_approval_granted";
+        activityMeta = {
+          ...activityMeta,
+          production_stage: "approved",
+          new_stage: "approved",
+          approval_stage: "complete",
+          note: note.trim() || null,
+        };
+        notifyUserIds = [existingAd.creator_id, existingAd.editor_id].filter(Boolean);
+        notifyTitle = "Ad approved";
+        notifyBody = note.trim()
+          ? `${actorName} approved ${existingAd.name}: "${note.trim()}"`
+          : `${actorName} approved ${existingAd.name} from Task Manager.`;
+      }
     } else if (action === "request_changes") {
       if (!note.trim()) {
         return NextResponse.json(
@@ -477,9 +503,26 @@ export async function POST(req: Request) {
         }
       }
       if (rawFootageUrl !== undefined) {
-        patch.raw_footage_url = rawFootageUrl || null;
+        if (typeof rawFootageUrl === "string" && rawFootageUrl.trim()) {
+          const trimmedRaw = rawFootageUrl.trim();
+          if (!/^https?:\/\//i.test(trimmedRaw)) {
+            return NextResponse.json(
+              { error: "rawFootageUrl must be a valid http:// or https:// URL." },
+              { status: 400 }
+            );
+          }
+          patch.raw_footage_url = trimmedRaw;
+        } else {
+          patch.raw_footage_url = null;
+        }
       }
       if (canReviewTasks(actor.role) && driveUrl !== undefined) {
+        if (typeof driveUrl === "string" && driveUrl.trim() && !/^https?:\/\//i.test(driveUrl.trim())) {
+          return NextResponse.json(
+            { error: "driveUrl must be a valid http:// or https:// URL." },
+            { status: 400 }
+          );
+        }
         patch.drive_url = driveUrl || null;
         const parsedDrive = parseDriveId(driveUrl);
         if (parsedDrive.fileId) {
@@ -523,7 +566,7 @@ export async function POST(req: Request) {
       if (existingAd.editing_freeze === "frozen") {
         return NextResponse.json(
           { error: "Editing is frozen for this creative by a manager." },
-          { status: 400 }
+          { status: 409 }
         );
       }
       patch.production_stage = "editing";
@@ -543,6 +586,12 @@ export async function POST(req: Request) {
         return NextResponse.json(
           { error: "Only the assigned editor or a manager can submit this video." },
           { status: 403 }
+        );
+      }
+      if (existingAd.editing_freeze === "frozen") {
+        return NextResponse.json(
+          { error: "Editing is frozen for this creative by a manager." },
+          { status: 409 }
         );
       }
       if (!driveUrl || typeof driveUrl !== "string" || !driveUrl.trim()) {

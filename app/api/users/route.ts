@@ -4,6 +4,16 @@ import { Role, User } from "@/lib/types";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
 import { hashPassword, resolveRequestActor } from "@/lib/auth-server";
 
+const VALID_ROLES = new Set<Role>([
+  "admin",
+  "manager",
+  "developer",
+  "editor",
+  "content_creator",
+  "media_buyer",
+  "member",
+]);
+
 function getDepartment(role: string): string {
   switch (role) {
     case "admin":
@@ -151,10 +161,24 @@ export async function POST(req: Request) {
 
     const name = (body.name || "").trim();
     const email = (body.email || "").trim().toLowerCase();
-    const role = (body.role as Role) || "member";
+    const rawRole = body.role !== undefined ? String(body.role).trim() : "member";
+    if (!VALID_ROLES.has(rawRole as Role)) {
+      return NextResponse.json(
+        { error: "Invalid role. Allowed roles: admin, manager, developer, editor, content_creator, media_buyer, member." },
+        { status: 400 }
+      );
+    }
+    const role = rawRole as Role;
     const employeeCode = (body.employeeCode || getEmployeeCode(name)).trim().toUpperCase();
     const color = body.color || getUserColor(employeeCode);
-    const capacityUnits = Number(body.dailyCapacityUnits) || getDailyCapacity(role);
+    const rawCapacity = body.dailyCapacityUnits !== undefined ? Number(body.dailyCapacityUnits) : getDailyCapacity(role);
+    if (!Number.isFinite(rawCapacity) || rawCapacity < 1 || rawCapacity > 100) {
+      return NextResponse.json(
+        { error: "dailyCapacityUnits must be a number between 1 and 100." },
+        { status: 400 }
+      );
+    }
+    const capacityUnits = Math.round(rawCapacity);
     const password = body.password ? String(body.password).trim() : null;
 
     if (!name || !email) {
@@ -292,6 +316,23 @@ export async function PATCH(req: Request) {
 
     if (!id) {
       return NextResponse.json({ error: "User ID is required" }, { status: 400 });
+    }
+
+    if (role !== undefined && !VALID_ROLES.has(String(role).trim() as Role)) {
+      return NextResponse.json(
+        { error: "Invalid role. Allowed roles: admin, manager, developer, editor, content_creator, media_buyer, member." },
+        { status: 400 }
+      );
+    }
+
+    if (dailyCapacityUnits !== undefined) {
+      const cap = Number(dailyCapacityUnits);
+      if (!Number.isFinite(cap) || cap < 1 || cap > 100) {
+        return NextResponse.json(
+          { error: "dailyCapacityUnits must be a number between 1 and 100." },
+          { status: 400 }
+        );
+      }
     }
 
     const auth = await resolveRequestActor(req);

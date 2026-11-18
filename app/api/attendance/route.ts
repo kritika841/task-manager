@@ -5,7 +5,7 @@ import { loadLocalDb, saveLocalDb, type LocalDbSchema } from "@/lib/local-supaba
 import { canManageWorkspace, resolveRequestActor } from "@/lib/auth-server";
 import { sendCheckoutReminderEmail } from "@/lib/email";
 import { AttendanceRecord, EmployeeAttendanceRow, Role } from "@/lib/types";
-import { getEmployeeCode, getUserColor } from "@/lib/utils";
+import { getEmployeeCode, getUserColor, sanitizeCsvCell } from "@/lib/utils";
 
 const TARGET_TIMEZONE = "Asia/Kolkata";
 
@@ -58,8 +58,7 @@ function formatDurationForCSV(checkInTime: string | null, checkOutTime: string |
 }
 
 function escapeCSVField(value: string): string {
-  const escaped = value.replace(/"/g, '""');
-  return `"${escaped}"`;
+  return sanitizeCsvCell(value);
 }
 
 function getDepartment(role: string): string {

@@ -21,7 +21,7 @@ import { Task, TaskPriority, TaskStatus } from "@/lib/types";
 import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
 import { StatusBadge, PriorityBadge } from "./ui/badge";
 import { ProgressBar } from "./ui/progress-bar";
-import { calculateProgress, formatDate, isOverdue, cn } from "@/lib/utils";
+import { calculateProgress, formatDate, isOverdue, cn, sanitizeUrl } from "@/lib/utils";
 
 type SortField =
   | "taskNumber"
@@ -469,9 +469,9 @@ export function TaskTable() {
                     >
                       {task.deliverableUrl ? (
                         <a
-                          href={task.deliverableUrl}
+                          href={sanitizeUrl(task.deliverableUrl)}
                           target="_blank"
-                          rel="noreferrer"
+                          rel="noopener noreferrer"
                           className="text-xs text-primary hover:underline flex items-center gap-1"
                         >
                           <span>View</span>

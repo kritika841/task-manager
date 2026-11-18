@@ -173,6 +173,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div
           className="fixed inset-0 z-40 bg-foreground/20 backdrop-blur-xs lg:hidden"
           onClick={() => setMobileMenuOpen(false)}
+          onMouseDown={() => setMobileMenuOpen(false)}
+          aria-hidden="true"
         />
       )}
 
@@ -182,7 +184,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           "fixed inset-y-0 left-0 z-40 flex w-[240px] flex-col border-r border-border bg-card transition-all duration-200 ease-in-out",
           mobileMenuOpen
             ? "translate-x-0 shadow-float z-50"
-            : "-translate-x-full",
+            : "-translate-x-full pointer-events-none lg:pointer-events-auto",
           isSidebarCollapsed ? "lg:-translate-x-full" : "lg:translate-x-0"
         )}
       >
@@ -689,12 +691,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         )}
       >
         {/* Sticky Top Header */}
-        <header className="sticky top-0 z-30 flex h-12 w-full items-center justify-between border-b border-border/80 bg-card/95 px-4 lg:px-6 text-card-foreground backdrop-blur">
-          <div className="flex items-center gap-2.5">
+        <header className="sticky top-0 z-30 flex h-12 w-full items-center justify-between gap-2 border-b border-border/80 bg-card/95 px-2.5 sm:px-4 lg:px-6 text-card-foreground backdrop-blur">
+          <div className="flex items-center gap-2 min-w-0">
             {/* Mobile Menu Button */}
             <button
               type="button"
-              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden cursor-pointer"
+              className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden cursor-pointer shrink-0"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               aria-label="Toggle mobile menu"
             >
@@ -716,7 +718,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
 
             {/* Workspace Breadcrumb */}
-            <div className="flex items-center gap-2 text-xs">
+            <div className="hidden sm:flex items-center gap-2 text-xs">
               <span className="font-semibold text-foreground">Satmi</span>
               <span className="text-muted-foreground">/</span>
               <span className="text-muted-foreground capitalize">
@@ -726,7 +728,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           {/* Right Header Controls */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0 min-w-0">
             {/* Search (Cmd+K) */}
             <button
               type="button"
@@ -774,11 +776,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 size="sm"
                 disabled={isAttendanceLoading}
                 onClick={() => handleAttendanceAction("checkin")}
-                className="gap-1.5 text-xs h-8 bg-emerald-600 hover:bg-emerald-500 text-white border-0 shadow-xs cursor-pointer"
+                className="gap-1 text-xs h-8 px-2 sm:px-3 bg-emerald-600 hover:bg-emerald-500 text-white border-0 shadow-xs cursor-pointer whitespace-nowrap shrink-0"
                 title="Check in for today"
               >
-                <LogIn className="size-3.5" />
-                <span>{isAttendanceLoading ? "Checking in..." : "Check In"}</span>
+                <LogIn className="size-3.5 shrink-0" />
+                <span className="hidden sm:inline">{isAttendanceLoading ? "Checking in..." : "Check In"}</span>
+                <span className="sm:hidden">{isAttendanceLoading ? "..." : "In"}</span>
               </Button>
             ) : !myTodayAttendance?.checkOutTime ? (
               <Button
@@ -786,13 +789,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 size="sm"
                 disabled={isAttendanceLoading}
                 onClick={() => handleAttendanceAction("checkout")}
-                className="gap-1.5 text-xs h-8 bg-rose-600 hover:bg-rose-500 text-white border-0 shadow-xs cursor-pointer"
+                className="gap-1 text-xs h-8 px-2 sm:px-3 bg-rose-600 hover:bg-rose-500 text-white border-0 shadow-xs cursor-pointer whitespace-nowrap shrink-0"
                 title={`Checked in at ${formatShortISTTime(myTodayAttendance.checkInTime)} IST — Click to Check Out`}
               >
                 <span className="size-2 rounded-full bg-white animate-pulse shrink-0" />
-                <LogOut className="size-3.5" />
-                <span>{isAttendanceLoading ? "Checking out..." : "Check Out"}</span>
-                <span className="hidden sm:inline text-[10px] opacity-90 font-mono pl-0.5">
+                <LogOut className="size-3.5 shrink-0" />
+                <span className="hidden sm:inline">{isAttendanceLoading ? "Checking out..." : "Check Out"}</span>
+                <span className="sm:hidden">{isAttendanceLoading ? "..." : "Out"}</span>
+                <span className="hidden md:inline text-[10px] opacity-90 font-mono pl-0.5">
                   In {formatShortISTTime(myTodayAttendance.checkInTime)}
                 </span>
               </Button>
@@ -803,13 +807,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   if (isAdmin) setActiveSection("attendance");
                 }}
                 className={cn(
-                  "inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold transition",
+                  "inline-flex items-center gap-1 h-8 px-2 sm:px-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold transition whitespace-nowrap shrink-0",
                   isAdmin ? "cursor-pointer hover:bg-emerald-500/15" : "cursor-default"
                 )}
                 title={`Checked in: ${formatShortISTTime(myTodayAttendance.checkInTime)} | Checked out: ${formatShortISTTime(myTodayAttendance.checkOutTime)} (IST)`}
               >
                 <CheckCircle2 className="size-3.5 shrink-0" />
-                <span>Checked Out</span>
+                <span className="hidden sm:inline">Checked Out</span>
+                <span className="sm:hidden">Done</span>
                 <span className="hidden md:inline text-[10px] font-mono opacity-80">
                   {formatShortISTTime(myTodayAttendance.checkInTime)} – {formatShortISTTime(myTodayAttendance.checkOutTime)}
                 </span>
@@ -821,10 +826,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               variant="primary"
               size="sm"
               onClick={() => setIsCreateModalOpen(true)}
-              className="gap-1.5 text-xs h-8 shadow-xs"
+              className="gap-1 text-xs h-8 px-2 sm:px-3 shadow-xs whitespace-nowrap shrink-0"
             >
-              <Plus className="size-3.5" />
-              <span>New Task</span>
+              <Plus className="size-3.5 shrink-0" />
+              <span className="hidden sm:inline">New Task</span>
+              <span className="sm:hidden">New</span>
             </Button>
           </div>
         </header>

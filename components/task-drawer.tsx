@@ -40,7 +40,7 @@ import { MediaDeliverable } from "./media-deliverable";
 import { SubtaskChecklist } from "./subtask-checklist";
 import { CommentThread } from "./comment-thread";
 import { TimeTracker } from "./time-tracker";
-import { formatDate, cn } from "@/lib/utils";
+import { formatDate, cn, sanitizeUrl } from "@/lib/utils";
 
 export function TaskDrawer() {
   const {
@@ -235,8 +235,8 @@ export function TaskDrawer() {
       />
 
       {/* Drawer Container */}
-      <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
-        <div className="w-screen max-w-xl bg-card border-l border-border shadow-float flex flex-col">
+      <div className="fixed inset-y-0 right-0 w-full sm:w-auto max-w-full flex pl-0 sm:pl-10">
+        <div className="w-full sm:w-screen max-w-full sm:max-w-xl bg-card border-l border-border shadow-float flex flex-col overflow-x-hidden">
           {/* Drawer Header */}
           <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-card">
             <div className="flex items-center gap-2 flex-wrap">
@@ -774,9 +774,9 @@ export function TaskDrawer() {
                       <div className="flex items-center justify-between rounded-lg bg-card/80 border border-border px-3 py-2">
                         <span className="text-muted-foreground font-medium">Raw Footage Folder:</span>
                         <a
-                          href={task.rawFootageUrl}
+                          href={sanitizeUrl(task.rawFootageUrl)}
                           target="_blank"
-                          rel="noreferrer"
+                          rel="noopener noreferrer"
                           className="inline-flex items-center gap-1 text-primary font-semibold hover:underline"
                         >
                           <span>Open Drive Folder</span>

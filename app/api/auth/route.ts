@@ -4,10 +4,48 @@ import { Role, User } from "@/lib/types";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
 import {
   SESSION_COOKIE_NAME,
+  extractSessionCookie,
+  revokeSessionToken,
   signSessionToken,
   verifyPasswordHash,
   resolveRequestActor,
 } from "@/lib/auth-server";
+
+const LOGIN_RATE_LIMIT_MAX = 8;
+const LOGIN_RATE_LIMIT_WINDOW_MS = 60_000;
+const loginAttempts = new Map<string, number[]>();
+
+function getClientIp(req: Request): string {
+  const fwd = req.headers.get("x-forwarded-for");
+  if (fwd) return fwd.split(",")[0].trim() || "unknown";
+  return req.headers.get("x-real-ip")?.trim() || "local";
+}
+
+function isLoginRateLimited(key: string): boolean {
+  const now = Date.now();
+  const timestamps = (loginAttempts.get(key) || []).filter(
+    (t) => now - t < LOGIN_RATE_LIMIT_WINDOW_MS
+  );
+  if (timestamps.length >= LOGIN_RATE_LIMIT_MAX) {
+    loginAttempts.set(key, timestamps);
+    return true;
+  }
+  loginAttempts.set(key, timestamps);
+  return false;
+}
+
+function recordFailedLoginAttempt(key: string): void {
+  const now = Date.now();
+  const timestamps = (loginAttempts.get(key) || []).filter(
+    (t) => now - t < LOGIN_RATE_LIMIT_WINDOW_MS
+  );
+  timestamps.push(now);
+  loginAttempts.set(key, timestamps);
+}
+
+function clearLoginAttempts(key: string): void {
+  loginAttempts.delete(key);
+}
 
 function getDepartment(role: string): string {
   switch (role) {
@@ -169,6 +207,16 @@ export async function POST(req: Request) {
       );
     }
 
+    const clientIp = getClientIp(req);
+    const emailRateKey = `${clientIp}:${cleanEmail}`;
+    const ipRateKey = `ip:${clientIp}`;
+    if (isLoginRateLimited(emailRateKey) || isLoginRateLimited(ipRateKey)) {
+      return NextResponse.json(
+        { ok: false, error: "Too many login attempts. Please wait 60 seconds and try again." },
+        { status: 429, headers: { "Retry-After": "60" } }
+      );
+    }
+
     // 1. Primary Authentication: Authenticate against Supabase Auth (Shared Org Identity)
     let authenticatedUserId: string | null = null;
 
@@ -192,18 +240,9 @@ export async function POST(req: Request) {
       .maybeSingle();
 
     if (!resolvedProfile) {
+      recordFailedLoginAttempt(emailRateKey);
+      recordFailedLoginAttempt(ipRateKey);
       return NextResponse.json({ ok: false, error: "Invalid email or password." }, { status: 401 });
-    }
-
-    if (resolvedProfile.active === false || resolvedProfile.deleted_at) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            "Your account has been deactivated or archived. Contact an administrator.",
-        },
-        { status: 403 }
-      );
     }
 
     // 3. Fallback: If Supabase Auth didn't match, check local password override in Task Manager metadata
@@ -217,10 +256,19 @@ export async function POST(req: Request) {
       if (meta.passwordHash && verifyPasswordHash(cleanPassword, meta.passwordHash)) {
         authenticatedUserId = resolvedProfile.id;
       } else {
+        recordFailedLoginAttempt(emailRateKey);
+        recordFailedLoginAttempt(ipRateKey);
         return NextResponse.json({ ok: false, error: "Invalid email or password." }, { status: 401 });
       }
     }
 
+    if (resolvedProfile.active === false || resolvedProfile.deleted_at) {
+      recordFailedLoginAttempt(emailRateKey);
+      recordFailedLoginAttempt(ipRateKey);
+      return NextResponse.json({ ok: false, error: "Invalid email or password." }, { status: 401 });
+    }
+
+    clearLoginAttempts(emailRateKey);
     const user = formatProfileToUser(resolvedProfile);
     const res = NextResponse.json({ ok: true, user }, { headers: { "Cache-Control": "no-store" } });
     attachSessionCookie(req, res, user);
@@ -235,6 +283,10 @@ export async function POST(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  const token = extractSessionCookie(req);
+  if (token) {
+    revokeSessionToken(token);
+  }
   const res = NextResponse.json({ ok: true });
   res.cookies.set({
     name: SESSION_COOKIE_NAME,

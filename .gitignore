@@ -8,3 +8,5 @@ public/uploads
 
 # Workspace settings are runtime data shared by signed-in users.
 data/workspace-settings.json*
+data/local-db.backup.json
+data/*.tmp

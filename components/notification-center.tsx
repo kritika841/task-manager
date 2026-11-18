@@ -159,7 +159,7 @@ export function NotificationCenter() {
             handleNotificationClick(activeToast);
             setActiveToast(null);
           }}
-          className="fixed top-16 right-4 z-50 max-w-sm rounded-xl border border-primary/30 bg-card p-3.5 shadow-float backdrop-blur-md animate-in slide-in-from-top-3 duration-200 cursor-pointer hover:border-primary transition"
+          className="fixed bottom-5 right-5 z-50 max-w-sm rounded-xl border border-primary/30 bg-card p-3.5 shadow-float backdrop-blur-md animate-in slide-in-from-bottom-3 duration-200 cursor-pointer hover:border-primary transition"
         >
           <div className="flex items-start gap-2.5">
             <div className="mt-0.5 shrink-0">{getNotificationIcon(activeToast.title)}</div>

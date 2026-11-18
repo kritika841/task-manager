@@ -127,3 +127,33 @@ export function getUserColor(empCode: string, customColor?: string): string {
   return DEFAULT_USER_COLORS[empCode.toUpperCase()] || "#64748b";
 }
 
+/**
+ * Validates that a URL uses an allowed web or local upload scheme, blocking javascript:/data:/vbscript:.
+ */
+export function isSafeUrl(url?: string | null): boolean {
+  if (!url || typeof url !== "string") return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith("/uploads/")) return !trimmed.startsWith("//");
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+export function sanitizeUrl(url?: string | null): string {
+  if (!url || typeof url !== "string") return "#";
+  return isSafeUrl(url) ? url.trim() : "#";
+}
+
+/**
+ * Neutralizes CSV spreadsheet formula injection (=, +, -, @, tab, CR) and quotes cell values per RFC 4180.
+ */
+export function sanitizeCsvCell(value: unknown): string {
+  const raw = value === null || value === undefined ? "" : String(value);
+  const safe = /^[=+\-@\t\r]/.test(raw) ? `'${raw}` : raw;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+

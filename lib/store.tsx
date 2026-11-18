@@ -35,6 +35,7 @@ import {
   AttendanceRecord,
 } from "./types";
 import { dateInTargetTimeZone, isCanonicalAdflowTask } from "./supabase";
+import { sanitizeCsvCell } from "./utils";
 import {
   playNotificationSound,
   isSoundMuted,
@@ -868,8 +869,15 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Fetch Webhook Configuration
+  const currentRole = useMemo(() => {
+    return users.find((u) => u.id === currentUserId)?.role || "member";
+  }, [users, currentUserId]);
+  const hasReviewAccess =
+    currentRole === "admin" || currentRole === "developer" || currentRole === "manager";
+
+  // Fetch Webhook Configuration (reviewers/admins only — prevents 403 noise for creators/members)
   const fetchWebhookConfig = useCallback(async () => {
+    if (!hasReviewAccess) return;
     try {
       const res = await fetch("/api/webhooks", { cache: "no-store" });
       if (!res.ok) return;
@@ -880,7 +888,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     } catch (err) {
       console.error("fetchWebhookConfig error:", err);
     }
-  }, []);
+  }, [hasReviewAccess]);
 
   // Fetch AdFlow Stage Mapping Template
   const fetchAdflowStageMapping = useCallback(async () => {
@@ -944,10 +952,13 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     fetchTasks(true);
     fetchDelegatorRules();
     fetchTemplates();
-    fetchWebhookConfig();
+    if (hasReviewAccess) {
+      fetchWebhookConfig();
+    }
     fetchAdflowStageMapping();
   }, [
     isAuthenticated,
+    hasReviewAccess,
     fetchTasks,
     fetchDelegatorRules,
     fetchTemplates,
@@ -1315,6 +1326,10 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
           setIsCreateModalOpen(false);
           return;
         }
+        if (isRoleTemplateModalOpen) {
+          setIsRoleTemplateModalOpen(false);
+          return;
+        }
         if (isAutoDelegatorOpen) {
           setIsAutoDelegatorOpen(false);
           return;
@@ -1357,6 +1372,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   }, [
     isAdmin,
     isSettingsModalOpen,
+    isRoleTemplateModalOpen,
     isCommandPaletteOpen,
     isShortcutsModalOpen,
     isCreateModalOpen,
@@ -2671,22 +2687,24 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       const assignee = users.find((u) => u.id === t.assigneeId);
       return [
         t.taskNumber,
-        `"${(t.title || "").replace(/"/g, '""')}"`,
+        t.title || "",
         t.status,
         t.priority,
-        `"${assignee?.name || "Unassigned"}"`,
-        `"${t.project || "Operations"}"`,
+        assignee?.name || "Unassigned",
+        t.project || "Operations",
         t.targetQuantity || 1,
         t.completedQuantity || 0,
         t.dueDate,
-        `"${t.deliverableUrl || ""}"`,
+        t.deliverableUrl || "",
         t.actualHours || 0,
         t.createdAt,
-      ].join(",");
+      ]
+        .map((cell) => sanitizeCsvCell(cell))
+        .join(",");
     });
 
     const csvContent =
-      "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
+      "data:text/csv;charset=utf-8," + [headers.map((h) => sanitizeCsvCell(h)).join(","), ...rows].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);

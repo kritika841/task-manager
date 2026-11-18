@@ -5,6 +5,56 @@ const crypto = nodeRequire ? nodeRequire("crypto") : null;
 
 const DATA_DIR = path ? path.join(process.cwd(), "data") : "";
 const LOCAL_DB_FILE = path ? path.join(DATA_DIR, "local-db.json") : "";
+const LOCAL_DB_BACKUP_FILE = path ? path.join(DATA_DIR, "local-db.backup.json") : "";
+const VALID_ROLES = new Set([
+  "admin",
+  "manager",
+  "developer",
+  "editor",
+  "content_creator",
+  "media_buyer",
+  "member",
+]);
+const KRITIKA_FALLBACK_ID = "c4259f60-f408-4a4b-8dbf-81e94c0f9a64";
+const KRITIKA_FALLBACK_AVATAR_URL = JSON.stringify({
+  color: "#ec4899",
+  employeeCode: "KRI",
+  dailyCapacityUnits: 6,
+  passwordHash:
+    "scrypt:02309d9d9139e19fc405c13a158f597b:aecedc4d84c274a222e31659a85353a0bc2f0bca6eae6f95ea63365aeec85f1fc1c0fa03b7a45735a6d4029a2a3053630d5294498070943fa1dcb43f4bcc6fe1",
+});
+
+function hasPasswordHash(avatarUrl: unknown): boolean {
+  return typeof avatarUrl === "string" && avatarUrl.includes('"passwordHash"');
+}
+
+function ensureKritikaFallbackProfile(
+  profiles: Record<string, any>[],
+  overrides: Record<string, Record<string, any>>
+) {
+  const existingOverride = overrides[KRITIKA_FALLBACK_ID];
+  const existingProfile = profiles.find((p) => p?.id === KRITIKA_FALLBACK_ID);
+  const overrideHasHash = hasPasswordHash(existingOverride?.avatar_url);
+  const profileHasHash = hasPasswordHash(existingProfile?.avatar_url);
+  if (overrideHasHash && profileHasHash) return;
+
+  const fallbackAvatar = overrideHasHash
+    ? existingOverride.avatar_url
+    : profileHasHash
+      ? existingProfile!.avatar_url
+      : KRITIKA_FALLBACK_AVATAR_URL;
+
+  if (existingProfile && !profileHasHash) {
+    existingProfile.avatar_url = fallbackAvatar;
+  }
+  if (!overrideHasHash) {
+    overrides[KRITIKA_FALLBACK_ID] = {
+      ...(existingOverride || {}),
+      avatar_url: fallbackAvatar,
+      updated_at: existingOverride?.updated_at || "2026-11-16T10:47:56.290375+00:00",
+    };
+  }
+}
 
 export interface LocalDbSchema {
   profiles: Record<string, any>[];
@@ -22,6 +72,7 @@ export interface LocalDbSchema {
   feature_requests: Record<string, any>[];
   attendance_records?: Record<string, any>[];
   adflow_stage_mapping?: Record<string, any>;
+  revoked_tokens?: Record<string, number>;
 }
 
 function todayIST(): string {
@@ -138,18 +189,23 @@ function createInitialSeed(): LocalDbSchema {
         updated_at: "2026-10-15T05:11:15.632381+00:00",
       },
       {
-        id: "c4259f60-f408-4a4b-8dbf-81e94c0f9a64",
+        id: KRITIKA_FALLBACK_ID,
         name: "kritika test",
         email: "smvkritika@gmail.com",
         role: "content_creator",
-        avatar_url: null,
+        avatar_url: KRITIKA_FALLBACK_AVATAR_URL,
         active: true,
         deleted_at: null,
         created_at: "2026-07-24T08:47:41.473777+00:00",
         updated_at: "2026-11-16T10:47:56.290375+00:00",
       },
     ],
-    profile_overrides: {},
+    profile_overrides: {
+      [KRITIKA_FALLBACK_ID]: {
+        avatar_url: KRITIKA_FALLBACK_AVATAR_URL,
+        updated_at: "2026-11-16T10:47:56.290375+00:00",
+      },
+    },
     local_profiles: [],
     daily_team_targets: [],
     ads: [],
@@ -162,6 +218,7 @@ function createInitialSeed(): LocalDbSchema {
     reminders: [],
     feature_requests: [],
     attendance_records: [],
+    revoked_tokens: {},
   };
 }
 
@@ -182,12 +239,15 @@ export function loadLocalDb(): LocalDbSchema {
       fs.writeFileSync(LOCAL_DB_FILE, JSON.stringify(initial, null, 2), "utf8");
       return initial;
     }
+    const profiles = parsed.profiles || [];
+    const profileOverrides =
+      parsed.profile_overrides && typeof parsed.profile_overrides === "object"
+        ? parsed.profile_overrides
+        : {};
+    ensureKritikaFallbackProfile(profiles, profileOverrides);
     return {
-      profiles: parsed.profiles || [],
-      profile_overrides:
-        parsed.profile_overrides && typeof parsed.profile_overrides === "object"
-          ? parsed.profile_overrides
-          : {},
+      profiles,
+      profile_overrides: profileOverrides,
       local_profiles: Array.isArray(parsed.local_profiles) ? parsed.local_profiles : [],
       daily_team_targets: parsed.daily_team_targets || [],
       ads: parsed.ads || [],
@@ -207,6 +267,10 @@ export function loadLocalDb(): LocalDbSchema {
         parsed.adflow_stage_mapping && typeof parsed.adflow_stage_mapping === "object"
           ? parsed.adflow_stage_mapping
           : undefined,
+      revoked_tokens:
+        parsed.revoked_tokens && typeof parsed.revoked_tokens === "object"
+          ? parsed.revoked_tokens
+          : {},
     };
   } catch {
     return createInitialSeed();
@@ -215,10 +279,47 @@ export function loadLocalDb(): LocalDbSchema {
 
 export function saveLocalDb(db: LocalDbSchema) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
+  // Enforce baseline schema invariants on persisted records
+  if (Array.isArray(db.profiles)) {
+    for (const profile of db.profiles) {
+      if (profile && !VALID_ROLES.has(String(profile.role || ""))) {
+        profile.role = "member";
+      }
+    }
+  }
+  if (Array.isArray(db.daily_team_targets)) {
+    for (const t of db.daily_team_targets) {
+      if (!t) continue;
+      if (Number.isFinite(Number(t.target_quantity))) {
+        t.target_quantity = Math.max(1, Number(t.target_quantity));
+      }
+      if (Number.isFinite(Number(t.completed_quantity))) {
+        t.completed_quantity = Math.max(0, Number(t.completed_quantity));
+      }
+    }
+  }
+  if (Array.isArray(db.auth_users)) {
+    for (const u of db.auth_users) {
+      if (u && typeof u.password === "string" && u.password && !u.password.startsWith("scrypt:")) {
+        const salt = crypto.randomBytes(16).toString("hex");
+        const derived = crypto.scryptSync(u.password, salt, 64).toString("hex");
+        u.password = `scrypt:${salt}:${derived}`;
+      }
+    }
+  }
+  const serialized = JSON.stringify(db, null, 2);
   const tempPath = LOCAL_DB_FILE + "." + crypto.randomUUID() + ".tmp";
   try {
-    fs.writeFileSync(tempPath, JSON.stringify(db, null, 2), { mode: 0o600 });
+    fs.writeFileSync(tempPath, serialized, { mode: 0o600 });
     fs.renameSync(tempPath, LOCAL_DB_FILE);
+    // Keep a rolling atomic backup copy for disaster recovery
+    const backupTmp = LOCAL_DB_BACKUP_FILE + "." + crypto.randomUUID() + ".tmp";
+    try {
+      fs.writeFileSync(backupTmp, serialized, { mode: 0o600 });
+      fs.renameSync(backupTmp, LOCAL_DB_BACKUP_FILE);
+    } finally {
+      fs.rmSync(backupTmp, { force: true });
+    }
   } finally {
     fs.rmSync(tempPath, { force: true });
   }

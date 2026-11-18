@@ -7,6 +7,16 @@ const RESEND_FROM_EMAIL =
 
 export const resend = new Resend(RESEND_API_KEY);
 
+function escapeHtml(value: unknown): string {
+  const str = value === null || value === undefined ? "" : String(value);
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 /**
  * Dynamically resolves the Developer email (`to`) and CC email (`cc`)
  * directly from the workspace `profiles` table (synced from adflow.satmi.in)
@@ -170,39 +180,39 @@ export async function sendReminderEmail(params: {
         ${badgeText}
       </div>
       <h2 style="margin: 0 0 12px; font-size: 18px; font-weight: 700; color: #09090b;">
-        ${params.title}
+        ${escapeHtml(params.title)}
       </h2>
       ${
         params.note
-          ? `<p style="margin: 0 0 16px; padding: 12px; border-radius: 8px; background: #f4f4f5; font-size: 14px; line-height: 1.5; color: #3f3f46;">${params.note}</p>`
+          ? `<p style="margin: 0 0 16px; padding: 12px; border-radius: 8px; background: #f4f4f5; font-size: 14px; line-height: 1.5; color: #3f3f46;">${escapeHtml(params.note)}</p>`
           : ""
       }
       <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #52525b;">
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">From:</td>
-          <td style="padding: 6px 0;">${RESEND_FROM_EMAIL}</td>
+          <td style="padding: 6px 0;">${escapeHtml(RESEND_FROM_EMAIL)}</td>
         </tr>
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">To:</td>
-          <td style="padding: 6px 0;">${params.targetEmails.join(", ")}</td>
+          <td style="padding: 6px 0;">${escapeHtml(params.targetEmails.join(", "))}</td>
         </tr>
         ${
           params.ccEmails && params.ccEmails.length > 0
-            ? `<tr><td style="padding: 6px 0; font-weight: 600;">CC:</td><td style="padding: 6px 0;">${params.ccEmails.join(", ")}</td></tr>`
+            ? `<tr><td style="padding: 6px 0; font-weight: 600;">CC:</td><td style="padding: 6px 0;">${escapeHtml(params.ccEmails.join(", "))}</td></tr>`
             : ""
         }
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">Scheduled For:</td>
-          <td style="padding: 6px 0;">${formattedDate} (IST)</td>
+          <td style="padding: 6px 0;">${escapeHtml(formattedDate)} (IST)</td>
         </tr>
         ${
           params.targetUserName
-            ? `<tr><td style="padding: 6px 0; font-weight: 600;">Assigned To:</td><td style="padding: 6px 0;">${params.targetUserName}</td></tr>`
+            ? `<tr><td style="padding: 6px 0; font-weight: 600;">Assigned To:</td><td style="padding: 6px 0;">${escapeHtml(params.targetUserName)}</td></tr>`
             : ""
         }
         ${
           params.createdByName
-            ? `<tr><td style="padding: 6px 0; font-weight: 600;">Created By:</td><td style="padding: 6px 0;">${params.createdByName}</td></tr>`
+            ? `<tr><td style="padding: 6px 0; font-weight: 600;">Created By:</td><td style="padding: 6px 0;">${escapeHtml(params.createdByName)}</td></tr>`
             : ""
         }
       </table>
@@ -249,34 +259,34 @@ export async function sendFeedbackEmail(params: {
         ${typeLabel} • ${(params.priority || "medium").toUpperCase()} PRIORITY
       </div>
       <h2 style="margin: 0 0 12px; font-size: 18px; font-weight: 700; color: #09090b;">
-        ${params.title}
+        ${escapeHtml(params.title)}
       </h2>
-      <div style="margin: 0 0 16px; padding: 14px; border-radius: 8px; background: #f4f4f5; font-size: 14px; line-height: 1.6; color: #27272a; white-space: pre-wrap;">${params.details || params.title}</div>
+      <div style="margin: 0 0 16px; padding: 14px; border-radius: 8px; background: #f4f4f5; font-size: 14px; line-height: 1.6; color: #27272a; white-space: pre-wrap;">${escapeHtml(params.details || params.title)}</div>
       <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #52525b;">
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">From:</td>
-          <td style="padding: 6px 0;">${RESEND_FROM_EMAIL}</td>
+          <td style="padding: 6px 0;">${escapeHtml(RESEND_FROM_EMAIL)}</td>
         </tr>
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">To (Developer):</td>
-          <td style="padding: 6px 0;">${developerEmails.join(", ")}</td>
+          <td style="padding: 6px 0;">${escapeHtml(developerEmails.join(", "))}</td>
         </tr>
         ${
           ccEmails.length > 0
-            ? `<tr><td style="padding: 6px 0; font-weight: 600;">CC:</td><td style="padding: 6px 0;">${ccEmails.join(", ")}</td></tr>`
+            ? `<tr><td style="padding: 6px 0; font-weight: 600;">CC:</td><td style="padding: 6px 0;">${escapeHtml(ccEmails.join(", "))}</td></tr>`
             : ""
         }
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">Submitted By:</td>
-          <td style="padding: 6px 0;">${params.authorName} (${params.authorRole})</td>
+          <td style="padding: 6px 0;">${escapeHtml(params.authorName)} (${escapeHtml(params.authorRole)})</td>
         </tr>
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">Category:</td>
-          <td style="padding: 6px 0;">${typeLabel}</td>
+          <td style="padding: 6px 0;">${escapeHtml(typeLabel)}</td>
         </tr>
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">Priority:</td>
-          <td style="padding: 6px 0; text-transform: capitalize;">${params.priority || "medium"}</td>
+          <td style="padding: 6px 0; text-transform: capitalize;">${escapeHtml(params.priority || "medium")}</td>
         </tr>
       </table>
       <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 18px 0 12px;" />
@@ -314,23 +324,23 @@ export async function sendCheckoutReminderEmail(params: {
         ATTENDANCE CHECKOUT REMINDER • 8:00 PM ALERT
       </div>
       <h2 style="margin: 0 0 12px; font-size: 18px; font-weight: 700; color: #09090b;">
-        Hi ${params.userName}, you haven't checked out yet today!
+        Hi ${escapeHtml(params.userName)}, you haven't checked out yet today!
       </h2>
       <p style="margin: 0 0 16px; padding: 12px; border-radius: 8px; background: #f4f4f5; font-size: 14px; line-height: 1.5; color: #3f3f46;">
-        Our attendance system shows that you checked in today (${params.date}) at <strong>${formattedCheckIn} (IST)</strong>, but have not checked out as of 8:00 PM. Please open the Satmi Task Manager dashboard and click the <strong>Check Out</strong> button at the top of your dashboard.
+        Our attendance system shows that you checked in today (${escapeHtml(params.date)}) at <strong>${escapeHtml(formattedCheckIn)} (IST)</strong>, but have not checked out as of 8:00 PM. Please open the Satmi Task Manager dashboard and click the <strong>Check Out</strong> button at the top of your dashboard.
       </p>
       <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #52525b;">
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">Employee:</td>
-          <td style="padding: 6px 0;">${params.userName} (${params.userEmail})</td>
+          <td style="padding: 6px 0;">${escapeHtml(params.userName)} (${escapeHtml(params.userEmail)})</td>
         </tr>
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">Date:</td>
-          <td style="padding: 6px 0;">${params.date}</td>
+          <td style="padding: 6px 0;">${escapeHtml(params.date)}</td>
         </tr>
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">Checked In At:</td>
-          <td style="padding: 6px 0;">${formattedCheckIn} (IST)</td>
+          <td style="padding: 6px 0;">${escapeHtml(formattedCheckIn)} (IST)</td>
         </tr>
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">Status:</td>

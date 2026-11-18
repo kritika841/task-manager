@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo } from "react";
-import { cn } from "@/lib/utils";
+import { cn, isSafeUrl } from "@/lib/utils";
 
 interface MarkdownProps {
   content: string;
@@ -171,12 +171,19 @@ function formatInline(text: string): React.ReactNode {
     }
     const linkMatch = part.match(/\[([^\]]+)\]\(([^)]+)\)/);
     if (linkMatch) {
+      if (!isSafeUrl(linkMatch[2])) {
+        return (
+          <span key={idx} className="text-muted-foreground font-medium">
+            {linkMatch[1]}
+          </span>
+        );
+      }
       return (
         <a
           key={idx}
-          href={linkMatch[2]}
+          href={linkMatch[2].trim()}
           target="_blank"
-          rel="noreferrer"
+          rel="noopener noreferrer"
           className="text-primary hover:underline font-medium inline-flex items-center gap-0.5"
         >
           {linkMatch[1]}

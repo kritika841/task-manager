@@ -29,8 +29,49 @@ import {
   StageHistoryEntry,
 } from "@/lib/types";
 import { getAllCommentsMap } from "@/lib/comments-store";
-import { getEmployeeCode, getUserColor } from "@/lib/utils";
+import { getEmployeeCode, getUserColor, isSafeUrl } from "@/lib/utils";
 import { canReviewTasks, resolveRequestActor } from "@/lib/auth-server";
+
+const recentTaskCreations = new Map<string, number>();
+const activeTaskPatchLocks = new Set<string>();
+const TASK_DEDUPE_WINDOW_MS = 3000;
+
+function validateTaskPayloadFields(body: Record<string, any>): string | null {
+  if (body.title !== undefined) {
+    if (typeof body.title !== "string" || !body.title.trim()) {
+      return "Task title is required.";
+    }
+    if (body.title.trim().length > 300) {
+      return "Task title cannot exceed 300 characters.";
+    }
+    if (/<script\b/i.test(body.title)) {
+      return "Script tags are not permitted in task titles.";
+    }
+  }
+  if (body.description !== undefined && body.description !== null) {
+    if (typeof body.description !== "string") {
+      return "Task description must be a string.";
+    }
+    if (body.description.length > 5000) {
+      return "Task description cannot exceed 5000 characters.";
+    }
+    if (/<script\b/i.test(body.description)) {
+      return "Script tags are not permitted in task descriptions.";
+    }
+  }
+  if (body.targetQuantity !== undefined) {
+    const qty = Number(body.targetQuantity);
+    if (!Number.isFinite(qty) || qty < 1 || qty > 100) {
+      return "targetQuantity must be a number between 1 and 100.";
+    }
+  }
+  if (typeof body.deliverableUrl === "string" && body.deliverableUrl.trim()) {
+    if (!isSafeUrl(body.deliverableUrl)) {
+      return "deliverableUrl must use http://, https://, or a /uploads/ path.";
+    }
+  }
+  return null;
+}
 import {
   canAccessStandaloneCreative,
   canAccessTask,
@@ -835,17 +876,40 @@ export async function GET(req: Request) {
     });
 
     const allTasks = [...adCreativeTasks, ...targetTasks];
-    const tasks = allTasks.filter((task) =>
+    const filteredTasks = allTasks.filter((task) =>
       (includeArchived || !task.isArchived) &&
       canAccessTask(actor, task.assigneeId, task.adCreatorId, task.adEditorId)
     );
+
+    const pageParam = url.searchParams.get("page");
+    const limitParam = url.searchParams.get("limit");
+    const parsedLimit = limitParam ? Math.max(1, Math.min(500, Number(limitParam) || 50)) : 0;
+    const parsedPage = pageParam ? Math.max(1, Number(pageParam) || 1) : 1;
+    const totalCount = filteredTasks.length;
+    const tasks =
+      parsedLimit > 0
+        ? filteredTasks.slice((parsedPage - 1) * parsedLimit, parsedPage * parsedLimit)
+        : filteredTasks;
+
     const visibleTaskIds = new Set(tasks.map((task) => task.id));
     const visibleAuditLogs = canReviewTasks(actor.role)
       ? auditLogs
       : auditLogs.filter((entry) => visibleTaskIds.has(entry.targetId));
 
     return NextResponse.json(
-      { tasks, users, auditLogs: visibleAuditLogs, today },
+      {
+        tasks,
+        users,
+        auditLogs: visibleAuditLogs,
+        today,
+        pagination: {
+          page: parsedPage,
+          limit: parsedLimit || totalCount,
+          totalCount,
+          totalPages: parsedLimit > 0 ? Math.max(1, Math.ceil(totalCount / parsedLimit)) : 1,
+          hasMore: parsedLimit > 0 ? parsedPage * parsedLimit < totalCount : false,
+        },
+      },
       { headers: { "Cache-Control": "private, no-store" } }
     );
   } catch (error: any) {
@@ -879,15 +943,54 @@ export async function POST(req: Request) {
 
     const { actor } = await resolveRequestActor(req);
     if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+
+    if (typeof body.title !== "string" || !body.title.trim()) {
+      return NextResponse.json({ error: "Task title is required." }, { status: 400 });
+    }
+    const validationError = validateTaskPayloadFields(body);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+
     const userId = body.assigneeId;
-    const taskName = (body.title || "Daily Task").trim();
+    const taskName = body.title.trim();
     const targetDate = body.dueDate || today;
-    const targetQuantity = Math.max(1, Number(body.targetQuantity) || 1);
+    const targetQuantity = Number(body.targetQuantity ?? 1);
     const assignedBy = actor.id;
 
     if (!userId) {
       return NextResponse.json({ error: "Assignee is required" }, { status: 400 });
     }
+
+    if (!canReviewTasks(actor.role) && userId !== actor.id) {
+      return NextResponse.json(
+        { error: "Forbidden: Only Managers, Admins, or Developers can assign tasks to other team members." },
+        { status: 403 }
+      );
+    }
+
+    if (!canReviewTasks(actor.role) && body.status === "completed") {
+      return NextResponse.json(
+        { error: "Forbidden: Only Managers, Admins, or Developers can create completed tasks." },
+        { status: 403 }
+      );
+    }
+
+    const dedupeKey = `${actor.id}:${userId}:${taskName.toLowerCase()}:${targetDate}:${targetQuantity}:${body.idempotencyKey || ""}`;
+    const nowMs = Date.now();
+    for (const [k, ts] of recentTaskCreations.entries()) {
+      if (nowMs - ts > TASK_DEDUPE_WINDOW_MS) {
+        recentTaskCreations.delete(k);
+      }
+    }
+    const prevSubmitAt = recentTaskCreations.get(dedupeKey);
+    if (prevSubmitAt && nowMs - prevSubmitAt < TASK_DEDUPE_WINDOW_MS) {
+      return NextResponse.json(
+        { error: "Duplicate task submission detected. Please wait before submitting again." },
+        { status: 409 }
+      );
+    }
+    recentTaskCreations.set(dedupeKey, nowMs);
 
     const actorName = actor.name;
     const nowIso = new Date().toISOString();
@@ -1089,6 +1192,7 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  let acquiredLockId: string | null = null;
   try {
     const body = await req.json();
     const { id, workflowAction } = body;
@@ -1100,6 +1204,20 @@ export async function PATCH(req: Request) {
     if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
     const { id: verifiedActorId, name: actorName } = actor;
 
+    const validationError = validateTaskPayloadFields(body);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+
+    if (activeTaskPatchLocks.has(id)) {
+      return NextResponse.json(
+        { error: "Conflict: This task is currently being modified by another request." },
+        { status: 409 }
+      );
+    }
+    activeTaskPatchLocks.add(id);
+    acquiredLockId = id;
+
     // Resolve the association from server records before applying a workflow change.
     const standaloneAdId = id.startsWith("ad-") ? id.slice(3) : undefined;
     let existing = standaloneAdId
@@ -1107,6 +1225,16 @@ export async function PATCH(req: Request) {
       : (await supabaseAdmin.from("daily_team_targets").select("*").eq("id", id).maybeSingle()).data;
     if (!standaloneAdId && !existing) {
       return NextResponse.json({ error: "Target not found" }, { status: 404 });
+    }
+    if (
+      body.expectedUpdatedAt &&
+      existing?.updated_at &&
+      String(body.expectedUpdatedAt) !== String(existing.updated_at)
+    ) {
+      return NextResponse.json(
+        { error: "Conflict: Task has been updated by someone else. Please refresh." },
+        { status: 409 }
+      );
     }
     let currentNotesMeta = parseNotes(existing?.notes);
     const adId = standaloneAdId || currentNotesMeta.adId;
@@ -1124,6 +1252,28 @@ export async function PATCH(req: Request) {
       : canAccessTask(actor, existing?.user_id, linkedAdRecord?.creator_id, linkedAdRecord?.editor_id);
     if (!hasTaskAccess) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    if (!canReviewTasks(actor.role)) {
+      const currentTargetOwner = existing?.user_id || linkedAdRecord?.editor_id || linkedAdRecord?.creator_id;
+      if (body.assigneeId !== undefined && body.assigneeId !== currentTargetOwner) {
+        return NextResponse.json(
+          { error: "Forbidden: Only Managers, Admins, or Developers can reassign tasks." },
+          { status: 403 }
+        );
+      }
+      if (
+        body.status === "completed" ||
+        String(body.productionStage || "").toLowerCase() === "approved" ||
+        (existing &&
+          body.completedQuantity !== undefined &&
+          Number(body.completedQuantity) >= Number(existing.target_quantity || 1))
+      ) {
+        return NextResponse.json(
+          { error: "Forbidden: Only Managers, Admins, or Developers can mark tasks completed. Move to In Review instead." },
+          { status: 403 }
+        );
+      }
     }
     const creativeName = currentNotesMeta.creativeName;
     const linked = Boolean(adId || creativeName);
@@ -1147,11 +1297,21 @@ export async function PATCH(req: Request) {
       }
 
       switch (workflowAction) {
-        case "approve":
-          body.status = "completed";
-          body.productionStage = "approved";
+        case "approve": {
+          const isCreatorReviewStage =
+            linked &&
+            currentNotesMeta.productionStage === "creator_review" &&
+            !body.finalApprove;
+          if (isCreatorReviewStage) {
+            body.status = "in_review";
+            body.productionStage = "final_review";
+          } else {
+            body.status = "completed";
+            body.productionStage = "approved";
+          }
           body.isRevisionRequested = false;
           break;
+        }
         case "request_changes":
           if (typeof body.revisionReason !== "string" || !body.revisionReason.trim()) {
             return NextResponse.json({ error: "A revision reason is required." }, { status: 400 });
@@ -1698,6 +1858,10 @@ export async function PATCH(req: Request) {
   } catch (error: any) {
     console.error("PATCH /api/tasks error:", error);
     return NextResponse.json({ error: error.message || "Failed to update task" }, { status: 500 });
+  } finally {
+    if (acquiredLockId) {
+      activeTaskPatchLocks.delete(acquiredLockId);
+    }
   }
 }
 

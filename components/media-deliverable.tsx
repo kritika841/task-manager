@@ -20,7 +20,7 @@ import {
 import { DeliverableAsset } from "@/lib/types";
 import { Button } from "./ui/button";
 import { Input } from "./ui/field";
-import { cn } from "@/lib/utils";
+import { cn, sanitizeUrl } from "@/lib/utils";
 
 interface MediaDeliverableProps {
   taskId: string;
@@ -186,9 +186,9 @@ export function MediaDeliverable({
                 </span>
               )}
               <a
-                href={deliverableUrl}
+                href={sanitizeUrl(deliverableUrl)}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="text-primary text-xs hover:underline flex items-center gap-1 font-medium"
               >
                 <span>{isDrive ? "Open in Drive" : "Open Asset"}</span>
@@ -230,9 +230,9 @@ export function MediaDeliverable({
                 <span className="truncate">{deliverableUrl}</span>
               </div>
               <a
-                href={deliverableUrl}
+                href={sanitizeUrl(deliverableUrl)}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="text-primary hover:underline font-semibold flex items-center gap-1 shrink-0 ml-2"
               >
                 <span>Launch Link</span>

@@ -152,9 +152,9 @@ function TaskDashboardContent() {
       ) : (
         <>
           {/* Clean View Tabs & Action Toolbar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border/80 pb-2.5 gap-2.5">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-border/80 pb-2.5 gap-2.5">
             {/* Left: View Tabs */}
-            <div className="flex items-center gap-1 overflow-x-auto scrollbar-none text-xs">
+            <div className="flex items-center gap-1 flex-wrap text-xs">
               <button
                 type="button"
                 onClick={() => setViewMode("board")}

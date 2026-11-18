@@ -306,6 +306,18 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
     setIsRoleTemplateModalOpen(false);
   };
 
+  useEffect(() => {
+    if (!effectiveIsOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (onClose) onClose();
+        setIsRoleTemplateModalOpen(false);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [effectiveIsOpen, onClose, setIsRoleTemplateModalOpen]);
+
   if (!effectiveIsOpen || !isAdmin) return null;
 
   return (

@@ -26,12 +26,9 @@ export async function POST(req: Request) {
     const body = await req.json();
     const auth = await resolveRequestActor(req);
     if (!auth.actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-    if (
-      auth.actor.role !== "admin" &&
-      auth.actor.role !== "manager"
-    ) {
+    if (!canReviewTasks(auth.actor.role)) {
       return NextResponse.json(
-        { ok: false, error: "Forbidden: Only Managers or Admins can configure webhooks." },
+        { ok: false, error: "Forbidden: Only Managers, Admins, or Developers can configure webhooks." },
         { status: 403 }
       );
     }

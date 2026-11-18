@@ -34,6 +34,9 @@ jobs:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_FROM_EMAIL: ${{ secrets.RESEND_FROM_EMAIL }}
 
+      - name: Test
+        run: npm test
+
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
@@ -172,6 +175,13 @@ jobs:
           server {
               server_name tasks.satmi.in;
               client_max_body_size 25m;
+
+              add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+              add_header X-Frame-Options "DENY" always;
+              add_header X-Content-Type-Options "nosniff" always;
+              add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+              add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+              add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' https: data: blob:; media-src 'self' https: blob:; connect-src 'self' https://ads.satmi.in wss://ads.satmi.in; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self';" always;
 
               location / {
                   proxy_pass http://127.0.0.1:4000;

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   X,
   Settings,
@@ -22,6 +22,10 @@ import {
   Zap,
   RotateCcw,
   Sparkles,
+  Webhook,
+  Eye,
+  EyeOff,
+  Send,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
 import { ViewMode, Role, TaskStatus, type User } from "@/lib/types";
@@ -58,13 +62,31 @@ export function SettingsModal() {
     adflowStageMapping,
     saveAdflowStageMapping,
     resetAdflowStageMapping,
+    webhookConfig,
+    saveWebhookSettings,
+    testWebhookEndpoint,
   } = useTasks();
 
-  const [activeTab, setActiveTab] = useState<"general" | "adflow" | "team">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "adflow" | "team" | "webhooks">("general");
   const [isSavingWorkspace, setIsSavingWorkspace] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [isSavingMapping, setIsSavingMapping] = useState(false);
   const [mappingError, setMappingError] = useState<string | null>(null);
+  const [whEnabled, setWhEnabled] = useState(webhookConfig.enabled);
+  const [whUrl, setWhUrl] = useState(webhookConfig.url);
+  const [whSecret, setWhSecret] = useState(webhookConfig.secret);
+  const [whEvents, setWhEvents] = useState<string[]>(webhookConfig.events || []);
+  const [showWhSecret, setShowWhSecret] = useState(false);
+  const [isSavingWebhook, setIsSavingWebhook] = useState(false);
+  const [isTestingWebhook, setIsTestingWebhook] = useState(false);
+  const [webhookStatusMsg, setWebhookStatusMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    setWhEnabled(Boolean(webhookConfig.enabled));
+    setWhUrl(webhookConfig.url || "");
+    setWhSecret(webhookConfig.secret || "");
+    setWhEvents(Array.isArray(webhookConfig.events) ? webhookConfig.events : []);
+  }, [webhookConfig, isSettingsModalOpen]);
 
   const saveMapping = async (save: () => Promise<boolean>) => {
     setIsSavingMapping(true);
@@ -226,6 +248,20 @@ export function SettingsModal() {
           >
             <UserIcon className="size-3.5" />
             <span>Team & Profile</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab("webhooks")}
+            className={cn(
+              "flex items-center gap-2 px-3.5 py-2.5 text-xs font-semibold border-b-2 transition cursor-pointer whitespace-nowrap",
+              activeTab === "webhooks"
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <Webhook className="size-3.5" />
+            <span>Webhooks</span>
           </button>
         </div>
 
@@ -1022,6 +1058,168 @@ export function SettingsModal() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TAB 4: WEBHOOKS */}
+          {activeTab === "webhooks" && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-border bg-card p-4 space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">Outbound Webhooks</h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Receive signed HMAC-SHA256 notifications when tasks or comments change.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setWhEnabled((prev) => !prev)}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer",
+                      whEnabled
+                        ? "bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
+                        : "bg-muted text-muted-foreground border-border"
+                    )}
+                  >
+                    {whEnabled ? "Enabled" : "Disabled"}
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-foreground mb-1">
+                    Endpoint URL
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://example.com/webhooks/task-manager"
+                    value={whUrl}
+                    onChange={(e) => setWhUrl(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-foreground mb-1">
+                    Signing Secret (X-Satmi-Signature)
+                  </label>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type={showWhSecret ? "text" : "password"}
+                      placeholder="Optional HMAC signing secret"
+                      value={whSecret}
+                      onChange={(e) => setWhSecret(e.target.value)}
+                      className="flex-1 rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary font-mono"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowWhSecret((s) => !s)}
+                      className="size-8 rounded-lg border border-border bg-muted/40 hover:bg-muted flex items-center justify-center text-muted-foreground cursor-pointer"
+                      aria-label={showWhSecret ? "Hide secret" : "Show secret"}
+                    >
+                      {showWhSecret ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <span className="block text-[11px] font-semibold text-foreground mb-1.5">
+                    Subscribed Events
+                  </span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      "task.created",
+                      "task.completed",
+                      "task.review_submitted",
+                      "task.revision_requested",
+                      "task.archived",
+                      "comment.created",
+                    ].map((evt) => {
+                      const checked = whEvents.includes(evt);
+                      return (
+                        <label
+                          key={evt}
+                          className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/20 px-2.5 py-1.5 text-xs cursor-pointer"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setWhEvents((prev) =>
+                                prev.includes(evt)
+                                  ? prev.filter((item) => item !== evt)
+                                  : [...prev, evt]
+                              )
+                            }
+                            className="rounded border-border text-primary"
+                          />
+                          <span className="font-mono text-[11px] text-foreground">{evt}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {webhookStatusMsg && (
+                  <p className="text-xs text-muted-foreground bg-muted/40 border border-border rounded-lg px-3 py-2">
+                    {webhookStatusMsg}
+                  </p>
+                )}
+
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    disabled={isTestingWebhook || !whUrl.trim()}
+                    onClick={async () => {
+                      setIsTestingWebhook(true);
+                      setWebhookStatusMsg(null);
+                      try {
+                        const res = await testWebhookEndpoint(whUrl.trim());
+                        setWebhookStatusMsg(
+                          res.ok
+                            ? `Test ping delivered (HTTP ${res.status}, ${res.latencyMs}ms).`
+                            : `Test ping failed: ${res.error || "Unknown error"}`
+                        );
+                      } finally {
+                        setIsTestingWebhook(false);
+                      }
+                    }}
+                    className="h-8 text-xs gap-1.5"
+                  >
+                    <Send className="size-3.5" />
+                    <span>{isTestingWebhook ? "Testing..." : "Send Test Ping"}</span>
+                  </Button>
+
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    disabled={isSavingWebhook}
+                    onClick={async () => {
+                      setIsSavingWebhook(true);
+                      setWebhookStatusMsg(null);
+                      try {
+                        const ok = await saveWebhookSettings({
+                          enabled: whEnabled,
+                          url: whUrl.trim(),
+                          secret: whSecret,
+                          events: whEvents,
+                        });
+                        setWebhookStatusMsg(
+                          ok ? "Webhook configuration saved." : "Failed to save webhook configuration."
+                        );
+                      } finally {
+                        setIsSavingWebhook(false);
+                      }
+                    }}
+                    className="h-8 text-xs"
+                  >
+                    {isSavingWebhook ? "Saving..." : "Save Webhook Config"}
+                  </Button>
+                </div>
+              </div>
             </div>
           )}
         </div>

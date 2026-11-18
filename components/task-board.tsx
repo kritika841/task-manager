@@ -38,7 +38,7 @@ import {
 import { StatusBadge, PriorityBadge } from "./ui/badge";
 import { ProgressBar } from "./ui/progress-bar";
 import { Button } from "./ui/button";
-import { calculateProgress, formatDate, isOverdue, cn, getUserColor, getEmployeeCode } from "@/lib/utils";
+import { calculateProgress, formatDate, isOverdue, cn, getUserColor, getEmployeeCode, sanitizeUrl } from "@/lib/utils";
 
 interface ColumnDef {
   id: TaskStatus;
@@ -279,7 +279,7 @@ export function TaskBoard() {
         }}
         onClick={() => setSelectedTaskId(task.id)}
         className={cn(
-          "group relative rounded-xl border bg-card p-3 shadow-soft transition-all duration-150 hover:border-primary/40 hover:shadow-md",
+          "group relative rounded-xl border bg-card p-3 shadow-soft transition-all duration-150 hover:border-primary/40 hover:shadow-md overflow-hidden",
           linked ? "cursor-pointer" : "cursor-grab active:cursor-grabbing",
           isSelected ? "border-primary ring-2 ring-primary/20 bg-primary/5" : "border-border",
           isBeingDragged && "opacity-40 scale-95 border-primary"
@@ -289,8 +289,8 @@ export function TaskBoard() {
         }}
       >
         {/* Card Top Meta */}
-        <div className="flex items-center justify-between gap-1.5 mb-1.5">
-          <div className="flex items-center gap-1.5">
+        <div className="flex items-start justify-between gap-1.5 mb-1.5 flex-wrap">
+          <div className="flex items-center gap-1.5 min-w-0">
             {/* Multi-select Checkbox */}
             <input
               type="checkbox"
@@ -314,7 +314,7 @@ export function TaskBoard() {
             )}
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-wrap justify-end min-w-0">
             {/* Blocked Badge (Urgent/Abnormal Only) */}
             {blocked && (
               <span
@@ -429,15 +429,15 @@ export function TaskBoard() {
             )}
             {task.deliverableUrl && (
               <a
-                href={task.deliverableUrl}
+                href={sanitizeUrl(task.deliverableUrl)}
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={(e) => e.stopPropagation()}
-                className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded hover:bg-emerald-500/20 transition truncate"
+                className="inline-flex items-center gap-1 text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded hover:bg-emerald-500/20 transition truncate max-w-full"
                 title="Open Deliverable Video / Drive link"
               >
-                <ExternalLink className="size-2.5" />
-                <span>Drive Deliverable</span>
+                <ExternalLink className="size-2.5 shrink-0" />
+                <span className="truncate">Drive Deliverable</span>
               </a>
             )}
           </div>
@@ -449,7 +449,7 @@ export function TaskBoard() {
             className="mb-2.5 p-1.5 rounded-lg border border-primary/20 bg-primary/5 space-y-1.5"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 flex-wrap">
               <Button
                 type="button"
                 variant="primary"
@@ -995,7 +995,7 @@ export function TaskBoard() {
 
       {/* 1. STANDARD COLUMNS LAYOUT */}
       {boardLayout === "columns" && (
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           {COLUMNS.map((column) => {
             const allColumnTasks = filteredTasks.filter((t) => t.status === column.id);
             const columnTasks = activeStageFilter &&
@@ -1050,7 +1050,7 @@ export function TaskBoard() {
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 flex-wrap justify-end min-w-0">
                       {column.id === "completed" &&
                         columnTasks.length > 0 &&
                         !filter.showArchived && (
@@ -1210,7 +1210,7 @@ export function TaskBoard() {
             </div>
 
             {/* Parent Columns Grid with Nested Sub-Columns */}
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
               {activeTpl.parentColumns.map((parent) => {
                 const parentTasks = filteredTasks.filter((t) => t.status === parent.id);
                 const colDef = COLUMNS.find((c) => c.id === parent.id) || COLUMNS[1];
@@ -1329,7 +1329,7 @@ export function TaskBoard() {
       {boardLayout === "swimlanes" && (
         <div className="space-y-4">
           {/* Sticky Global 5-Stage Status Bar for Swimlanes */}
-          <div className="sticky top-12 z-20 hidden md:grid md:grid-cols-5 gap-3 px-3 py-2.5 rounded-xl border border-border/80 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-sm">
+          <div className="sticky top-12 z-20 hidden xl:grid xl:grid-cols-5 gap-3 px-3 py-2.5 rounded-xl border border-border/80 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-sm">
             {COLUMNS.map((column) => {
               const colCount = filteredTasks.filter((t) => t.status === column.id).length;
               return (
@@ -1453,7 +1453,7 @@ export function TaskBoard() {
 
                 {/* Swimlane Columns Grid */}
                 {!isCollapsed && (
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-3 p-3 bg-card/40">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 p-3 bg-card/40">
                     {COLUMNS.map((column) => {
                       const swimlaneTasks = memberTasks.filter((t) => t.status === column.id);
                       const key = `${member.id}-${column.id}`;

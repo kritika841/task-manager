@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin, dateInTargetTimeZone } from "@/lib/supabase";
 import { DailyTaskRule } from "@/lib/types";
-import { resolveRequestActor } from "@/lib/auth-server";
+import { canReviewTasks, resolveRequestActor } from "@/lib/auth-server";
 
 export async function GET() {
   try {
@@ -43,12 +43,9 @@ export async function POST(req: Request) {
 
     const auth = await resolveRequestActor(req);
     if (!auth.actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-    if (
-      auth.actor.role !== "admin" &&
-      auth.actor.role !== "manager"
-    ) {
+    if (!canReviewTasks(auth.actor.role)) {
       return NextResponse.json(
-        { error: "Forbidden: Only Managers or Admins can modify Auto Delegator rules." },
+        { error: "Forbidden: Only Managers, Admins, or Developers can modify Auto Delegator rules." },
         { status: 403 }
       );
     }
@@ -122,12 +119,9 @@ export async function DELETE(req: Request) {
 
     const auth = await resolveRequestActor(req);
     if (!auth.actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-    if (
-      auth.actor.role !== "admin" &&
-      auth.actor.role !== "manager"
-    ) {
+    if (!canReviewTasks(auth.actor.role)) {
       return NextResponse.json(
-        { error: "Forbidden: Only Managers or Admins can delete Auto Delegator rules." },
+        { error: "Forbidden: Only Managers, Admins, or Developers can delete Auto Delegator rules." },
         { status: 403 }
       );
     }

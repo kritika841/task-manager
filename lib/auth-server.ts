@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { Role } from "./types";
 import { ADFLOW_SUPABASE_SERVICE_KEY, supabaseAdmin } from "./supabase";
+import { loadLocalDb, saveLocalDb } from "./local-supabase-fallback";
 
 export const SESSION_COOKIE_NAME = "satmi_session_v2";
 
@@ -9,11 +10,18 @@ const SESSION_SECRET =
   ADFLOW_SUPABASE_SERVICE_KEY ||
   crypto.randomBytes(32).toString("hex");
 
+const revokedTokenHashes = new Set<string>();
+
+function hashSessionToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
 export interface SessionPayload {
   id: string;
   email: string;
   name: string;
   role: Role;
+  jti?: string;
   iat: number;
   exp: number;
 }
@@ -30,6 +38,7 @@ export function signSessionToken(user: {
     email: user.email,
     name: user.name,
     role: user.role,
+    jti: crypto.randomUUID(),
     iat: now,
     exp: now + 60 * 60 * 24 * 7, // 7 days
   };
@@ -43,7 +52,28 @@ export function signSessionToken(user: {
   return `${encoded}.${signature}`;
 }
 
-export function verifySessionToken(token: string): SessionPayload | null {
+export function revokeSessionToken(token: string | null | undefined): void {
+  if (!token || typeof token !== "string") return;
+  const tokenHash = hashSessionToken(token);
+  revokedTokenHashes.add(tokenHash);
+  try {
+    const db = loadLocalDb();
+    const now = Math.floor(Date.now() / 1000);
+    const revoked = db.revoked_tokens || {};
+    // Prune expired revocations before persisting
+    for (const [k, exp] of Object.entries(revoked)) {
+      if (!Number.isFinite(exp) || exp <= now) {
+        delete revoked[k];
+      }
+    }
+    const decoded = verifyTokenSignatureOnly(token);
+    revoked[tokenHash] = decoded?.exp || now + 60 * 60 * 24 * 7;
+    db.revoked_tokens = revoked;
+    saveLocalDb(db);
+  } catch {}
+}
+
+function verifyTokenSignatureOnly(token: string): SessionPayload | null {
   try {
     const parts = token.split(".");
     if (parts.length !== 2) return null;
@@ -59,14 +89,34 @@ export function verifySessionToken(token: string): SessionPayload | null {
     if (sigBuf.length !== expectedBuf.length) return null;
     if (!crypto.timingSafeEqual(sigBuf, expectedBuf)) return null;
 
-    const payload = JSON.parse(
-      Buffer.from(encoded, "base64url").toString("utf-8")
-    ) as SessionPayload;
+    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf-8")) as SessionPayload;
+  } catch {
+    return null;
+  }
+}
+
+export function verifySessionToken(token: string): SessionPayload | null {
+  try {
+    const payload = verifyTokenSignatureOnly(token);
+    if (!payload) return null;
 
     const now = Math.floor(Date.now() / 1000);
     if (!payload.id || !Number.isFinite(payload.exp) || payload.exp <= now) {
       return null;
     }
+
+    const tokenHash = hashSessionToken(token);
+    if (revokedTokenHashes.has(tokenHash)) {
+      return null;
+    }
+
+    try {
+      const db = loadLocalDb();
+      if (db.revoked_tokens && db.revoked_tokens[tokenHash]) {
+        revokedTokenHashes.add(tokenHash);
+        return null;
+      }
+    } catch {}
 
     return payload;
   } catch {
