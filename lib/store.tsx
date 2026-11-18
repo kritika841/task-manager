@@ -48,6 +48,55 @@ import {
   type AdFlowStageMappingUpdate,
 } from "./adflow-bridge";
 
+export const DEFAULT_STATUS_LABELS: Record<TaskStatus, string> = {
+  backlog: "Backlog",
+  todo: "To Do",
+  in_progress: "In Progress",
+  in_review: "In Review",
+  completed: "Done",
+};
+
+export function getStatusLabelForUser(
+  templates: RoleTemplate[],
+  status: TaskStatus,
+  targetUserId?: string,
+  targetRole?: Role | string
+): string {
+  const fallbackLabel = DEFAULT_STATUS_LABELS[status] || status;
+  if (!targetUserId && !targetRole) {
+    return fallbackLabel;
+  }
+
+  const userTemplate = targetUserId
+    ? templates.find(
+        (t) =>
+          t.customStatusLabelsEnabled === true &&
+          Boolean(t.userId) &&
+          t.userId === targetUserId
+      )
+    : undefined;
+
+  const roleTemplate =
+    !userTemplate && targetRole
+      ? templates.find(
+          (t) =>
+            t.customStatusLabelsEnabled === true &&
+            !t.userId &&
+            t.role === targetRole
+        )
+      : undefined;
+
+  const matched = userTemplate || roleTemplate;
+  if (!matched || matched.customStatusLabelsEnabled !== true) {
+    return fallbackLabel;
+  }
+
+  const customLabel =
+    matched.statusLabels?.[status]?.trim() ||
+    matched.parentColumns?.find((p) => p.id === status)?.label?.trim();
+  return customLabel || fallbackLabel;
+}
+
 export function isSelfAssignedTask(task: Task, userId: string): boolean {
   return Boolean(
     userId &&

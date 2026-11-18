@@ -28,7 +28,7 @@ import {
   History,
 } from "lucide-react";
 import { Task, TaskStatus, User, RoleTemplate } from "@/lib/types";
-import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
+import { getStatusLabelForUser, isAdFlowLinkedTask, useTasks } from "@/lib/store";
 import { dateInTargetTimeZone } from "@/lib/supabase";
 import {
   ADFLOW_PRODUCTION_STAGES,
@@ -122,48 +122,31 @@ export function TaskBoard() {
   const filteredTargetUser =
     filter.assigneeId !== "all"
       ? users.find((u) => u.id === filter.assigneeId)
-      : currentActor;
+      : undefined;
 
   const resolveColumnLabel = (
     status: TaskStatus,
     targetUserId?: string,
     targetRole?: string
   ): string => {
-    const fallbackLabel = COLUMNS.find((c) => c.id === status)?.label || status;
-    const effectiveUserId = targetUserId ?? filteredTargetUser?.id ?? currentUserId;
-    const effectiveRole = targetRole ?? filteredTargetUser?.role ?? currentActor?.role;
-
-    const candidateTemplate =
-      (activeTemplateId && activeTemplateId !== "adflow-pipeline"
-        ? templates.find(
-            (t) =>
-              t.id === activeTemplateId &&
-              t.customStatusLabelsEnabled === true &&
-              (!t.userId || !effectiveUserId || t.userId === effectiveUserId)
-          )
-        : undefined) ||
-      templates.find(
-        (t) =>
-          t.customStatusLabelsEnabled === true &&
-          effectiveUserId &&
-          t.userId === effectiveUserId
-      ) ||
-      templates.find(
-        (t) =>
-          t.customStatusLabelsEnabled === true &&
-          !t.userId &&
-          effectiveRole &&
-          t.role === effectiveRole
-      );
-
-    if (!candidateTemplate || candidateTemplate.customStatusLabelsEnabled !== true) {
-      return fallbackLabel;
+    if (targetUserId !== undefined || targetRole !== undefined) {
+      return getStatusLabelForUser(templates, status, targetUserId, targetRole);
     }
-
-    const customLabel =
-      candidateTemplate.statusLabels?.[status]?.trim() ||
-      candidateTemplate.parentColumns?.find((p) => p.id === status)?.label?.trim();
-    return customLabel || fallbackLabel;
+    if (!isManagerOrAdmin) {
+      return getStatusLabelForUser(templates, status, currentUserId, currentActor?.role);
+    }
+    if (filter.assigneeId !== "all") {
+      return getStatusLabelForUser(
+        templates,
+        status,
+        filteredTargetUser?.id || filter.assigneeId,
+        filteredTargetUser?.role
+      );
+    }
+    if (filter.onlyMyTasks) {
+      return getStatusLabelForUser(templates, status, currentUserId, currentActor?.role);
+    }
+    return getStatusLabelForUser(templates, status, undefined, "general");
   };
 
   const [expandedTaskIds, setExpandedTaskIds] = useState<Record<string, boolean>>({});

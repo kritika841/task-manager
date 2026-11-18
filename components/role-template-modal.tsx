@@ -228,7 +228,6 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
       });
       if (created) {
         setSelectedTemplateId(created.id);
-        setActiveTemplateId(created.id);
         setActiveTab("templates");
       }
     } else if (editingTemplate) {
@@ -807,7 +806,46 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                   </label>
                   <select
                     value={formRole}
-                    onChange={(e) => setFormRole(e.target.value as Role | "general")}
+                    onChange={(e) => {
+                      const prevRoleLabel =
+                        ROLE_OPTIONS.find((r) => r.role === formRole)?.label || "Custom";
+                      const nextRole = e.target.value as Role | "general";
+                      const nextRoleLabel =
+                        ROLE_OPTIONS.find((r) => r.role === nextRole)?.label || "Custom";
+                      setFormRole(nextRole);
+
+                      if (formUserId && nextRole !== "general") {
+                        const selectedUser = users.find((u) => u.id === formUserId);
+                        if (!selectedUser || selectedUser.role !== nextRole) {
+                          setFormUserId("");
+                        }
+                      }
+
+                      if (isCreatingNew) {
+                        if (
+                          !formName.trim() ||
+                          formName === `${prevRoleLabel} Workflow`
+                        ) {
+                          setFormName(`${nextRoleLabel} Workflow`);
+                        }
+                        if (
+                          !formDesc.trim() ||
+                          formDesc === `${prevRoleLabel} pipeline stages and checklist`
+                        ) {
+                          setFormDesc(`${nextRoleLabel} pipeline stages and checklist`);
+                        }
+                        setFormParentCols((prev) =>
+                          prev.map((col) => ({
+                            ...col,
+                            subColumns: col.subColumns.map((sub) =>
+                              sub.label === `${prevRoleLabel} Daily Deliverable`
+                                ? { ...sub, label: `${nextRoleLabel} Daily Deliverable` }
+                                : sub
+                            ),
+                          }))
+                        );
+                      }
+                    }}
                     className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground"
                   >
                     {ROLE_OPTIONS.map((r) => (
@@ -842,12 +880,21 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                     onChange={(e) => setFormUserId(e.target.value)}
                     className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground"
                   >
-                    <option value="">All users in role</option>
-                    {users.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} ({u.role.replace("_", " ")})
-                      </option>
-                    ))}
+                    <option value="">
+                      {formRole === "general"
+                        ? "All users"
+                        : `All users in ${
+                            ROLE_OPTIONS.find((r) => r.role === formRole)?.label ||
+                            formRole.replace("_", " ")
+                          } role`}
+                    </option>
+                    {users
+                      .filter((u) => formRole === "general" || u.role === formRole)
+                      .map((u) => (
+                        <option key={u.id} value={u.id}>
+                          {u.name} ({u.role.replace("_", " ")})
+                        </option>
+                      ))}
                   </select>
                 </div>
 

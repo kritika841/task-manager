@@ -17,8 +17,8 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { Task, Subtask, TaskStatus } from "@/lib/types";
-import { isAdFlowLinkedTask, isSelfAssignedTask, useTasks } from "@/lib/store";
-import { StatusBadge, PriorityBadge } from "./ui/badge";
+import { getStatusLabelForUser, isAdFlowLinkedTask, isSelfAssignedTask, useTasks } from "@/lib/store";
+import { Badge, PriorityBadge } from "./ui/badge";
 import { ProgressBar } from "./ui/progress-bar";
 import { Button } from "./ui/button";
 import { Input } from "./ui/field";
@@ -38,6 +38,7 @@ export function TaskList() {
     selectedTaskIds,
     toggleSelectTask,
     selectAllFilteredTasks,
+    templates,
   } = useTasks();
 
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
@@ -158,7 +159,24 @@ export function TaskList() {
                 </div>
 
                 <div className="relative" onClick={(e) => e.stopPropagation()}>
-                  <StatusBadge status={task.status} />
+                  {(() => {
+                    const targetUid = assignee?.id || task.assigneeId;
+                    const targetRole = assignee?.role || task.templateRole;
+                    const badgeStyle: Record<TaskStatus, { variant: "muted" | "accent" | "warning" | "success"; dot: string }> = {
+                      backlog: { variant: "muted", dot: "bg-muted-foreground" },
+                      todo: { variant: "accent", dot: "bg-accent-foreground" },
+                      in_progress: { variant: "warning", dot: "bg-warning" },
+                      in_review: { variant: "warning", dot: "bg-warning" },
+                      completed: { variant: "success", dot: "bg-success" },
+                    };
+                    const cfg = badgeStyle[task.status] || badgeStyle.backlog;
+                    return (
+                      <Badge variant={cfg.variant}>
+                        <span className={cn("size-1.5 rounded-full", cfg.dot)} />
+                        {getStatusLabelForUser(templates, task.status, targetUid, targetRole)}
+                      </Badge>
+                    );
+                  })()}
                   <select
                     disabled={isAdFlowLinkedTask(task)}
                     value={task.status}
@@ -168,11 +186,23 @@ export function TaskList() {
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-xs"
                     title="Change status"
                   >
-                    <option value="backlog">Backlog</option>
-                    <option value="todo">To Do</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="in_review">In Review</option>
-                    {isManagerOrAdmin && <option value="completed">Done</option>}
+                    <option value="backlog">
+                      {getStatusLabelForUser(templates, "backlog", assignee?.id || task.assigneeId, assignee?.role || task.templateRole)}
+                    </option>
+                    <option value="todo">
+                      {getStatusLabelForUser(templates, "todo", assignee?.id || task.assigneeId, assignee?.role || task.templateRole)}
+                    </option>
+                    <option value="in_progress">
+                      {getStatusLabelForUser(templates, "in_progress", assignee?.id || task.assigneeId, assignee?.role || task.templateRole)}
+                    </option>
+                    <option value="in_review">
+                      {getStatusLabelForUser(templates, "in_review", assignee?.id || task.assigneeId, assignee?.role || task.templateRole)}
+                    </option>
+                    {isManagerOrAdmin && (
+                      <option value="completed">
+                        {getStatusLabelForUser(templates, "completed", assignee?.id || task.assigneeId, assignee?.role || task.templateRole)}
+                      </option>
+                    )}
                   </select>
                 </div>
                 <PriorityBadge priority={task.priority} />

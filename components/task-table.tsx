@@ -18,7 +18,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { Task, TaskPriority, TaskStatus } from "@/lib/types";
-import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
+import { getStatusLabelForUser, isAdFlowLinkedTask, useTasks } from "@/lib/store";
 import { StatusBadge, PriorityBadge } from "./ui/badge";
 import { ProgressBar } from "./ui/progress-bar";
 import { calculateProgress, formatDate, isOverdue, cn, sanitizeUrl } from "@/lib/utils";
@@ -49,6 +49,7 @@ export function TaskTable() {
     getMemberCapacity,
     approveTask,
     requestRevision,
+    templates,
     density,
   } = useTasks();
 
@@ -388,11 +389,23 @@ export function TaskTable() {
                         }
                         className="text-xs rounded-lg border border-border bg-card px-2 py-1 text-foreground focus:ring-1 focus:ring-primary outline-hidden"
                       >
-                        <option value="todo">To Do</option>
-                        <option value="in_progress">In Progress</option>
-                        <option value="in_review">In Review</option>
-                        {isManagerOrAdmin && <option value="completed">Completed</option>}
-                        <option value="backlog">Backlog</option>
+                        <option value="todo">
+                          {getStatusLabelForUser(templates, "todo", assignee?.id || task.assigneeId, assignee?.role || task.templateRole)}
+                        </option>
+                        <option value="in_progress">
+                          {getStatusLabelForUser(templates, "in_progress", assignee?.id || task.assigneeId, assignee?.role || task.templateRole)}
+                        </option>
+                        <option value="in_review">
+                          {getStatusLabelForUser(templates, "in_review", assignee?.id || task.assigneeId, assignee?.role || task.templateRole)}
+                        </option>
+                        {isManagerOrAdmin && (
+                          <option value="completed">
+                            {getStatusLabelForUser(templates, "completed", assignee?.id || task.assigneeId, assignee?.role || task.templateRole)}
+                          </option>
+                        )}
+                        <option value="backlog">
+                          {getStatusLabelForUser(templates, "backlog", assignee?.id || task.assigneeId, assignee?.role || task.templateRole)}
+                        </option>
                       </select>
                     </td>
                   )}

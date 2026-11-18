@@ -28,7 +28,7 @@ import {
   Play,
   Snowflake,
 } from "lucide-react";
-import { isAdFlowLinkedTask, isSelfAssignedTask, useTasks } from "@/lib/store";
+import { getStatusLabelForUser, isAdFlowLinkedTask, isSelfAssignedTask, useTasks } from "@/lib/store";
 import { TaskPriority, TaskStatus } from "@/lib/types";
 import { isCanonicalAdflowTask } from "@/lib/supabase";
 import { ADFLOW_PRODUCTION_STAGES } from "@/lib/adflow-bridge";
@@ -73,6 +73,7 @@ export function TaskDrawer() {
     isAdsManagementConnected,
     enforceCanonicalLock,
     refreshAll,
+    templates,
     adflowStageMapping,
   } = useTasks();
 
@@ -479,7 +480,12 @@ export function TaskDrawer() {
                                 : "border-transparent text-muted-foreground/80 hover:bg-muted/60 hover:text-foreground"
                             )}
                           >
-                            {st.label}
+                            {getStatusLabelForUser(
+                              templates,
+                              st.id as TaskStatus,
+                              assignee?.id || task.assigneeId,
+                              assignee?.role || task.templateRole
+                            )}
                           </button>
                         ))}
                       </div>
