@@ -473,6 +473,21 @@ test("Tasks & Users: RBAC bounds, validation, deduplication (409), optimistic lo
   });
   assert.equal(stalePatch.status, 409);
 
+  // Strict per-assignee isolation for editor & member (tasks + users)
+  const edCookie = await loginAs("t-ed@test.local");
+  const edTasksRes = await api("/api/tasks", { headers: { cookie: edCookie } });
+  assert.equal(edTasksRes.status, 200);
+  assert.equal(edTasksRes.json.users.length, 1);
+  assert.equal(edTasksRes.json.users[0].id, "22222222-2222-4222-8222-222222222204");
+  assert.ok(edTasksRes.json.tasks.every((t) => t.assigneeId === "22222222-2222-4222-8222-222222222204"));
+  assert.ok(!edTasksRes.json.tasks.some((t) => t.assigneeId === "22222222-2222-4222-8222-222222222205"));
+
+  const memTasksRes = await api("/api/tasks", { headers: { cookie: memCookie } });
+  assert.equal(memTasksRes.status, 200);
+  assert.equal(memTasksRes.json.users.length, 1);
+  assert.equal(memTasksRes.json.users[0].id, "22222222-2222-4222-8222-222222222205");
+  assert.ok(memTasksRes.json.tasks.every((t) => t.assigneeId === "22222222-2222-4222-8222-222222222205"));
+
   // Pagination check
   const pageRes = await api("/api/tasks?page=1&limit=2", { headers: { cookie: admCookie } });
   assert.equal(pageRes.status, 200);

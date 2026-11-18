@@ -78,6 +78,7 @@ import {
   getCreativeAssignee,
   isCreatorStage,
   readTaskNotesMetadata,
+  resolveMergedTaskAssignee,
 } from "@/lib/task-access";
 import { dispatchWebhookEvent } from "@/lib/webhooks-store";
 
@@ -507,9 +508,11 @@ export async function GET(req: Request) {
       const liveProdStage = matchedAd?.production_stage || parsedNotes.productionStage;
       const liveAdStatus = matchedAd?.status;
 
-      const resolvedAssigneeId = matchedAd
-        ? getCreativeAssignee(matchedAd, { productionStage: liveProdStage }) || row.user_id
-        : row.user_id;
+      const resolvedAssigneeId = resolveMergedTaskAssignee(
+        matchedAd,
+        row.user_id,
+        liveProdStage
+      );
       const assignee = users.find((u) => u.id === resolvedAssigneeId);
       const project = parsedNotes.project || assignee?.department || "Operations";
       const empCode = assignee?.employeeCode || getEmployeeCode(assignee?.name || "EMP");
@@ -878,7 +881,7 @@ export async function GET(req: Request) {
     const allTasks = [...adCreativeTasks, ...targetTasks];
     const filteredTasks = allTasks.filter((task) =>
       (includeArchived || !task.isArchived) &&
-      canAccessTask(actor, task.assigneeId, task.adCreatorId, task.adEditorId)
+      canAccessTask(actor, task.assigneeId)
     );
 
     const pageParam = url.searchParams.get("page");
@@ -891,6 +894,10 @@ export async function GET(req: Request) {
         ? filteredTasks.slice((parsedPage - 1) * parsedLimit, parsedPage * parsedLimit)
         : filteredTasks;
 
+    const visibleUsers = canReviewTasks(actor.role)
+      ? users
+      : users.filter((u) => u.id === actor.id);
+
     const visibleTaskIds = new Set(tasks.map((task) => task.id));
     const visibleAuditLogs = canReviewTasks(actor.role)
       ? auditLogs
@@ -899,7 +906,7 @@ export async function GET(req: Request) {
     return NextResponse.json(
       {
         tasks,
-        users,
+        users: visibleUsers,
         auditLogs: visibleAuditLogs,
         today,
         pagination: {
@@ -1238,24 +1245,27 @@ export async function PATCH(req: Request) {
     }
     let currentNotesMeta = parseNotes(existing?.notes);
     const adId = standaloneAdId || currentNotesMeta.adId;
-    let linkedAdRecord: { creator_id?: string | null; editor_id?: string | null } | null = null;
+    let linkedAdRecord: { creator_id?: string | null; editor_id?: string | null; production_stage?: string | null } | null = null;
     if (!standaloneAdId && adId) {
       const { data: ad } = await supabaseAdmin
         .from("ads")
-        .select("creator_id, editor_id")
+        .select("creator_id, editor_id, production_stage")
         .eq("id", adId)
         .maybeSingle();
       linkedAdRecord = ad;
     }
+    const effectiveAssigneeId = standaloneAdId
+      ? ""
+      : resolveMergedTaskAssignee(linkedAdRecord, existing?.user_id, currentNotesMeta.productionStage);
     const hasTaskAccess = standaloneAdId
       ? await canAccessStandaloneCreative(actor, standaloneAdId)
-      : canAccessTask(actor, existing?.user_id, linkedAdRecord?.creator_id, linkedAdRecord?.editor_id);
+      : canAccessTask(actor, effectiveAssigneeId);
     if (!hasTaskAccess) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
     }
 
     if (!canReviewTasks(actor.role)) {
-      const currentTargetOwner = existing?.user_id || linkedAdRecord?.editor_id || linkedAdRecord?.creator_id;
+      const currentTargetOwner = effectiveAssigneeId || existing?.user_id;
       if (body.assigneeId !== undefined && body.assigneeId !== currentTargetOwner) {
         return NextResponse.json(
           { error: "Forbidden: Only Managers, Admins, or Developers can reassign tasks." },

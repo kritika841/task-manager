@@ -117,6 +117,7 @@ export function TaskBoard() {
   } = useTasks();
 
   const statusesByColumn = getAdFlowStatusesByColumn(adflowStageMapping);
+  const effectiveBoardLayout = isManagerOrAdmin ? boardLayout : "columns";
 
   const [expandedTaskIds, setExpandedTaskIds] = useState<Record<string, boolean>>({});
   const [collapsedSwimlanes, setCollapsedSwimlanes] = useState<Record<string, boolean>>({});
@@ -878,7 +879,10 @@ export function TaskBoard() {
 
   // All active team members synced from AdFlow
   const activeMembers = users.filter(
-    (u) => u.active !== false && !u.deletedAt
+    (u) =>
+      u.active !== false &&
+      !u.deletedAt &&
+      filteredTasks.some((t) => t.assigneeId === u.id)
   );
 
   return (
@@ -904,97 +908,99 @@ export function TaskBoard() {
           )}
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          {boardLayout === "swimlanes" && activeMembers.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                const anyCollapsed =
-                  Object.values(collapsedSwimlanes).some(Boolean);
-                if (anyCollapsed) {
-                  setCollapsedSwimlanes({});
-                } else {
-                  const allCollapsed: Record<string, boolean> = {};
-                  activeMembers.forEach((m) => {
-                    allCollapsed[m.id] = true;
-                  });
-                  setCollapsedSwimlanes(allCollapsed);
-                }
-              }}
-              className="rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition cursor-pointer"
-            >
-              {Object.values(collapsedSwimlanes).some(Boolean)
-                ? "Expand All"
-                : "Collapse All"}
-            </button>
-          )}
-
-          {boardLayout === "subcolumns" && (
-            <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs">
-              <select
-                value={activeTemplateId || "adflow-pipeline"}
-                onChange={(e) => setActiveTemplateId(e.target.value || null)}
-                className="bg-transparent text-xs font-semibold text-foreground border-none outline-none cursor-pointer pr-1"
+        {isManagerOrAdmin && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {effectiveBoardLayout === "swimlanes" && activeMembers.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const anyCollapsed =
+                    Object.values(collapsedSwimlanes).some(Boolean);
+                  if (anyCollapsed) {
+                    setCollapsedSwimlanes({});
+                  } else {
+                    const allCollapsed: Record<string, boolean> = {};
+                    activeMembers.forEach((m) => {
+                      allCollapsed[m.id] = true;
+                    });
+                    setCollapsedSwimlanes(allCollapsed);
+                  }
+                }}
+                className="rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition cursor-pointer"
               >
-                <option value="adflow-pipeline">AdFlow 10-Status Pipeline</option>
-                {templates.map((tpl) => (
-                  <option key={tpl.id} value={tpl.id}>
-                    {tpl.name}
-                  </option>
-                ))}
-              </select>
+                {Object.values(collapsedSwimlanes).some(Boolean)
+                  ? "Expand All"
+                  : "Collapse All"}
+              </button>
+            )}
+
+            {effectiveBoardLayout === "subcolumns" && (
+              <div className="flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs">
+                <select
+                  value={activeTemplateId || "adflow-pipeline"}
+                  onChange={(e) => setActiveTemplateId(e.target.value || null)}
+                  className="bg-transparent text-xs font-semibold text-foreground border-none outline-none cursor-pointer pr-1"
+                >
+                  <option value="adflow-pipeline">AdFlow 10-Status Pipeline</option>
+                  {templates.map((tpl) => (
+                    <option key={tpl.id} value={tpl.id}>
+                      {tpl.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
+              <button
+                type="button"
+                onClick={() => setBoardLayout("columns")}
+                className={cn(
+                  "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition cursor-pointer",
+                  effectiveBoardLayout === "columns"
+                    ? "bg-card text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Columns className="size-3.5" />
+                <span>Board</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setBoardLayout("subcolumns")}
+                className={cn(
+                  "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition cursor-pointer",
+                  effectiveBoardLayout === "subcolumns"
+                    ? "bg-card text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+                title="Role Sub-Columns"
+              >
+                <Layers className="size-3.5" />
+                <span>Sub-Columns</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setBoardLayout("swimlanes")}
+                className={cn(
+                  "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition cursor-pointer",
+                  effectiveBoardLayout === "swimlanes"
+                    ? "bg-card text-foreground shadow-xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                <Rows className="size-3.5" />
+                <span>Swimlanes</span>
+              </button>
             </div>
-          )}
-
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-0.5">
-            <button
-              type="button"
-              onClick={() => setBoardLayout("columns")}
-              className={cn(
-                "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition cursor-pointer",
-                boardLayout === "columns"
-                  ? "bg-card text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Columns className="size-3.5" />
-              <span>Board</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setBoardLayout("subcolumns")}
-              className={cn(
-                "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition cursor-pointer",
-                boardLayout === "subcolumns"
-                  ? "bg-card text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-              title="Role Sub-Columns"
-            >
-              <Layers className="size-3.5" />
-              <span>Sub-Columns</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setBoardLayout("swimlanes")}
-              className={cn(
-                "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition cursor-pointer",
-                boardLayout === "swimlanes"
-                  ? "bg-card text-foreground shadow-xs font-semibold"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              <Rows className="size-3.5" />
-              <span>Swimlanes</span>
-            </button>
           </div>
-        </div>
+        )}
       </div>
 
       {/* 1. STANDARD COLUMNS LAYOUT */}
-      {boardLayout === "columns" && (
+      {effectiveBoardLayout === "columns" && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           {COLUMNS.map((column) => {
             const allColumnTasks = filteredTasks.filter((t) => t.status === column.id);
@@ -1077,52 +1083,60 @@ export function TaskBoard() {
                   </div>
 
                   {/* AdFlow Statuses mapped inside this column (Drop Targets & Quick Filters) */}
-                  <div className="flex flex-wrap gap-1 pt-0.5">
-                    {statusesByColumn[column.id].map((stg) => {
-                      const stageCount = allColumnTasks.filter(
-                        (t) => t.productionStage === stg.id
-                      ).length;
-                      const isStageSelected = activeStageFilter === stg.id;
-                      const isStageDragOver = dragOverColumn === `stage-${stg.id}`;
+                  {(() => {
+                    const visibleStages = statusesByColumn[column.id].filter((stg) =>
+                      isManagerOrAdmin || allColumnTasks.some((t) => t.productionStage === stg.id)
+                    );
+                    if (visibleStages.length === 0) return null;
+                    return (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {visibleStages.map((stg) => {
+                          const stageCount = allColumnTasks.filter(
+                            (t) => t.productionStage === stg.id
+                          ).length;
+                          const isStageSelected = activeStageFilter === stg.id;
+                          const isStageDragOver = dragOverColumn === `stage-${stg.id}`;
 
-                      return (
-                        <button
-                          key={stg.id}
-                          type="button"
-                          onClick={() =>
-                            setActiveStageFilter((prev) => (prev === stg.id ? null : stg.id))
-                          }
-                          onDragOver={(e) => handleDragOver(e, `stage-${stg.id}`)}
-                          onDragLeave={(e) => {
-                            if (e.currentTarget === e.target) setDragOverColumn(null);
-                          }}
-                          onDrop={(e) =>
-                            handleDrop(e, column.id, undefined, undefined, stg.id)
-                          }
-                          className={cn(
-                            "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-medium border transition cursor-pointer select-none",
-                            isStageDragOver
-                              ? "border-primary bg-primary/20 text-primary ring-1 ring-primary"
-                              : isStageSelected
-                              ? "bg-primary/15 text-primary border-primary/40 font-bold"
-                              : "bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted hover:text-foreground"
-                          )}
-                          title={`${stg.label} — Drag a card here to set AdFlow status to "${stg.label}", or click to filter`}
-                        >
-                          <span
-                            className="size-1.5 rounded-full shrink-0"
-                            style={{ backgroundColor: stg.color }}
-                          />
-                          <span>{stg.shortLabel}</span>
-                          {stageCount > 0 && (
-                            <span className="font-mono text-[9px] opacity-80 ml-0.5">
-                              {stageCount}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+                          return (
+                            <button
+                              key={stg.id}
+                              type="button"
+                              onClick={() =>
+                                setActiveStageFilter((prev) => (prev === stg.id ? null : stg.id))
+                              }
+                              onDragOver={(e) => handleDragOver(e, `stage-${stg.id}`)}
+                              onDragLeave={(e) => {
+                                if (e.currentTarget === e.target) setDragOverColumn(null);
+                              }}
+                              onDrop={(e) =>
+                                handleDrop(e, column.id, undefined, undefined, stg.id)
+                              }
+                              className={cn(
+                                "inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9.5px] font-medium border transition cursor-pointer select-none",
+                                isStageDragOver
+                                  ? "border-primary bg-primary/20 text-primary ring-1 ring-primary"
+                                  : isStageSelected
+                                  ? "bg-primary/15 text-primary border-primary/40 font-bold"
+                                  : "bg-muted/40 text-muted-foreground border-border/60 hover:bg-muted hover:text-foreground"
+                              )}
+                              title={`${stg.label} — Drag a card here to set AdFlow status to "${stg.label}", or click to filter`}
+                            >
+                              <span
+                                className="size-1.5 rounded-full shrink-0"
+                                style={{ backgroundColor: stg.color }}
+                              />
+                              <span>{stg.shortLabel}</span>
+                              {stageCount > 0 && (
+                                <span className="font-mono text-[9px] opacity-80 ml-0.5">
+                                  {stageCount}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Column Cards */}
@@ -1156,7 +1170,7 @@ export function TaskBoard() {
       )}
 
       {/* 2. ROLE WORKFLOW SUB-COLUMNS LAYOUT */}
-      {boardLayout === "subcolumns" && (() => {
+      {effectiveBoardLayout === "subcolumns" && (() => {
         const adflowBuiltInTemplate: RoleTemplate = {
           id: "adflow-pipeline",
           name: "AdFlow 10-Status Pipeline",
@@ -1326,35 +1340,41 @@ export function TaskBoard() {
       })()}
 
       {/* 3. MEMBER SWIMLANES LAYOUT */}
-      {boardLayout === "swimlanes" && (
+      {effectiveBoardLayout === "swimlanes" && (
         <div className="space-y-4">
-          {/* Sticky Global 5-Stage Status Bar for Swimlanes */}
-          <div className="sticky top-12 z-20 hidden xl:grid xl:grid-cols-5 gap-3 px-3 py-2.5 rounded-xl border border-border/80 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-sm">
-            {COLUMNS.map((column) => {
-              const colCount = filteredTasks.filter((t) => t.status === column.id).length;
-              return (
-                <div
-                  key={column.id}
-                  className="flex items-center justify-between px-2.5 py-1 rounded-lg bg-muted/30 border border-border/50"
-                >
-                  <div
-                    className={cn(
-                      "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide",
-                      column.pillBg
-                    )}
-                  >
-                    <span className={cn("size-2 rounded-full shrink-0", column.dotColor)} />
-                    <span>{column.label}</span>
-                  </div>
-                  <span className="text-xs font-mono font-bold text-muted-foreground pr-1">
-                    {colCount}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          {activeMembers.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-border bg-card/40 p-10 text-center text-xs text-muted-foreground">
+              No assigned tasks match the current view.
+            </div>
+          ) : (
+            <>
+              {/* Sticky Global 5-Stage Status Bar for Swimlanes */}
+              <div className="sticky top-12 z-20 hidden xl:grid xl:grid-cols-5 gap-3 px-3 py-2.5 rounded-xl border border-border/80 bg-card/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-sm">
+                {COLUMNS.map((column) => {
+                  const colCount = filteredTasks.filter((t) => t.status === column.id).length;
+                  return (
+                    <div
+                      key={column.id}
+                      className="flex items-center justify-between px-2.5 py-1 rounded-lg bg-muted/30 border border-border/50"
+                    >
+                      <div
+                        className={cn(
+                          "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide",
+                          column.pillBg
+                        )}
+                      >
+                        <span className={cn("size-2 rounded-full shrink-0", column.dotColor)} />
+                        <span>{column.label}</span>
+                      </div>
+                      <span className="text-xs font-mono font-bold text-muted-foreground pr-1">
+                        {colCount}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
 
-          {activeMembers.map((member) => {
+              {activeMembers.map((member) => {
             const memberTasks = filteredTasks.filter((t) => t.assigneeId === member.id);
             const isCollapsed = !!collapsedSwimlanes[member.id];
             const capacity = getMemberCapacity(member.id);
@@ -1520,6 +1540,8 @@ export function TaskBoard() {
               </div>
             );
           })}
+            </>
+          )}
         </div>
       )}
     </div>

@@ -5,10 +5,17 @@ import {
   updateTemplate,
   deleteTemplate,
 } from "@/lib/templates-store";
+import { canReviewTasks, resolveRequestActor } from "@/lib/auth-server";
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    const templates = await getTemplates();
+    const { actor } = await resolveRequestActor(req);
+    let templates = await getTemplates();
+    if (actor && !canReviewTasks(actor.role)) {
+      templates = templates.filter(
+        (t) => t.userId === actor.id || t.role === actor.role
+      );
+    }
     return NextResponse.json({ templates });
   } catch (error: any) {
     console.error("GET /api/templates error:", error);

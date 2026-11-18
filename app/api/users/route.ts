@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { Role, User } from "@/lib/types";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
-import { hashPassword, resolveRequestActor } from "@/lib/auth-server";
+import { canReviewTasks, hashPassword, resolveRequestActor } from "@/lib/auth-server";
 
 const VALID_ROLES = new Set<Role>([
   "admin",
@@ -98,6 +98,9 @@ function parseUserMetadata(avatarUrl: string | null, name: string, role: string)
 
 export async function GET(req: Request) {
   try {
+    const { actor } = await resolveRequestActor(req);
+    if (!actor) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+
     const url = new URL(req.url);
     const includeInactive = url.searchParams.get("includeInactive") === "true";
 
@@ -136,7 +139,11 @@ export async function GET(req: Request) {
       };
     });
 
-    return NextResponse.json({ users });
+    const visibleUsers = canReviewTasks(actor.role)
+      ? users
+      : users.filter((u) => u.id === actor.id);
+
+    return NextResponse.json({ users: visibleUsers });
   } catch (err: any) {
     return NextResponse.json({ error: err?.message || "Failed to fetch users" }, { status: 500 });
   }

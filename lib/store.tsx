@@ -444,15 +444,22 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
-  // Base visible tasks in current workspace mode (respects showArchived and AdFlow sync setting)
+  const currentRole = useMemo(() => {
+    return users.find((u) => u.id === currentUserId)?.role || "member";
+  }, [users, currentUserId]);
+  const hasReviewAccess =
+    currentRole === "admin" || currentRole === "developer" || currentRole === "manager";
+
+  // Base visible tasks in current workspace mode (respects showArchived, AdFlow sync setting, and strict assignee isolation)
   const baseVisibleTasks = useMemo(() => {
     return tasks.filter((task) => {
+      if (!hasReviewAccess && currentUserId && task.assigneeId !== currentUserId) return false;
       if (!filter.showArchived && task.isArchived) return false;
       if (filter.showArchived && !task.isArchived) return false;
       if (!isAdsManagementConnected && isTaskAdflow(task)) return false;
       return true;
     });
-  }, [tasks, filter.showArchived, isAdsManagementConnected]);
+  }, [tasks, filter.showArchived, isAdsManagementConnected, hasReviewAccess, currentUserId]);
 
   const openCreateModal = useCallback((preselectedUserId?: string, preselectedStatus?: TaskStatus) => {
     setCreateModalAssigneeId(preselectedUserId || null);
@@ -868,12 +875,6 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       console.error("fetchTemplates error:", err);
     }
   }, []);
-
-  const currentRole = useMemo(() => {
-    return users.find((u) => u.id === currentUserId)?.role || "member";
-  }, [users, currentUserId]);
-  const hasReviewAccess =
-    currentRole === "admin" || currentRole === "developer" || currentRole === "manager";
 
   // Fetch Webhook Configuration (reviewers/admins only — prevents 403 noise for creators/members)
   const fetchWebhookConfig = useCallback(async () => {

@@ -12,16 +12,9 @@ type CreativeAssignment = {
 
 export function canAccessTask(
   actor: TaskActor,
-  assigneeId?: string | null,
-  adCreatorId?: string | null,
-  adEditorId?: string | null
+  assigneeId?: string | null
 ): boolean {
-  return (
-    canReviewTasks(actor.role) ||
-    actor.id === assigneeId ||
-    (Boolean(adCreatorId) && actor.id === adCreatorId) ||
-    (Boolean(adEditorId) && actor.id === adEditorId)
-  );
+  return canReviewTasks(actor.role) || (Boolean(assigneeId) && actor.id === assigneeId);
 }
 
 export function isCreatorStage(stage?: string | null): boolean {
@@ -41,9 +34,20 @@ export function getCreativeAssignee(
   override?: { assigneeId?: string; productionStage?: string }
 ): string {
   const creatorStage = isCreatorStage(ad.production_stage || override?.productionStage);
-  return override?.assigneeId ||
-    (creatorStage ? ad.creator_id || ad.editor_id : ad.editor_id || ad.creator_id) ||
-    "";
+  return override?.assigneeId || (creatorStage ? ad.creator_id : ad.editor_id) || "";
+}
+
+export function resolveMergedTaskAssignee(
+  ad: CreativeAssignment | null | undefined,
+  taskUserId?: string | null,
+  fallbackStage?: string | null
+): string {
+  if (!ad) return taskUserId || "";
+  const effectiveStage = ad.production_stage || fallbackStage;
+  return (
+    getCreativeAssignee(ad, { productionStage: effectiveStage || undefined }) ||
+    (isCreatorStage(effectiveStage) ? taskUserId || "" : "")
+  );
 }
 
 export function readTaskNotesMetadata(raw?: string | null): Record<string, any> | null {
@@ -78,9 +82,7 @@ export async function canAccessStandaloneCreative(actor: TaskActor, adId: string
   if (hasLinkedTask) return false;
   return canAccessTask(
     actor,
-    getCreativeAssignee(ad, db.ad_overrides[adId] || db.ad_overrides[`ad-${adId}`]),
-    ad.creator_id,
-    ad.editor_id
+    getCreativeAssignee(ad, db.ad_overrides[adId] || db.ad_overrides[`ad-${adId}`])
   );
 }
 
@@ -93,15 +95,17 @@ export async function canAccessTaskById(actor: TaskActor, taskId: string): Promi
     .select("user_id, notes")
     .eq("id", taskId)
     .maybeSingle();
-  if (canAccessTask(actor, task?.user_id)) return true;
-  const notes = readTaskNotesMetadata(task?.notes);
+  if (!task) return false;
+  const notes = readTaskNotesMetadata(task.notes);
   if (notes?.adId) {
     const { data: ad } = await supabaseAdmin
       .from("ads")
-      .select("creator_id, editor_id")
+      .select("creator_id, editor_id, production_stage")
       .eq("id", notes.adId)
       .maybeSingle();
-    return canAccessTask(actor, task?.user_id, ad?.creator_id, ad?.editor_id);
+    if (ad) {
+      return canAccessTask(actor, resolveMergedTaskAssignee(ad, task.user_id, notes.productionStage));
+    }
   }
-  return false;
+  return canAccessTask(actor, task.user_id);
 }

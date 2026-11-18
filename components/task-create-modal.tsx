@@ -41,6 +41,7 @@ export function TaskCreateModal() {
     users,
     currentUser,
     currentUserId,
+    isManagerOrAdmin,
     getMemberCapacity,
   } = useTasks();
 
@@ -352,7 +353,7 @@ export function TaskCreateModal() {
                   <label className="text-sm font-semibold text-foreground">
                     Assignee
                   </label>
-                  {currentUserId && (
+                  {isManagerOrAdmin && currentUserId && (
                     <button
                       type="button"
                       onClick={() => {
@@ -374,6 +375,7 @@ export function TaskCreateModal() {
 
                 <Select
                   value={assigneeId}
+                  disabled={!isManagerOrAdmin}
                   onChange={(e) => {
                     setAssigneeId(e.target.value);
                     setSelectedPreset("");
@@ -405,7 +407,7 @@ export function TaskCreateModal() {
                         : "Role Template Tasks"}
                     </span>
                   </label>
-                  {primaryRoleTemplate && assigneeRoleStages.length > 0 && (
+                  {isManagerOrAdmin && primaryRoleTemplate && assigneeRoleStages.length > 0 && (
                     <button
                       type="button"
                       onClick={handleApplyFullRoleTemplate}
