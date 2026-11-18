@@ -293,3 +293,60 @@ export async function sendFeedbackEmail(params: {
     html,
   });
 }
+
+export async function sendCheckoutReminderEmail(params: {
+  userName: string;
+  userEmail: string;
+  date: string;
+  checkInTime: string;
+}) {
+  const formattedCheckIn = new Date(params.checkInTime).toLocaleString("en-IN", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "medium",
+    timeStyle: "short",
+  });
+
+  const subject = `⏰ Checkout Reminder: Please check out on Satmi Dashboard (${params.date})`;
+
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e4e4e7; border-radius: 12px; background: #ffffff; color: #18181b;">
+      <div style="display: inline-block; padding: 4px 10px; border-radius: 9999px; background: #fee2e2; color: #b91c1c; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 12px;">
+        ATTENDANCE CHECKOUT REMINDER • 8:00 PM ALERT
+      </div>
+      <h2 style="margin: 0 0 12px; font-size: 18px; font-weight: 700; color: #09090b;">
+        Hi ${params.userName}, you haven't checked out yet today!
+      </h2>
+      <p style="margin: 0 0 16px; padding: 12px; border-radius: 8px; background: #f4f4f5; font-size: 14px; line-height: 1.5; color: #3f3f46;">
+        Our attendance system shows that you checked in today (${params.date}) at <strong>${formattedCheckIn} (IST)</strong>, but have not checked out as of 8:00 PM. Please open the Satmi Task Manager dashboard and click the <strong>Check Out</strong> button at the top of your dashboard.
+      </p>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #52525b;">
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Employee:</td>
+          <td style="padding: 6px 0;">${params.userName} (${params.userEmail})</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Date:</td>
+          <td style="padding: 6px 0;">${params.date}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Checked In At:</td>
+          <td style="padding: 6px 0;">${formattedCheckIn} (IST)</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Status:</td>
+          <td style="padding: 6px 0; color: #dc2626; font-weight: 600;">Pending Check-Out</td>
+        </tr>
+      </table>
+      <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 18px 0 12px;" />
+      <p style="margin: 0; font-size: 11px; color: #71717a;">
+        Satmi Task Manager • Automated Attendance Notification (From: ${RESEND_FROM_EMAIL})
+      </p>
+    </div>
+  `;
+
+  return dispatchResendMail({
+    to: [params.userEmail.trim().toLowerCase()],
+    subject,
+    html,
+  });
+}

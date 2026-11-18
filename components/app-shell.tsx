@@ -14,6 +14,7 @@ import {
   Command,
   Archive,
   Settings,
+  LogIn,
   LogOut,
   PanelLeft,
   LayoutTemplate,
@@ -24,6 +25,7 @@ import {
   Sparkles,
   LayoutDashboard,
   CheckCircle2,
+  CalendarCheck,
   MessageSquarePlus,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
@@ -69,6 +71,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setIsSettingsModalOpen,
     isRoleTemplateModalOpen,
     setIsRoleTemplateModalOpen,
+    myTodayAttendance,
+    isAttendanceLoading,
+    checkInToday,
+    checkOutToday,
   } = store;
 
   const isDeveloper = store.isDeveloper ?? currentUser?.role === "developer";
@@ -105,6 +111,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const currentEmpCode =
     currentUser.employeeCode || getEmployeeCode(currentUser.name);
   const userColor = getUserColor(currentEmpCode, currentUser.color);
+
+  const formatShortISTTime = (iso: string | null | undefined) => {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    return d.toLocaleTimeString("en-IN", {
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
+
+  const handleAttendanceAction = async (action: "checkin" | "checkout") => {
+    const res = action === "checkin" ? await checkInToday() : await checkOutToday();
+    if (!res.ok && res.error) {
+      window.alert(res.error);
+    }
+  };
 
   // Close user dropdown on outside click
   useEffect(() => {
@@ -423,6 +448,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 ) : null}
               </button>
 
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveSection("attendance");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-xs font-medium transition cursor-pointer",
+                    activeSection === "attendance"
+                      ? "bg-accent text-accent-foreground font-semibold"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <CalendarCheck className="size-4 shrink-0 text-emerald-500" />
+                    <span>Attendance</span>
+                  </div>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => {
@@ -709,6 +755,55 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
             <NotificationCenter />
             <ThemeToggle />
+
+            {/* Daily Check-In / Check-Out Button */}
+            {!myTodayAttendance?.checkInTime ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={isAttendanceLoading}
+                onClick={() => handleAttendanceAction("checkin")}
+                className="gap-1.5 text-xs h-8 bg-emerald-600 hover:bg-emerald-500 text-white border-0 shadow-xs cursor-pointer"
+                title="Check in for today"
+              >
+                <LogIn className="size-3.5" />
+                <span>{isAttendanceLoading ? "Checking in..." : "Check In"}</span>
+              </Button>
+            ) : !myTodayAttendance?.checkOutTime ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={isAttendanceLoading}
+                onClick={() => handleAttendanceAction("checkout")}
+                className="gap-1.5 text-xs h-8 bg-rose-600 hover:bg-rose-500 text-white border-0 shadow-xs cursor-pointer"
+                title={`Checked in at ${formatShortISTTime(myTodayAttendance.checkInTime)} IST — Click to Check Out`}
+              >
+                <span className="size-2 rounded-full bg-white animate-pulse shrink-0" />
+                <LogOut className="size-3.5" />
+                <span>{isAttendanceLoading ? "Checking out..." : "Check Out"}</span>
+                <span className="hidden sm:inline text-[10px] opacity-90 font-mono pl-0.5">
+                  In {formatShortISTTime(myTodayAttendance.checkInTime)}
+                </span>
+              </Button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  if (isAdmin) setActiveSection("attendance");
+                }}
+                className={cn(
+                  "inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-semibold transition",
+                  isAdmin ? "cursor-pointer hover:bg-emerald-500/15" : "cursor-default"
+                )}
+                title={`Checked in: ${formatShortISTTime(myTodayAttendance.checkInTime)} | Checked out: ${formatShortISTTime(myTodayAttendance.checkOutTime)} (IST)`}
+              >
+                <CheckCircle2 className="size-3.5 shrink-0" />
+                <span>Checked Out</span>
+                <span className="hidden md:inline text-[10px] font-mono opacity-80">
+                  {formatShortISTTime(myTodayAttendance.checkInTime)} – {formatShortISTTime(myTodayAttendance.checkOutTime)}
+                </span>
+              </button>
+            )}
 
             {/* Primary Action Button: + New Task */}
             <Button

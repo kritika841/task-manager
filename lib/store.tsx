@@ -32,6 +32,7 @@ import {
   OfflineMutation,
   WebhookConfig,
   StageHistoryEntry,
+  AttendanceRecord,
 } from "./types";
 import { dateInTargetTimeZone, isCanonicalAdflowTask } from "./supabase";
 import {
@@ -64,8 +65,8 @@ interface TaskContextType {
   setSoundMuted: (muted: boolean) => void;
   toggleSound: () => void;
   playNotificationSound: (type?: "task" | "reminder") => void;
-  activeSection: "overview" | "notepad" | "reminders";
-  setActiveSection: (section: "overview" | "notepad" | "reminders") => void;
+  activeSection: "overview" | "notepad" | "reminders" | "attendance";
+  setActiveSection: (section: "overview" | "notepad" | "reminders" | "attendance") => void;
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
   boardLayout: BoardLayout;
@@ -239,6 +240,12 @@ interface TaskContextType {
     updates: AdFlowStageMappingUpdate
   ) => Promise<boolean>;
   resetAdflowStageMapping: () => Promise<boolean>;
+  // Employee Check-In / Check-Out Attendance
+  myTodayAttendance: AttendanceRecord | null;
+  isAttendanceLoading: boolean;
+  checkInToday: () => Promise<{ ok: boolean; error?: string }>;
+  checkOutToday: () => Promise<{ ok: boolean; error?: string }>;
+  refreshMyAttendance: () => Promise<void>;
 }
 
 const defaultFilter: FilterState = {
@@ -314,7 +321,9 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
   const [currentUserId, setCurrentUserId] = useState<string>("");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
-  const [activeSection, setActiveSectionState] = useState<"overview" | "notepad" | "reminders">("overview");
+  const [activeSection, setActiveSectionState] = useState<"overview" | "notepad" | "reminders" | "attendance">("overview");
+  const [myTodayAttendance, setMyTodayAttendance] = useState<AttendanceRecord | null>(null);
+  const [isAttendanceLoading, setIsAttendanceLoading] = useState<boolean>(false);
   const [viewMode, setViewModeState] = useState<ViewMode>("board");
   const [boardLayout, setBoardLayoutState] = useState<BoardLayout>("columns");
   const [density, setDensityState] = useState<DensityMode>("comfortable");
@@ -427,7 +436,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     } catch {}
   }, []);
 
-  const setActiveSection = useCallback((section: "overview" | "notepad" | "reminders") => {
+  const setActiveSection = useCallback((section: "overview" | "notepad" | "reminders" | "attendance") => {
     setActiveSectionState(section);
     try {
       localStorage.setItem(STORAGE_KEY_ACTIVE_SECTION, section);
@@ -556,11 +565,13 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       const savedSection = localStorage.getItem(STORAGE_KEY_ACTIVE_SECTION) as
         | "overview"
         | "notepad"
-        | "reminders";
+        | "reminders"
+        | "attendance";
       if (
         savedSection === "overview" ||
         savedSection === "notepad" ||
-        savedSection === "reminders"
+        savedSection === "reminders" ||
+        savedSection === "attendance"
       ) {
         setActiveSectionState(savedSection);
       }
@@ -949,6 +960,72 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       fetchNotifications();
     }
   }, [currentUserId, fetchNotifications]);
+
+  const refreshMyAttendance = useCallback(async () => {
+    if (!isAuthenticated || !currentUserId || currentUserId === "default") return;
+    try {
+      const res = await fetch(
+        `/api/attendance?userId=${encodeURIComponent(currentUserId)}`,
+        { cache: "no-store" }
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      setMyTodayAttendance(data.myTodayRecord || null);
+    } catch (err) {
+      console.error("refreshMyAttendance error:", err);
+    }
+  }, [isAuthenticated, currentUserId]);
+
+  const performAttendanceAction = useCallback(
+    async (action: "checkin" | "checkout"): Promise<{ ok: boolean; error?: string }> => {
+      if (!currentUserId || currentUserId === "default") {
+        return { ok: false, error: "Not signed in." };
+      }
+      setIsAttendanceLoading(true);
+      try {
+        const res = await fetch("/api/attendance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action, userId: currentUserId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          return { ok: false, error: data.error || `Failed to ${action}` };
+        }
+        if (data.record) {
+          setMyTodayAttendance(data.record);
+        } else {
+          await refreshMyAttendance();
+        }
+        return { ok: true };
+      } catch (err: any) {
+        console.error(`Attendance ${action} error:`, err);
+        return { ok: false, error: err?.message || `Failed to ${action}` };
+      } finally {
+        setIsAttendanceLoading(false);
+      }
+    },
+    [currentUserId, refreshMyAttendance]
+  );
+
+  const checkInToday = useCallback(
+    () => performAttendanceAction("checkin"),
+    [performAttendanceAction]
+  );
+
+  const checkOutToday = useCallback(
+    () => performAttendanceAction("checkout"),
+    [performAttendanceAction]
+  );
+
+  useEffect(() => {
+    if (!isAuthenticated || !currentUserId || currentUserId === "default") return;
+    void refreshMyAttendance();
+    const interval = setInterval(() => {
+      void refreshMyAttendance();
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [isAuthenticated, currentUserId, refreshMyAttendance]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -3042,6 +3119,11 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         deleteRoleTemplate,
         applyTemplateToUser,
         reassignTask,
+        myTodayAttendance,
+        isAttendanceLoading,
+        checkInToday,
+        checkOutToday,
+        refreshMyAttendance,
       }}
     >
       {children}

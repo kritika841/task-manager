@@ -7,6 +7,7 @@ import {
   ListTodo,
   BarChart3,
   Calendar as CalendarIcon,
+  CalendarCheck,
   Search,
   RotateCcw,
   Download,
@@ -32,6 +33,7 @@ import { AutoDelegatorModal } from "@/components/auto-delegator-modal";
 import { TaskImportModal } from "@/components/task-import-modal";
 import { PersonalNotepad } from "@/components/personal-notepad";
 import { RemindersPanel } from "@/components/reminders-panel";
+import { AttendancePanel } from "@/components/attendance-panel";
 import { LoginView } from "@/components/login-view";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/field";
@@ -45,6 +47,7 @@ function TaskDashboardContent() {
     filteredTasks,
     isAdmin,
     activeSection,
+    setActiveSection,
     viewMode,
     setViewMode,
     density,
@@ -143,6 +146,8 @@ function TaskDashboardContent() {
         <PersonalNotepad asView={true} />
       ) : activeSection === "reminders" ? (
         <RemindersPanel asView={true} />
+      ) : activeSection === "attendance" ? (
+        <AttendancePanel />
       ) : (
         <>
           {/* Clean View Tabs & Action Toolbar */}
@@ -206,19 +211,33 @@ function TaskDashboardContent() {
               </button>
 
               {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => setViewMode("analytics")}
-                  className={cn(
-                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
-                    viewMode === "analytics"
-                      ? "bg-muted text-foreground font-semibold"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
-                  )}
-                >
-                  <BarChart3 className="size-3.5" />
-                  <span>Analytics</span>
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setViewMode("analytics")}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
+                      viewMode === "analytics"
+                        ? "bg-muted text-foreground font-semibold"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                    )}
+                  >
+                    <BarChart3 className="size-3.5" />
+                    <span>Analytics</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection("attendance")}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer shrink-0",
+                      "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                    )}
+                  >
+                    <CalendarCheck className="size-3.5 text-emerald-500" />
+                    <span>Attendance</span>
+                  </button>
+                </>
               )}
 
               <span className="ml-1 text-[11px] font-mono text-muted-foreground">

@@ -292,4 +292,40 @@ export interface FeatureRequest {
   updatedAt: string;
 }
 
+export interface AttendanceRecord {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  employeeCode?: string;
+  role?: Role;
+  department?: string;
+  date: string; // YYYY-MM-DD in Asia/Kolkata (IST)
+  status: 'present' | 'absent';
+  checkInTime: string | null; // ISO timestamp
+  checkOutTime: string | null; // ISO timestamp
+  checkoutReminderSent?: boolean;
+  checkoutReminderSentAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EmployeeAttendanceRow {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  employeeCode: string;
+  role: Role;
+  department: string;
+  color?: string;
+  avatar?: string;
+  date: string;
+  status: 'present' | 'absent';
+  checkInTime: string | null;
+  checkOutTime: string | null;
+  checkoutReminderSent: boolean;
+  checkoutReminderSentAt: string | null;
+  recordId?: string | null;
+}
+
 

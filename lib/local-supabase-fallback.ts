@@ -20,6 +20,7 @@ export interface LocalDbSchema {
   personal_notes: Record<string, any>[];
   reminders: Record<string, any>[];
   feature_requests: Record<string, any>[];
+  attendance_records?: Record<string, any>[];
   adflow_stage_mapping?: Record<string, any>;
 }
 
@@ -160,6 +161,7 @@ function createInitialSeed(): LocalDbSchema {
     personal_notes: [],
     reminders: [],
     feature_requests: [],
+    attendance_records: [],
   };
 }
 
@@ -200,6 +202,7 @@ export function loadLocalDb(): LocalDbSchema {
       personal_notes: parsed.personal_notes || [],
       reminders: parsed.reminders || [],
       feature_requests: parsed.feature_requests || [],
+      attendance_records: Array.isArray(parsed.attendance_records) ? parsed.attendance_records : [],
       adflow_stage_mapping:
         parsed.adflow_stage_mapping && typeof parsed.adflow_stage_mapping === "object"
           ? parsed.adflow_stage_mapping
