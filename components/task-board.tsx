@@ -118,6 +118,53 @@ export function TaskBoard() {
 
   const statusesByColumn = getAdFlowStatusesByColumn(adflowStageMapping);
   const effectiveBoardLayout = isManagerOrAdmin ? boardLayout : "columns";
+  const currentActor = users.find((u) => u.id === currentUserId);
+  const filteredTargetUser =
+    filter.assigneeId !== "all"
+      ? users.find((u) => u.id === filter.assigneeId)
+      : currentActor;
+
+  const resolveColumnLabel = (
+    status: TaskStatus,
+    targetUserId?: string,
+    targetRole?: string
+  ): string => {
+    const fallbackLabel = COLUMNS.find((c) => c.id === status)?.label || status;
+    const effectiveUserId = targetUserId ?? filteredTargetUser?.id ?? currentUserId;
+    const effectiveRole = targetRole ?? filteredTargetUser?.role ?? currentActor?.role;
+
+    const candidateTemplate =
+      (activeTemplateId && activeTemplateId !== "adflow-pipeline"
+        ? templates.find(
+            (t) =>
+              t.id === activeTemplateId &&
+              t.customStatusLabelsEnabled === true &&
+              (!t.userId || !effectiveUserId || t.userId === effectiveUserId)
+          )
+        : undefined) ||
+      templates.find(
+        (t) =>
+          t.customStatusLabelsEnabled === true &&
+          effectiveUserId &&
+          t.userId === effectiveUserId
+      ) ||
+      templates.find(
+        (t) =>
+          t.customStatusLabelsEnabled === true &&
+          !t.userId &&
+          effectiveRole &&
+          t.role === effectiveRole
+      );
+
+    if (!candidateTemplate || candidateTemplate.customStatusLabelsEnabled !== true) {
+      return fallbackLabel;
+    }
+
+    const customLabel =
+      candidateTemplate.statusLabels?.[status]?.trim() ||
+      candidateTemplate.parentColumns?.find((p) => p.id === status)?.label?.trim();
+    return customLabel || fallbackLabel;
+  };
 
   const [expandedTaskIds, setExpandedTaskIds] = useState<Record<string, boolean>>({});
   const [collapsedSwimlanes, setCollapsedSwimlanes] = useState<Record<string, boolean>>({});
@@ -1003,6 +1050,7 @@ export function TaskBoard() {
       {effectiveBoardLayout === "columns" && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           {COLUMNS.map((column) => {
+            const colLabel = resolveColumnLabel(column.id);
             const allColumnTasks = filteredTasks.filter((t) => t.status === column.id);
             const columnTasks = activeStageFilter &&
               statusesByColumn[column.id].some((s) => s.id === activeStageFilter)
@@ -1041,7 +1089,7 @@ export function TaskBoard() {
                           selectTasks(columnTasks.map((t) => t.id), e.target.checked)
                         }
                         className="rounded border-border text-primary focus:ring-primary size-3.5 cursor-pointer opacity-50 hover:opacity-100"
-                        title={`Bulk select all ${columnTasks.length} tasks in ${column.label}`}
+                        title={`Bulk select all ${columnTasks.length} tasks in ${colLabel}`}
                       />
                       <div
                         className={cn(
@@ -1050,7 +1098,7 @@ export function TaskBoard() {
                         )}
                       >
                         <span className={cn("size-2 rounded-full shrink-0", column.dotColor)} />
-                        <span>{column.label}</span>
+                        <span>{colLabel}</span>
                         <span className="text-[10px] font-mono opacity-80 ml-0.5">
                           {columnTasks.length}
                         </span>
@@ -1075,7 +1123,7 @@ export function TaskBoard() {
                         type="button"
                         onClick={() => openCreateModal(undefined, column.id)}
                         className="text-muted-foreground/60 hover:text-foreground transition p-1 rounded-md hover:bg-muted/50 cursor-pointer"
-                        title={`Add task to ${column.label}`}
+                        title={`Add task to ${colLabel}`}
                       >
                         <Plus className="size-3.5" />
                       </button>
@@ -1228,6 +1276,10 @@ export function TaskBoard() {
               {activeTpl.parentColumns.map((parent) => {
                 const parentTasks = filteredTasks.filter((t) => t.status === parent.id);
                 const colDef = COLUMNS.find((c) => c.id === parent.id) || COLUMNS[1];
+                const parentDisplayLabel =
+                  activeTpl.customStatusLabelsEnabled === true
+                    ? activeTpl.statusLabels?.[parent.id]?.trim() || parent.label
+                    : colDef.label;
 
                 return (
                   <div
@@ -1239,7 +1291,7 @@ export function TaskBoard() {
                       <div className="flex items-center gap-2">
                         <div className={cn("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold tracking-wide whitespace-nowrap", colDef.pillBg)}>
                           <span className={cn("size-2 rounded-full shrink-0", colDef.dotColor)} />
-                          <span>{parent.label}</span>
+                          <span>{parentDisplayLabel}</span>
                           <span className="text-[10px] font-mono opacity-80 ml-0.5">
                             {parentTasks.length}
                           </span>
@@ -1249,7 +1301,7 @@ export function TaskBoard() {
                         type="button"
                         onClick={() => openCreateModal(undefined, parent.id)}
                         className="text-muted-foreground/60 hover:text-foreground transition p-1 rounded-md hover:bg-muted/50 cursor-pointer"
-                        title={`Add task to ${parent.label}`}
+                        title={`Add task to ${parentDisplayLabel}`}
                       >
                         <Plus className="size-3.5" />
                       </button>
@@ -1476,6 +1528,7 @@ export function TaskBoard() {
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 p-3 bg-card/40">
                     {COLUMNS.map((column) => {
                       const swimlaneTasks = memberTasks.filter((t) => t.status === column.id);
+                      const swimColLabel = resolveColumnLabel(column.id, member.id, member.role);
                       const key = `${member.id}-${column.id}`;
                       const isHovered = dragOverColumn === key;
 
@@ -1511,10 +1564,10 @@ export function TaskBoard() {
                                   )
                                 }
                                 className="rounded border-border text-primary focus:ring-primary size-3 cursor-pointer"
-                                title={`Bulk select all tasks in ${column.label}`}
+                                title={`Bulk select all tasks in ${swimColLabel}`}
                               />
                               <span className={cn("size-1.5 rounded-full", column.dotColor)} />
-                              <span>{column.label}</span>
+                              <span>{swimColLabel}</span>
                             </span>
                             <span className="font-mono text-[10px]">{swimlaneTasks.length}</span>
                           </div>

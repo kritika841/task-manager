@@ -693,6 +693,16 @@ export async function updateTemplate(id: string, updates: Partial<RoleTemplate>)
   const updatedItem: RoleTemplate = {
     ...existing,
     ...updates,
+    customStatusLabelsEnabled:
+      updates.customStatusLabelsEnabled !== undefined
+        ? Boolean(updates.customStatusLabelsEnabled)
+        : existing.customStatusLabelsEnabled,
+    statusLabels:
+      updates.customStatusLabelsEnabled === false
+        ? undefined
+        : updates.statusLabels !== undefined
+          ? updates.statusLabels
+          : existing.statusLabels,
     updatedAt: new Date().toISOString(),
   };
   current[index] = updatedItem;

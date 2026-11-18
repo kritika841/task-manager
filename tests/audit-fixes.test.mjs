@@ -36,6 +36,8 @@ let baseUrl;
 let mockPort;
 let capturedEmails = [];
 let mockAds = [];
+let mockUpstreamProfiles = null;
+let capturedProfilePatches = [];
 
 async function api(urlPath, opts = {}) {
   const res = await fetch(`${baseUrl}${urlPath}`, opts);
@@ -133,6 +135,16 @@ test.before(async () => {
       return send(200, { id: "mock-email" });
     }
     if (urlObj.pathname === "/rest/v1/profiles") {
+      if (req.method === "PATCH") {
+        capturedProfilePatches.push({
+          id: urlObj.searchParams.get("id"),
+          body,
+        });
+        return send(200, []);
+      }
+      if (mockUpstreamProfiles) {
+        return send(200, mockUpstreamProfiles);
+      }
       const curDb = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
       return send(200, curDb.profiles);
     }
@@ -465,6 +477,35 @@ test("Tasks & Users: RBAC bounds, validation, deduplication (409), optimistic lo
   });
   assert.equal(badPatchUrl.status, 400);
 
+  // Member blocked from editing deadline, priority, targetQuantity, title, or deleting admin-assigned tasks
+  for (const forbiddenBody of [
+    { id: taskId, dueDate: "2099-12-31" },
+    { id: taskId, priority: "high" },
+    { id: taskId, targetQuantity: 9 },
+    { id: taskId, title: "Modified By Assignee" },
+  ]) {
+    const forbiddenPatch = await api("/api/tasks", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", cookie: memCookie },
+      body: JSON.stringify(forbiddenBody),
+    });
+    assert.equal(forbiddenPatch.status, 403);
+  }
+
+  const forbiddenDelete = await api(`/api/tasks?id=${taskId}`, {
+    method: "DELETE",
+    headers: { cookie: memCookie },
+  });
+  assert.equal(forbiddenDelete.status, 403);
+
+  // Valid deliverable submission succeeds for assignee
+  const okDeliverablePatch = await api("/api/tasks", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", cookie: memCookie },
+    body: JSON.stringify({ id: taskId, deliverableUrl: "https://drive.google.com/file/d/abc123/view" }),
+  });
+  assert.equal(okDeliverablePatch.status, 200);
+
   // Optimistic concurrency check (stale expectedUpdatedAt -> 409)
   const stalePatch = await api("/api/tasks", {
     method: "PATCH",
@@ -527,4 +568,71 @@ test("Infra: /api/health, Security Headers, and Custom 404 page", async () => {
   assert.equal(notFound.status, 404);
   assert.ok(notFound.text.includes("Page Not Found"));
   assert.ok(notFound.text.includes("Back to Dashboard"));
+});
+
+test("AdFlow profile role sync & Role Templates custom status nomenclature", async () => {
+  const admCookie = await loginAs("t-admin@test.local");
+
+  // 1. Custom status nomenclature toggle persists in /api/templates
+  const tplRes = await api("/api/templates", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie: admCookie },
+    body: JSON.stringify({
+      name: "Custom Nomenclature Test",
+      role: "editor",
+      customStatusLabelsEnabled: true,
+      statusLabels: { todo: "Assigned" },
+      parentColumns: [
+        { id: "backlog", label: "Backlog", subColumns: [] },
+        { id: "todo", label: "Assigned", subColumns: [] },
+        { id: "in_progress", label: "In Progress", subColumns: [] },
+        { id: "in_review", label: "In Review", subColumns: [] },
+        { id: "completed", label: "Done", subColumns: [] },
+      ],
+    }),
+  });
+  assert.equal(tplRes.status, 201);
+  assert.equal(tplRes.json.template.customStatusLabelsEnabled, true);
+  assert.equal(tplRes.json.template.statusLabels.todo, "Assigned");
+
+  // 2. Upstream AdFlow profile role updates overwrite stale local role overrides
+  await new Promise((r) => setTimeout(r, 1600));
+  const curDb = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+  curDb.profile_overrides["22222222-2222-4222-8222-222222222205"] = {
+    role: "member",
+    updated_at: "2020-01-01T00:00:00.000Z",
+  };
+  fs.writeFileSync(DB_PATH, JSON.stringify(curDb, null, 2), "utf8");
+
+  mockUpstreamProfiles = curDb.profiles.map((p) =>
+    p.id === "22222222-2222-4222-8222-222222222205"
+      ? { ...p, role: "editor", updated_at: new Date().toISOString() }
+      : p
+  );
+
+  const usersRes = await api("/api/users", { headers: { cookie: admCookie } });
+  mockUpstreamProfiles = null;
+  assert.equal(usersRes.status, 200);
+  const syncedMember = usersRes.json.users.find(
+    (u) => u.id === "22222222-2222-4222-8222-222222222205"
+  );
+  assert.equal(syncedMember?.role, "editor");
+
+  // 3. Updating user settings in Task Manager syncs PATCH back to AdFlow profiles
+  const patchRes = await api("/api/users", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", cookie: admCookie },
+    body: JSON.stringify({
+      id: "22222222-2222-4222-8222-222222222205",
+      role: "member",
+    }),
+  });
+  assert.equal(patchRes.status, 200);
+  assert.ok(
+    capturedProfilePatches.some(
+      (p) =>
+        p.id === "eq.22222222-2222-4222-8222-222222222205" &&
+        p.body?.role === "member"
+    )
+  );
 });

@@ -23,6 +23,19 @@ export async function GET(req: Request) {
   }
 }
 
+function sanitizeStatusLabels(raw: unknown): Partial<Record<"backlog" | "todo" | "in_progress" | "in_review" | "completed", string>> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const allowed = ["backlog", "todo", "in_progress", "in_review", "completed"] as const;
+  const out: Partial<Record<(typeof allowed)[number], string>> = {};
+  for (const key of allowed) {
+    const val = (raw as Record<string, unknown>)[key];
+    if (typeof val === "string" && val.trim()) {
+      out[key] = val.trim().slice(0, 60);
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -30,6 +43,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Template name and role are required" }, { status: 400 });
     }
 
+    const customStatusLabelsEnabled = Boolean(body.customStatusLabelsEnabled);
     const template = await createTemplate({
       name: body.name,
       role: body.role,
@@ -37,6 +51,8 @@ export async function POST(req: Request) {
       userName: body.userName || undefined,
       description: body.description || "",
       isDefault: Boolean(body.isDefault),
+      customStatusLabelsEnabled,
+      statusLabels: customStatusLabelsEnabled ? sanitizeStatusLabels(body.statusLabels) : undefined,
       parentColumns: body.parentColumns || [],
     });
 
@@ -54,7 +70,17 @@ export async function PUT(req: Request) {
       return NextResponse.json({ error: "Template ID is required" }, { status: 400 });
     }
 
-    const updated = await updateTemplate(body.id, body);
+    const sanitizedUpdates = { ...body };
+    if (body.customStatusLabelsEnabled !== undefined) {
+      sanitizedUpdates.customStatusLabelsEnabled = Boolean(body.customStatusLabelsEnabled);
+      sanitizedUpdates.statusLabels = sanitizedUpdates.customStatusLabelsEnabled
+        ? sanitizeStatusLabels(body.statusLabels)
+        : undefined;
+    } else if (body.statusLabels !== undefined) {
+      sanitizedUpdates.statusLabels = sanitizeStatusLabels(body.statusLabels);
+    }
+
+    const updated = await updateTemplate(body.id, sanitizedUpdates);
     if (!updated) {
       return NextResponse.json({ error: "Template not found" }, { status: 404 });
     }

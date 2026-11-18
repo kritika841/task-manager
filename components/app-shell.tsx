@@ -28,7 +28,7 @@ import {
   CalendarCheck,
   MessageSquarePlus,
 } from "lucide-react";
-import { useTasks } from "@/lib/store";
+import { isSelfAssignedTask, useTasks } from "@/lib/store";
 import { isSoundMuted, toggleSoundMuted } from "@/lib/sound";
 import { ThemeToggle } from "./theme-toggle";
 import { CommandPalette } from "./command-palette";
@@ -151,11 +151,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const myTasksCount = filter.onlyMyTasks
     ? filteredTasks.length
-    : baseVisibleTasks.filter(
-        (t) =>
-          t.assigneeId === currentUserId ||
-          t.adCreatorId === currentUserId ||
-          t.adEditorId === currentUserId
+    : baseVisibleTasks.filter((t) =>
+        isManagerOrAdmin
+          ? t.assigneeId === currentUserId
+          : isSelfAssignedTask(t, currentUserId)
       ).length;
   const inReviewCount =
     filter.status === "in_review"

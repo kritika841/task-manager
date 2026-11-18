@@ -17,7 +17,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { Task, Subtask, TaskStatus } from "@/lib/types";
-import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
+import { isAdFlowLinkedTask, isSelfAssignedTask, useTasks } from "@/lib/store";
 import { StatusBadge, PriorityBadge } from "./ui/badge";
 import { ProgressBar } from "./ui/progress-bar";
 import { Button } from "./ui/button";
@@ -33,6 +33,7 @@ export function TaskList() {
     updateTask,
     deleteTask,
     restoreTask,
+    currentUserId,
     isManagerOrAdmin,
     selectedTaskIds,
     toggleSelectTask,
@@ -75,6 +76,7 @@ export function TaskList() {
         const completedQty = task.completedQuantity || 0;
         const pct = Math.min(100, Math.round((completedQty / targetQty) * 100));
         const overdue = isOverdue(task.dueDate) && task.status !== "completed";
+        const canModifyTaskConfig = isManagerOrAdmin || isSelfAssignedTask(task, currentUserId);
 
         return (
           <div
@@ -170,7 +172,7 @@ export function TaskList() {
                     <option value="todo">To Do</option>
                     <option value="in_progress">In Progress</option>
                     <option value="in_review">In Review</option>
-                    <option value="completed">Done</option>
+                    {isManagerOrAdmin && <option value="completed">Done</option>}
                   </select>
                 </div>
                 <PriorityBadge priority={task.priority} />
@@ -200,7 +202,7 @@ export function TaskList() {
                 </span>
 
                 {/* Archive / Delete button */}
-                {task.isArchived ? (
+                {canModifyTaskConfig && (task.isArchived ? (
                   <button
                     type="button"
                     onClick={(e) => {
@@ -213,22 +215,20 @@ export function TaskList() {
                     <RotateCcw className="size-3.5" />
                   </button>
                 ) : (
-                  isManagerOrAdmin && (
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (confirm(`Archive task ${task.taskNumber}?`)) {
-                          deleteTask(task.id);
-                        }
-                      }}
-                      className="size-7 rounded hover:bg-amber-500/15 text-muted-foreground/60 hover:text-amber-500 flex items-center justify-center transition cursor-pointer"
-                      title="Archive task"
-                    >
-                      <Archive className="size-3.5" />
-                    </button>
-                  )
-                )}
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (confirm(`Archive task ${task.taskNumber}?`)) {
+                        deleteTask(task.id);
+                      }
+                    }}
+                    className="size-7 rounded hover:bg-amber-500/15 text-muted-foreground/60 hover:text-amber-500 flex items-center justify-center transition cursor-pointer"
+                    title="Archive task"
+                  >
+                    <Archive className="size-3.5" />
+                  </button>
+                ))}
               </div>
             </div>
 

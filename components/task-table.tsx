@@ -391,7 +391,7 @@ export function TaskTable() {
                         <option value="todo">To Do</option>
                         <option value="in_progress">In Progress</option>
                         <option value="in_review">In Review</option>
-                        <option value="completed">Completed</option>
+                        {isManagerOrAdmin && <option value="completed">Completed</option>}
                         <option value="backlog">Backlog</option>
                       </select>
                     </td>

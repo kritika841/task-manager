@@ -147,6 +147,8 @@ export interface RoleTemplate {
   userName?: string;
   description: string;
   isDefault?: boolean;
+  customStatusLabelsEnabled?: boolean;
+  statusLabels?: Partial<Record<TaskStatus, string>>;
   parentColumns: ParentColumnDef[];
   createdAt: string;
   updatedAt: string;

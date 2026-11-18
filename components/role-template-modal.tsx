@@ -83,6 +83,7 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
   const [formRole, setFormRole] = useState<Role | "general">("editor");
   const [formUserId, setFormUserId] = useState<string>("");
   const [formDesc, setFormDesc] = useState("");
+  const [formCustomStatusLabelsEnabled, setFormCustomStatusLabelsEnabled] = useState(false);
   const [formParentCols, setFormParentCols] = useState<ParentColumnDef[]>([]);
 
   // Apply template state
@@ -146,6 +147,7 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
             : [],
       }))
     );
+    setFormCustomStatusLabelsEnabled(false);
     setIsCreatingNew(true);
     setEditingTemplate(null);
     setActiveTab("builder");
@@ -156,7 +158,14 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
     setFormRole(tpl.role);
     setFormUserId(tpl.userId || "");
     setFormDesc(tpl.description || "");
-    setFormParentCols(JSON.parse(JSON.stringify(tpl.parentColumns)));
+    setFormCustomStatusLabelsEnabled(Boolean(tpl.customStatusLabelsEnabled));
+    setFormParentCols(
+      JSON.parse(JSON.stringify(tpl.parentColumns)).map((col: ParentColumnDef) => ({
+        ...col,
+        label:
+          (tpl.customStatusLabelsEnabled && tpl.statusLabels?.[col.id]) || col.label,
+      }))
+    );
     setIsCreatingNew(true);
     setEditingTemplate(null);
     setActiveTab("builder");
@@ -167,7 +176,14 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
     setFormRole(tpl.role);
     setFormUserId(tpl.userId || "");
     setFormDesc(tpl.description || "");
-    setFormParentCols(JSON.parse(JSON.stringify(tpl.parentColumns)));
+    setFormCustomStatusLabelsEnabled(Boolean(tpl.customStatusLabelsEnabled));
+    setFormParentCols(
+      JSON.parse(JSON.stringify(tpl.parentColumns)).map((col: ParentColumnDef) => ({
+        ...col,
+        label:
+          (tpl.customStatusLabelsEnabled && tpl.statusLabels?.[col.id]) || col.label,
+      }))
+    );
     setEditingTemplate(tpl);
     setIsCreatingNew(false);
     setActiveTab("builder");
@@ -176,13 +192,38 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
   const handleSaveBuilder = async () => {
     if (!formName.trim()) return;
 
+    const normalizedParentCols: ParentColumnDef[] = formParentCols.map((col) => {
+      const defaultLabel =
+        PARENT_COLUMNS_PRESET.find((p) => p.id === col.id)?.label || col.label;
+      return {
+        ...col,
+        label: formCustomStatusLabelsEnabled
+          ? col.label.trim() || defaultLabel
+          : defaultLabel,
+      };
+    });
+
+    const statusLabels = formCustomStatusLabelsEnabled
+      ? normalizedParentCols.reduce(
+          (acc, col) => ({ ...acc, [col.id]: col.label }),
+          {} as Partial<Record<TaskStatus, string>>
+        )
+      : undefined;
+
+    const selectedUserName = formUserId
+      ? users.find((u) => u.id === formUserId)?.name
+      : undefined;
+
     if (isCreatingNew) {
       const created = await createRoleTemplate({
         name: formName.trim(),
         role: formRole,
         userId: formUserId || undefined,
+        userName: selectedUserName,
         description: formDesc.trim(),
-        parentColumns: formParentCols,
+        customStatusLabelsEnabled: formCustomStatusLabelsEnabled,
+        statusLabels,
+        parentColumns: normalizedParentCols,
         isDefault: false,
       });
       if (created) {
@@ -195,8 +236,11 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
         name: formName.trim(),
         role: formRole,
         userId: formUserId || undefined,
+        userName: selectedUserName,
         description: formDesc.trim(),
-        parentColumns: formParentCols,
+        customStatusLabelsEnabled: formCustomStatusLabelsEnabled,
+        statusLabels,
+        parentColumns: normalizedParentCols,
       });
       if (updated) {
         setSelectedTemplateId(updated.id);
@@ -649,7 +693,12 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                         className="rounded-xl border border-border/80 bg-muted/15 p-2.5 space-y-2"
                       >
                         <div className="flex items-center justify-between pb-1 border-b border-border/60">
-                          <span className="text-xs font-bold text-foreground">{parent.label}</span>
+                          <span className="text-xs font-bold text-foreground">
+                            {currentTpl.customStatusLabelsEnabled
+                              ? currentTpl.statusLabels?.[parent.id] || parent.label
+                              : PARENT_COLUMNS_PRESET.find((p) => p.id === parent.id)?.label ||
+                                parent.label}
+                          </span>
                           <span className="text-[10px] font-mono text-muted-foreground">
                             {parent.subColumns.length}
                           </span>
@@ -783,16 +832,107 @@ export function RoleTemplateModal({ isOpen, onClose }: RoleTemplateModalProps = 
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-border bg-muted/20 p-3">
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-1">
+                    Specific User (Optional)
+                  </label>
+                  <select
+                    value={formUserId}
+                    onChange={(e) => setFormUserId(e.target.value)}
+                    className="w-full rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-foreground"
+                  >
+                    <option value="">All users in role</option>
+                    {users.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} ({u.role.replace("_", " ")})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <span className="block text-xs font-semibold text-foreground">
+                      Customize Default Status Nomenclature
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Off by default. Toggle on to rename To Do, In Progress, etc.
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={formCustomStatusLabelsEnabled}
+                    onClick={() => {
+                      const next = !formCustomStatusLabelsEnabled;
+                      setFormCustomStatusLabelsEnabled(next);
+                      if (!next) {
+                        setFormParentCols((prev) =>
+                          prev.map((col) => ({
+                            ...col,
+                            label:
+                              PARENT_COLUMNS_PRESET.find((p) => p.id === col.id)?.label ||
+                              col.label,
+                          }))
+                        );
+                      }
+                    }}
+                    className={cn(
+                      "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition cursor-pointer",
+                      formCustomStatusLabelsEnabled
+                        ? "bg-primary border-primary"
+                        : "bg-muted border-border"
+                    )}
+                    title="Toggle custom status nomenclature"
+                  >
+                    <span
+                      className={cn(
+                        "inline-block size-4 rounded-full bg-white shadow transition-transform",
+                        formCustomStatusLabelsEnabled ? "translate-x-5" : "translate-x-1"
+                      )}
+                    />
+                  </button>
+                </div>
+              </div>
+
               <div className="space-y-3">
                 {formParentCols.map((parent) => (
                   <div
                     key={parent.id}
                     className="rounded-xl border border-border bg-card p-3.5 space-y-2.5"
                   >
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
                         <span className="size-2 rounded-full bg-primary" />
-                        <span className="text-xs font-bold text-foreground">{parent.label}</span>
+                        {formCustomStatusLabelsEnabled ? (
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="text"
+                              value={parent.label}
+                              onChange={(e) =>
+                                setFormParentCols((prev) =>
+                                  prev.map((col) =>
+                                    col.id === parent.id
+                                      ? { ...col, label: e.target.value }
+                                      : col
+                                  )
+                                )
+                              }
+                              aria-label={`Custom status label for ${parent.id}`}
+                              className="rounded-md border border-primary/40 bg-background px-2 py-0.5 text-xs font-bold text-foreground w-36 focus:outline-none focus:ring-1 focus:ring-primary"
+                            />
+                            <span className="text-[10px] font-mono text-muted-foreground">
+                              (default:{" "}
+                              {PARENT_COLUMNS_PRESET.find((p) => p.id === parent.id)?.label})
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs font-bold text-foreground">
+                            {PARENT_COLUMNS_PRESET.find((p) => p.id === parent.id)?.label ||
+                              parent.label}
+                          </span>
+                        )}
                         <span className="text-[10px] font-mono text-muted-foreground">
                           ({parent.subColumns.length})
                         </span>

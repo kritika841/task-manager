@@ -28,7 +28,7 @@ import {
   Play,
   Snowflake,
 } from "lucide-react";
-import { isAdFlowLinkedTask, useTasks } from "@/lib/store";
+import { isAdFlowLinkedTask, isSelfAssignedTask, useTasks } from "@/lib/store";
 import { TaskPriority, TaskStatus } from "@/lib/types";
 import { isCanonicalAdflowTask } from "@/lib/supabase";
 import { ADFLOW_PRODUCTION_STAGES } from "@/lib/adflow-bridge";
@@ -137,6 +137,8 @@ export function TaskDrawer() {
   const isAssignedCreator =
     currentUser.id === task.adCreatorId ||
     (currentUser.role === "content_creator" && currentUser.id === task.assigneeId);
+  const isSelfAssigned = isSelfAssignedTask(task, currentUserId);
+  const canModifyTaskConfig = isManagerOrAdmin || isSelfAssigned;
 
   const handleRevisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -273,7 +275,7 @@ export function TaskDrawer() {
             </div>
 
             <div className="flex items-center gap-2">
-              {task.isArchived ? (
+              {canModifyTaskConfig && (task.isArchived ? (
                 <Button
                   type="button"
                   size="sm"
@@ -286,22 +288,20 @@ export function TaskDrawer() {
                   <span>Restore</span>
                 </Button>
               ) : (
-                isManagerOrAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (confirm(`Archive task ${task.taskNumber}?`)) {
-                        deleteTask(task.id);
-                        setSelectedTaskId(null);
-                      }
-                    }}
-                    className="size-7 rounded-lg border border-amber-500/20 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-500 flex items-center justify-center transition cursor-pointer"
-                    title="Archive task"
-                  >
-                    <Archive className="size-3.5" />
-                  </button>
-                )
-              )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (confirm(`Archive task ${task.taskNumber}?`)) {
+                      deleteTask(task.id);
+                      setSelectedTaskId(null);
+                    }
+                  }}
+                  className="size-7 rounded-lg border border-amber-500/20 hover:border-amber-500/60 hover:bg-amber-500/10 text-amber-500 flex items-center justify-center transition cursor-pointer"
+                  title="Archive task"
+                >
+                  <Archive className="size-3.5" />
+                </button>
+              ))}
 
               <button
                 type="button"
@@ -383,11 +383,11 @@ export function TaskDrawer() {
                     <input
                       type="text"
                       value={task.title}
-                      disabled={isTitleLocked}
+                      disabled={isTitleLocked || !canModifyTaskConfig}
                       onChange={(e) => updateTask(task.id, { title: e.target.value })}
                       className={cn(
                         "text-base font-bold text-foreground bg-transparent border-b outline-hidden w-full transition pb-1",
-                        isTitleLocked
+                        isTitleLocked || !canModifyTaskConfig
                           ? "border-transparent cursor-not-allowed opacity-90 select-none"
                           : "border-transparent hover:border-border focus:border-primary"
                       )}
@@ -464,7 +464,9 @@ export function TaskDrawer() {
                           { id: "in_progress", label: "In Progress", activeStyle: "bg-blue-500/20 text-blue-400 border-blue-500/40" },
                           { id: "in_review", label: "In Review", activeStyle: "bg-amber-500/20 text-amber-400 border-amber-500/40" },
                           { id: "completed", label: "Done", activeStyle: "bg-emerald-500/20 text-emerald-400 border-emerald-500/40" },
-                        ].map((st) => (
+                        ]
+                          .filter((st) => isManagerOrAdmin || st.id !== "completed")
+                          .map((st) => (
                           <button
                             key={st.id}
                             type="button"
@@ -567,6 +569,7 @@ export function TaskDrawer() {
                     <div className="col-span-2">
                       <Select
                         value={task.priority}
+                        disabled={!canModifyTaskConfig}
                         onChange={(e) =>
                           updateTask(task.id, {
                             priority: e.target.value as TaskPriority,
@@ -589,20 +592,27 @@ export function TaskDrawer() {
                       <span>Assignee</span>
                     </span>
                     <div className="col-span-2">
-                      <Select
-                        value={task.assigneeId}
-                        disabled={!isManagerOrAdmin}
-                        onChange={(e) =>
-                          updateTask(task.id, { assigneeId: e.target.value })
-                        }
-                        className="w-full text-xs h-8 bg-card"
-                      >
-                        {users.map((u) => (
-                          <option key={u.id} value={u.id}>
-                            {u.name} ({u.role})
-                          </option>
-                        ))}
-                      </Select>
+                      {isManagerOrAdmin ? (
+                        <Select
+                          value={task.assigneeId}
+                          onChange={(e) =>
+                            updateTask(task.id, { assigneeId: e.target.value })
+                          }
+                          className="w-full text-xs h-8 bg-card"
+                        >
+                          {users.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.name} ({u.role})
+                            </option>
+                          ))}
+                        </Select>
+                      ) : (
+                        <div className="h-8 px-2.5 rounded-md border border-border/60 bg-muted/40 flex items-center text-xs font-medium text-foreground truncate">
+                          {assignee
+                            ? `${assignee.name} (${assignee.role.replace("_", " ")})`
+                            : "Unassigned"}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -614,13 +624,14 @@ export function TaskDrawer() {
                         type="number"
                         min="1"
                         max="50"
+                        disabled={!canModifyTaskConfig}
                         value={targetQty}
                         onChange={(e) =>
                           updateTask(task.id, {
                             targetQuantity: Math.max(1, parseInt(e.target.value) || 1),
                           })
                         }
-                        className="w-20 rounded-md border border-border px-2 py-1 text-xs bg-card font-mono"
+                        className="w-20 rounded-md border border-border px-2 py-1 text-xs bg-card font-mono disabled:opacity-60 disabled:cursor-not-allowed"
                       />
                       <span className="text-muted-foreground text-[11px]">deliverable units</span>
                     </div>
@@ -650,8 +661,9 @@ export function TaskDrawer() {
                       </span>
                       <button
                         type="button"
+                        disabled={!isManagerOrAdmin && completedQty + 1 >= targetQty}
                         onClick={() => updateTaskProgress(task.id, completedQty + 1)}
-                        className="size-7 rounded border border-border bg-card hover:bg-muted font-bold flex items-center justify-center cursor-pointer"
+                        className="size-7 rounded border border-border bg-card hover:bg-muted font-bold flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                       >
                         +
                       </button>
@@ -668,18 +680,29 @@ export function TaskDrawer() {
                       <span>Due Date</span>
                     </span>
                     <div className="col-span-2 flex items-center gap-2">
-                      <Input
-                        type="date"
-                        value={task.dueDate}
-                        onChange={(e) => updateTask(task.id, { dueDate: e.target.value })}
-                        className="flex-1 text-xs h-8 bg-card"
-                      />
-                      <Input
-                        type="time"
-                        value={task.dueTime || ""}
-                        onChange={(e) => updateTask(task.id, { dueTime: e.target.value })}
-                        className="w-24 text-xs h-8 bg-card"
-                      />
+                      {isManagerOrAdmin ? (
+                        <>
+                          <Input
+                            type="date"
+                            value={task.dueDate}
+                            onChange={(e) => updateTask(task.id, { dueDate: e.target.value })}
+                            className="flex-1 text-xs h-8 bg-card"
+                          />
+                          <Input
+                            type="time"
+                            value={task.dueTime || ""}
+                            onChange={(e) => updateTask(task.id, { dueTime: e.target.value })}
+                            className="w-24 text-xs h-8 bg-card"
+                          />
+                        </>
+                      ) : (
+                        <div className="h-8 px-2.5 rounded-md border border-border/60 bg-muted/40 flex items-center gap-2 text-xs font-mono text-foreground w-full">
+                          <span>{formatDate(task.dueDate)}</span>
+                          {task.dueTime && (
+                            <span className="text-muted-foreground">· {task.dueTime}</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -690,37 +713,39 @@ export function TaskDrawer() {
                     <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
                       Instructions & Notes
                     </span>
-                    <div className="flex items-center rounded border border-border bg-muted/40 p-0.5 text-[10px]">
-                      <button
-                        type="button"
-                        onClick={() => setDescMode("edit")}
-                        className={cn(
-                          "px-2 py-0.5 rounded cursor-pointer transition flex items-center gap-1",
-                          descMode === "edit"
-                            ? "bg-card text-foreground font-bold shadow-2xs"
-                            : "text-muted-foreground"
-                        )}
-                      >
-                        <Edit3 className="size-2.5" />
-                        <span>Edit</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDescMode("preview")}
-                        className={cn(
-                          "px-2 py-0.5 rounded cursor-pointer transition flex items-center gap-1",
-                          descMode === "preview"
-                            ? "bg-card text-foreground font-bold shadow-2xs"
-                            : "text-muted-foreground"
-                        )}
-                      >
-                        <Eye className="size-2.5" />
-                        <span>Preview</span>
-                      </button>
-                    </div>
+                    {canModifyTaskConfig && (
+                      <div className="flex items-center rounded border border-border bg-muted/40 p-0.5 text-[10px]">
+                        <button
+                          type="button"
+                          onClick={() => setDescMode("edit")}
+                          className={cn(
+                            "px-2 py-0.5 rounded cursor-pointer transition flex items-center gap-1",
+                            descMode === "edit"
+                              ? "bg-card text-foreground font-bold shadow-2xs"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          <Edit3 className="size-2.5" />
+                          <span>Edit</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDescMode("preview")}
+                          className={cn(
+                            "px-2 py-0.5 rounded cursor-pointer transition flex items-center gap-1",
+                            descMode === "preview"
+                              ? "bg-card text-foreground font-bold shadow-2xs"
+                              : "text-muted-foreground"
+                          )}
+                        >
+                          <Eye className="size-2.5" />
+                          <span>Preview</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
 
-                  {descMode === "edit" ? (
+                  {canModifyTaskConfig && descMode === "edit" ? (
                     <Textarea
                       rows={3}
                       placeholder="Add task instructions, links, or requirements..."
@@ -1272,6 +1297,7 @@ export function TaskDrawer() {
                   completedQuantity={completedQty}
                   autoCompletedQuantity={task.autoCompletedQuantity || 0}
                   users={users}
+                  disabled={!canModifyTaskConfig}
                   onToggle={(subtaskId) => toggleSubtask(task.id, subtaskId)}
                   onAddSubtask={(title, assignedTo) =>
                     addSubtask(task.id, title, assignedTo)
@@ -1299,13 +1325,17 @@ export function TaskDrawer() {
                       return (
                         <label
                           key={ot.id}
-                          className="flex items-center justify-between p-1.5 rounded hover:bg-muted/40 cursor-pointer"
+                          className={cn(
+                            "flex items-center justify-between p-1.5 rounded",
+                            canModifyTaskConfig ? "hover:bg-muted/40 cursor-pointer" : "opacity-80 cursor-default"
+                          )}
                         >
                           <div className="flex items-center gap-2 min-w-0">
                             <input
                               type="checkbox"
                               checked={isChecked}
-                              onChange={() => toggleDependency(ot.id)}
+                              disabled={!canModifyTaskConfig}
+                              onChange={() => canModifyTaskConfig && toggleDependency(ot.id)}
                               className="rounded border-border text-primary focus:ring-primary size-3.5"
                             />
                             <span className="truncate font-medium text-[11px]">

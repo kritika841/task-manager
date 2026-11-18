@@ -778,25 +778,73 @@ function handleLocalSupabaseRequest(urlStr: string, init?: RequestInit): Respons
   });
 }
 
-// Cache network reachability for 60s when DNS/network fails so fallback is instantaneous (<1ms)
+// Cache network reachability for 30-60s when DNS/network fails; throttle profile sync to 1.5s
 let supabaseOfflineUntil = 0;
 let lastProfilesSyncAt = 0;
 
+function mergeProfileAvatarMetadata(upAvatar: unknown, localAvatar: unknown): any {
+  const upStr = typeof upAvatar === "string" ? upAvatar : null;
+  if (upStr && upStr.includes('"passwordHash"')) {
+    return upStr;
+  }
+
+  let localMeta: Record<string, any> | null = null;
+  if (typeof localAvatar === "string" && localAvatar.trim().startsWith("{")) {
+    try {
+      localMeta = JSON.parse(localAvatar);
+    } catch {}
+  }
+
+  if (!localMeta) {
+    return upAvatar !== undefined ? upAvatar : localAvatar;
+  }
+
+  if (upStr && upStr.trim().startsWith("{")) {
+    try {
+      const upMeta = JSON.parse(upStr);
+      return JSON.stringify({
+        ...localMeta,
+        ...upMeta,
+        ...(localMeta.passwordHash ? { passwordHash: localMeta.passwordHash } : {}),
+      });
+    } catch {}
+  }
+
+  if (upStr && (upStr.startsWith("http") || upStr.startsWith("/"))) {
+    return JSON.stringify({ ...localMeta, realAvatarUrl: upStr });
+  }
+
+  if (upStr && upStr.startsWith("#")) {
+    return JSON.stringify({ ...localMeta, color: upStr });
+  }
+
+  return localAvatar;
+}
+
 async function syncUpstreamAdFlowProfiles(url: URL, init?: RequestInit) {
   if (Date.now() < supabaseOfflineUntil) return;
-  if (Date.now() - lastProfilesSyncAt < 8_000) return;
+  if (Date.now() - lastProfilesSyncAt < 1_500) return;
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 5000);
   try {
     const upstreamProfilesUrl = `${url.origin}/rest/v1/profiles?select=*`;
+    const fallbackKey =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ||
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      "";
+    const headers = new Headers(init?.headers);
+    headers.set("accept", "application/json");
+    if (!headers.get("apikey") && fallbackKey) {
+      headers.set("apikey", fallbackKey);
+    }
+    if (!headers.get("authorization") && fallbackKey) {
+      headers.set("authorization", `Bearer ${fallbackKey}`);
+    }
+
     const res = await fetch(upstreamProfilesUrl, {
-      ...init,
       method: "GET",
-      headers: {
-        ...(init?.headers || {}),
-        accept: "application/json",
-      },
+      headers,
       signal: controller.signal,
     });
     clearTimeout(timeout);
@@ -807,19 +855,58 @@ async function syncUpstreamAdFlowProfiles(url: URL, init?: RequestInit) {
 
     const db = loadLocalDb();
     const overrides = db.profile_overrides || {};
+    const existingProfilesById = new Map<string, Record<string, any>>();
+    const existingProfilesByEmail = new Map<string, Record<string, any>>();
+    for (const p of db.profiles || []) {
+      if (p?.id) existingProfilesById.set(p.id, p);
+      if (p?.email) existingProfilesByEmail.set(String(p.email).toLowerCase(), p);
+    }
+    const overridesByEmail = new Map<string, Record<string, any>>();
+    for (const ov of Object.values(overrides)) {
+      if (ov?.email) overridesByEmail.set(String(ov.email).toLowerCase(), ov);
+    }
     const localCreated = Array.isArray(db.local_profiles) ? db.local_profiles : [];
 
-    // Merge upstream AdFlow profiles with any local dashboard overrides (e.g. developer role assignment)
+    // AdFlow profiles are authoritative for role, name, email, active, and deleted_at
     const merged: Record<string, any>[] = upstreamRows.map((upRow: Record<string, any>) => {
-      const ov = overrides[upRow.id];
-      if (!ov) return upRow;
+      const upEmail = String(upRow.email || "").toLowerCase();
+      const ov = overrides[upRow.id] || (upEmail ? overridesByEmail.get(upEmail) : undefined);
+      const localMatch =
+        existingProfilesById.get(upRow.id) ||
+        (upEmail ? existingProfilesByEmail.get(upEmail) : undefined);
+
+      const upRole = upRow.role || "member";
+      const preserveDevOverride =
+        ov?.role === "developer" &&
+        upRole === "member" &&
+        String(ov?.updated_at || "") > String(upRow.updated_at || "");
+      const resolvedRole = preserveDevOverride ? "developer" : upRole;
+
+      const mergedAvatarUrl = mergeProfileAvatarMetadata(
+        upRow.avatar_url,
+        ov?.avatar_url !== undefined ? ov.avatar_url : localMatch?.avatar_url
+      );
+
+      overrides[upRow.id] = {
+        ...(ov || {}),
+        id: upRow.id,
+        name: upRow.name,
+        email: upRow.email,
+        role: resolvedRole,
+        active: upRow.active,
+        deleted_at: upRow.deleted_at,
+        ...(mergedAvatarUrl !== undefined ? { avatar_url: mergedAvatarUrl } : {}),
+        updated_at: upRow.updated_at || new Date().toISOString(),
+      };
+
       return {
         ...upRow,
-        ...(ov.role ? { role: ov.role } : {}),
-        ...(ov.name ? { name: ov.name } : {}),
-        ...(ov.avatar_url !== undefined ? { avatar_url: ov.avatar_url } : {}),
-        ...(ov.active !== undefined ? { active: ov.active } : {}),
-        ...(ov.deleted_at !== undefined ? { deleted_at: ov.deleted_at } : {}),
+        role: resolvedRole,
+        name: upRow.name,
+        email: upRow.email,
+        active: upRow.active,
+        deleted_at: upRow.deleted_at,
+        avatar_url: mergedAvatarUrl,
       };
     });
 
@@ -836,6 +923,8 @@ async function syncUpstreamAdFlowProfiles(url: URL, init?: RequestInit) {
       }
     }
 
+    ensureKritikaFallbackProfile(merged, overrides);
+    db.profile_overrides = overrides;
     db.profiles = merged;
     saveLocalDb(db);
     lastProfilesSyncAt = Date.now();

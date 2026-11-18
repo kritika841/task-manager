@@ -48,6 +48,27 @@ import {
   type AdFlowStageMappingUpdate,
 } from "./adflow-bridge";
 
+export function isSelfAssignedTask(task: Task, userId: string): boolean {
+  return Boolean(
+    userId &&
+      task.creatorId === userId &&
+      task.assigneeId === userId &&
+      !task.adId &&
+      !task.creativeName &&
+      !task.isCanonicalAdflowTask &&
+      !isCanonicalAdflowTask(task.title)
+  );
+}
+
+export function isCompletedOver24Hours(task: Task, today: string): boolean {
+  if (task.status !== "completed") return false;
+  const completedMs = new Date(task.completedAt || task.updatedAt || "").getTime();
+  return (
+    (Number.isFinite(completedMs) && Date.now() - completedMs >= 24 * 60 * 60 * 1000) ||
+    (!task.completedAt && task.dueDate < today)
+  );
+}
+
 import type { WorkspaceSettings } from "./workspace-settings";
 
 type TaskWorkflowAction = "approve" | "request_changes" | "submit_for_review";
@@ -2862,7 +2883,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
     return baseVisibleTasks.filter((task) => {
       // 0. Daily Production "Done" Tab Overload Protection:
-      // If viewing Completed History specifically, only show completed tasks.
+      // Move tasks done for > 24 hours automatically to Done History.
       if (filter.showCompletedHistory) {
         if (task.status !== "completed") return false;
       } else if (
@@ -2871,10 +2892,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         !hasExplicitDateFilter &&
         task.status === "completed"
       ) {
-        // Automatically move past-day completed tasks out of the active daily Overview
-        // so the Done column only holds today's completed production items!
-        const completedDateStr = task.completedAt ? task.completedAt.slice(0, 10) : task.dueDate;
-        if (task.dueDate < today && completedDateStr < today) {
+        if (isCompletedOver24Hours(task, today)) {
           return false;
         }
       }
@@ -2962,14 +2980,13 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // 5. Assigned to me toggle
-      if (
-        filter.onlyMyTasks &&
-        task.assigneeId !== currentUserId &&
-        task.adCreatorId !== currentUserId &&
-        task.adEditorId !== currentUserId
-      ) {
-        return false;
+      // 5. My Tasks toggle: Admin/Manager sees tasks assigned to them; non-reviewers see only self-assigned tasks
+      if (filter.onlyMyTasks) {
+        if (hasReviewAccess) {
+          if (task.assigneeId !== currentUserId) return false;
+        } else if (!isSelfAssignedTask(task, currentUserId)) {
+          return false;
+        }
       }
 
       // 6. Explicit dropdowns
@@ -2991,7 +3008,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
 
       return true;
     });
-  }, [baseVisibleTasks, filter, currentUserId]);
+  }, [baseVisibleTasks, filter, currentUserId, hasReviewAccess]);
 
   const selectAllFilteredTasks = useCallback(
     (select: boolean) => {

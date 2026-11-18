@@ -1,8 +1,30 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { ADFLOW_SUPABASE_URL, supabaseAdmin } from "@/lib/supabase";
+import { getAdFlowHeaders } from "@/lib/adflow-bridge";
 import { Role, User } from "@/lib/types";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
 import { canReviewTasks, hashPassword, resolveRequestActor } from "@/lib/auth-server";
+
+async function syncProfilePatchToAdFlow(id: string, patch: Record<string, any>) {
+  if (!id || Object.keys(patch).length === 0) return;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    await fetch(
+      `${ADFLOW_SUPABASE_URL}/rest/v1/profiles?id=eq.${encodeURIComponent(id)}`,
+      {
+        method: "PATCH",
+        headers: getAdFlowHeaders(),
+        body: JSON.stringify(patch),
+        signal: controller.signal,
+      }
+    );
+  } catch (err) {
+    console.warn("AdFlow profile sync skipped:", err);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 const VALID_ROLES = new Set<Role>([
   "admin",
@@ -417,6 +439,17 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ error: updateErr.message }, { status: 500 });
     }
 
+    if (auth.actor.role === "admin" || auth.actor.role === "developer") {
+      const adflowPatch: Record<string, any> = {};
+      if (updates.name) adflowPatch.name = updates.name;
+      if (updates.role) adflowPatch.role = updates.role;
+      if (updates.active !== undefined) adflowPatch.active = updates.active;
+      if (Object.keys(adflowPatch).length > 0) {
+        adflowPatch.updated_at = updates.updated_at;
+        await syncProfilePatchToAdFlow(id, adflowPatch);
+      }
+    }
+
     const user: User = {
       id: updated.id,
       name: updated.name,
@@ -459,18 +492,25 @@ export async function DELETE(req: Request) {
     }
 
     // Soft delete matching AdFlow (sets active = false, deleted_at = now())
+    const nowIso = new Date().toISOString();
     const { error } = await supabaseAdmin
       .from("profiles")
       .update({
         active: false,
-        deleted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+        deleted_at: nowIso,
+        updated_at: nowIso,
       })
       .eq("id", id);
 
     if (error) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
+
+    await syncProfilePatchToAdFlow(id, {
+      active: false,
+      deleted_at: nowIso,
+      updated_at: nowIso,
+    });
 
     return NextResponse.json({ ok: true, message: "User soft-deleted successfully" });
   } catch (err: any) {

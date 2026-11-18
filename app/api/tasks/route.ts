@@ -1275,14 +1275,60 @@ export async function PATCH(req: Request) {
       if (
         body.status === "completed" ||
         String(body.productionStage || "").toLowerCase() === "approved" ||
-        (existing &&
-          body.completedQuantity !== undefined &&
+        (body.completedQuantity !== undefined &&
+          existing &&
           Number(body.completedQuantity) >= Number(existing.target_quantity || 1))
       ) {
         return NextResponse.json(
           { error: "Forbidden: Only Managers, Admins, or Developers can mark tasks completed. Move to In Review instead." },
           { status: 403 }
         );
+      }
+    }
+
+    if (!canReviewTasks(actor.role)) {
+      const deadlineTouched =
+        (body.dueDate !== undefined && (!existing || body.dueDate !== existing.target_date)) ||
+        (body.dueTime !== undefined && body.dueTime !== currentNotesMeta.dueTime) ||
+        (body.startDate !== undefined && body.startDate !== currentNotesMeta.startDate);
+      if (deadlineTouched) {
+        return NextResponse.json(
+          { error: "Forbidden: Only Admins or Managers can change task deadlines." },
+          { status: 403 }
+        );
+      }
+
+      const isSelfAssignedPersonalTask = Boolean(
+        existing &&
+          !standaloneAdId &&
+          !adId &&
+          !currentNotesMeta.creativeName &&
+          !isCanonicalAdflowTask(existing.task_name) &&
+          existing.assigned_by === actor.id &&
+          existing.user_id === actor.id
+      );
+
+      if (!isSelfAssignedPersonalTask) {
+        const configFieldTouched =
+          body.title !== undefined ||
+          body.priority !== undefined ||
+          body.targetQuantity !== undefined ||
+          body.description !== undefined ||
+          body.estimatedHours !== undefined ||
+          body.project !== undefined ||
+          body.blockedByTaskIds !== undefined ||
+          body.customSubtasks !== undefined ||
+          body.isArchived !== undefined ||
+          body.restore !== undefined;
+        if (configFieldTouched) {
+          return NextResponse.json(
+            {
+              error:
+                "Forbidden: You can only submit deliverables and update progress on tasks assigned to you.",
+            },
+            { status: 403 }
+          );
+        }
       }
     }
     const creativeName = currentNotesMeta.creativeName;
@@ -1894,6 +1940,12 @@ export async function DELETE(req: Request) {
       if (!(await canAccessStandaloneCreative(actor, realAdId))) {
         return NextResponse.json({ error: "Task not found" }, { status: 404 });
       }
+      if (!canReviewTasks(actor.role)) {
+        return NextResponse.json(
+          { error: "Forbidden: Only Admins or Managers can delete or archive AdFlow tasks." },
+          { status: 403 }
+        );
+      }
       const db = loadLocalDb();
       if (!db.ad_overrides) db.ad_overrides = {};
 
@@ -1926,6 +1978,19 @@ export async function DELETE(req: Request) {
     }
 
     const currentNotesMeta = parseNotes(existing.notes || null);
+    const isSelfAssignedPersonalTask = Boolean(
+      !currentNotesMeta.adId &&
+        !currentNotesMeta.creativeName &&
+        !isCanonicalAdflowTask(existing.task_name) &&
+        existing.assigned_by === actor.id &&
+        existing.user_id === actor.id
+    );
+    if (!canReviewTasks(actor.role) && !isSelfAssignedPersonalTask) {
+      return NextResponse.json(
+        { error: "Forbidden: Only Admins or Managers can delete or archive tasks assigned to you." },
+        { status: 403 }
+      );
+    }
     currentNotesMeta.isArchived = true;
     currentNotesMeta.archivedAt = new Date().toISOString();
     currentNotesMeta.archivedBy = verifiedActorId;
