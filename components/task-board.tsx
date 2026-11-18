@@ -474,126 +474,139 @@ export function TaskBoard() {
           </div>
         )}
 
-        {/* Manager Approval & Revision Actions on In Review / Creative Tasks */}
-        {(task.status === "in_review" || task.adId || task.creativeName) && isManagerOrAdmin && (
-          <div
-            className="mb-2.5 p-1.5 rounded-lg border border-primary/20 bg-primary/5 space-y-1.5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <Button
-                type="button"
-                variant="primary"
-                size="sm"
-                onClick={() => approveTask(task.id)}
-                disabled={task.status === "completed" && task.productionStage === "approved"}
-                className="h-6 text-[10px] gap-1 flex-1 bg-success hover:bg-success/90 text-white cursor-pointer"
-              >
-                <Check className="size-3" />
-                <span>{task.status === "completed" ? "Approved" : "Approve"}</span>
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                onClick={() => {
-                  if (cardRevisionTaskId === task.id) {
-                    setCardRevisionTaskId(null);
-                  } else {
-                    setCardRevisionTaskId(task.id);
-                    setCardRevisionTarget("editor");
-                    setCardRevisionNote("");
-                  }
-                }}
-                className="h-6 text-[10px] gap-1 flex-1 border-warning/30 text-warning hover:bg-warning/10 cursor-pointer"
-              >
-                <RotateCcw className="size-3" />
-                <span>Revisions</span>
-              </Button>
-            </div>
-
-            {cardRevisionTaskId === task.id && (
-              <div className="pt-1.5 border-t border-border/50 space-y-1.5 text-[10px]">
-                <div className="grid grid-cols-2 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setCardRevisionTarget("editor")}
-                    className={cn(
-                      "px-1.5 py-1 rounded border font-semibold transition cursor-pointer",
-                      cardRevisionTarget === "editor"
-                        ? "bg-amber-500/20 text-amber-500 border-amber-500/50"
-                        : "bg-card text-muted-foreground border-border"
-                    )}
-                  >
-                    To Editor
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCardRevisionTarget("creator")}
-                    className={cn(
-                      "px-1.5 py-1 rounded border font-semibold transition cursor-pointer",
-                      cardRevisionTarget === "creator"
-                        ? "bg-amber-500/20 text-amber-500 border-amber-500/50"
-                        : "bg-card text-muted-foreground border-border"
-                    )}
-                  >
-                    To Creator
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  placeholder={`Note for ${cardRevisionTarget === "creator" ? "Content Creator" : "Video Editor"}...`}
-                  value={cardRevisionNote}
-                  onChange={(e) => setCardRevisionNote(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && cardRevisionNote.trim()) {
-                      e.preventDefault();
-                      requestRevision(
-                        task.id,
-                        cardRevisionTarget === "creator"
-                          ? "Creator Changes Requested"
-                          : "Editor Changes Requested",
-                        cardRevisionNote.trim(),
-                        cardRevisionTarget
-                      );
+        {/* Manager Approval & Revision Actions on In Review / Creative Tasks (plus Content Creator in creator_review) */}
+        {(() => {
+          const isCreatorReviewForMe =
+            task.productionStage === "creator_review" &&
+            (currentUserId === task.adCreatorId || currentUserId === task.assigneeId);
+          if (
+            !(((task.status === "in_review" || task.adId || task.creativeName) && isManagerOrAdmin) || isCreatorReviewForMe)
+          ) {
+            return null;
+          }
+          const revisionTarget = isManagerOrAdmin ? cardRevisionTarget : "editor";
+          return (
+            <div
+              className="mb-2.5 p-1.5 rounded-lg border border-primary/20 bg-primary/5 space-y-1.5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Button
+                  type="button"
+                  variant="primary"
+                  size="sm"
+                  onClick={() => approveTask(task.id)}
+                  disabled={task.status === "completed" && task.productionStage === "approved"}
+                  className="h-6 text-[10px] gap-1 flex-1 bg-success hover:bg-success/90 text-white cursor-pointer"
+                >
+                  <Check className="size-3" />
+                  <span>{task.status === "completed" ? "Approved" : "Approve"}</span>
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    if (cardRevisionTaskId === task.id) {
                       setCardRevisionTaskId(null);
+                    } else {
+                      setCardRevisionTaskId(task.id);
+                      setCardRevisionTarget("editor");
                       setCardRevisionNote("");
                     }
                   }}
-                  className="w-full rounded border border-border bg-card px-2 py-1 text-[10px] text-foreground outline-none focus:border-primary"
-                />
-                <div className="flex items-center justify-end gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setCardRevisionTaskId(null)}
-                    className="px-2 py-0.5 rounded text-[10px] text-muted-foreground hover:bg-muted cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const note = cardRevisionNote.trim() || "Changes requested from Task Manager";
-                      requestRevision(
-                        task.id,
-                        cardRevisionTarget === "creator"
-                          ? "Creator Changes Requested"
-                          : "Editor Changes Requested",
-                        note,
-                        cardRevisionTarget
-                      );
-                      setCardRevisionTaskId(null);
-                      setCardRevisionNote("");
-                    }}
-                    className="px-2 py-0.5 rounded bg-amber-500 text-white font-semibold text-[10px] hover:bg-amber-600 cursor-pointer"
-                  >
-                    Send to {cardRevisionTarget === "creator" ? "Creator" : "Editor"}
-                  </button>
-                </div>
+                  className="h-6 text-[10px] gap-1 flex-1 border-warning/30 text-warning hover:bg-warning/10 cursor-pointer"
+                >
+                  <RotateCcw className="size-3" />
+                  <span>Revisions</span>
+                </Button>
               </div>
-            )}
-          </div>
-        )}
+
+              {cardRevisionTaskId === task.id && (
+                <div className="pt-1.5 border-t border-border/50 space-y-1.5 text-[10px]">
+                  {isManagerOrAdmin && (
+                    <div className="grid grid-cols-2 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setCardRevisionTarget("editor")}
+                        className={cn(
+                          "px-1.5 py-1 rounded border font-semibold transition cursor-pointer",
+                          cardRevisionTarget === "editor"
+                            ? "bg-amber-500/20 text-amber-500 border-amber-500/50"
+                            : "bg-card text-muted-foreground border-border"
+                        )}
+                      >
+                        To Editor
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCardRevisionTarget("creator")}
+                        className={cn(
+                          "px-1.5 py-1 rounded border font-semibold transition cursor-pointer",
+                          cardRevisionTarget === "creator"
+                            ? "bg-amber-500/20 text-amber-500 border-amber-500/50"
+                            : "bg-card text-muted-foreground border-border"
+                        )}
+                      >
+                        To Creator
+                      </button>
+                    </div>
+                  )}
+                  <input
+                    type="text"
+                    placeholder={`Note for ${revisionTarget === "creator" ? "Content Creator" : "Video Editor"}...`}
+                    value={cardRevisionNote}
+                    onChange={(e) => setCardRevisionNote(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && cardRevisionNote.trim()) {
+                        e.preventDefault();
+                        requestRevision(
+                          task.id,
+                          revisionTarget === "creator"
+                            ? "Creator Changes Requested"
+                            : "Editor Changes Requested",
+                          cardRevisionNote.trim(),
+                          revisionTarget
+                        );
+                        setCardRevisionTaskId(null);
+                        setCardRevisionNote("");
+                      }
+                    }}
+                    className="w-full rounded border border-border bg-card px-2 py-1 text-[10px] text-foreground outline-none focus:border-primary"
+                  />
+                  <div className="flex items-center justify-end gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setCardRevisionTaskId(null)}
+                      className="px-2 py-0.5 rounded text-[10px] text-muted-foreground hover:bg-muted cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const note = cardRevisionNote.trim() || "Changes requested from Task Manager";
+                        requestRevision(
+                          task.id,
+                          revisionTarget === "creator"
+                            ? "Creator Changes Requested"
+                            : "Editor Changes Requested",
+                          note,
+                          revisionTarget
+                        );
+                        setCardRevisionTaskId(null);
+                        setCardRevisionNote("");
+                      }}
+                      className="px-2 py-0.5 rounded bg-amber-500 text-white font-semibold text-[10px] hover:bg-amber-600 cursor-pointer"
+                    >
+                      Send to {revisionTarget === "creator" ? "Creator" : "Editor"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Notion Card Footer: Assignee & Due Date (Matches Notion exactly) */}
         <div className="flex flex-col gap-1.5 pt-2 border-t border-border/40 text-xs">

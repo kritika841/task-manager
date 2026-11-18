@@ -140,6 +140,8 @@ export function TaskDrawer() {
     (currentUser.role === "content_creator" && currentUser.id === task.assigneeId);
   const isSelfAssigned = isSelfAssignedTask(task, currentUserId);
   const canModifyTaskConfig = isManagerOrAdmin || isSelfAssigned;
+  const canCreatorReviewNow =
+    isAssignedCreator && task.productionStage === "creator_review";
 
   const handleRevisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1129,82 +1131,92 @@ export function TaskDrawer() {
                           </div>
                         )}
 
-                        {/* 4. Manager Review & Pipeline Controls */}
-                        {isReviewer && (
+                        {/* 4. Manager / Creator Review & Pipeline Controls */}
+                        {(isReviewer || canCreatorReviewNow) && (
                           <div className="space-y-3 pt-2 border-t border-border/60">
                             <div className="flex items-center justify-between">
                               <span className="text-[11px] font-mono uppercase tracking-wider text-muted-foreground">
-                                Review & Admin Controls
+                                {isReviewer ? "Review & Admin Controls" : "Creator Review Controls"}
                               </span>
-                              <div className="flex items-center gap-1.5">
-                                {task.editingFreeze !== "unfrozen" ? (
-                                  <button
-                                    type="button"
-                                    disabled={adflowBusy}
-                                    onClick={() => executeAdFlowControl("unfreeze_editing")}
-                                    className="text-[10px] font-semibold text-blue-400 hover:underline cursor-pointer"
-                                    title="Unfreeze active edit concurrency limit for this creative"
-                                  >
-                                    Unfreeze Edit Limit
-                                  </button>
-                                ) : (
-                                  <span className="text-[10px] font-mono text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">
-                                    Limit Unfrozen
-                                  </span>
-                                )}
-                              </div>
+                              {isReviewer && (
+                                <div className="flex items-center gap-1.5">
+                                  {task.editingFreeze !== "unfrozen" ? (
+                                    <button
+                                      type="button"
+                                      disabled={adflowBusy}
+                                      onClick={() => executeAdFlowControl("unfreeze_editing")}
+                                      className="text-[10px] font-semibold text-blue-400 hover:underline cursor-pointer"
+                                      title="Unfreeze active edit concurrency limit for this creative"
+                                    >
+                                      Unfreeze Edit Limit
+                                    </button>
+                                  ) : (
+                                    <span className="text-[10px] font-mono text-emerald-500 bg-emerald-500/10 px-1.5 py-0.5 rounded">
+                                      Limit Unfrozen
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                              <div>
-                                <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
-                                  Route Revision / Changes To
-                                </label>
-                                <Select
-                                  value={adflowTarget}
-                                  onChange={(e) =>
-                                    setAdflowTarget(e.target.value as "creator" | "editor")
-                                  }
-                                  className="w-full text-xs h-8 bg-card"
-                                >
-                                  <option value="editor">
-                                    Editor (changes_requested)
-                                  </option>
-                                  <option value="creator">
-                                    Content Creator (creator_changes_requested)
-                                  </option>
-                                </Select>
+                            {isReviewer && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                <div>
+                                  <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                                    Route Revision / Changes To
+                                  </label>
+                                  <Select
+                                    value={adflowTarget}
+                                    onChange={(e) =>
+                                      setAdflowTarget(e.target.value as "creator" | "editor")
+                                    }
+                                    className="w-full text-xs h-8 bg-card"
+                                  >
+                                    <option value="editor">
+                                      Editor (changes_requested)
+                                    </option>
+                                    <option value="creator">
+                                      Content Creator (creator_changes_requested)
+                                    </option>
+                                  </Select>
+                                </div>
+                                <div>
+                                  <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                                    Assign / Reassign Editor
+                                  </label>
+                                  <Select
+                                    value={task.adEditorId || ""}
+                                    onChange={(e) =>
+                                      executeAdFlowControl("assign_editor", { editorId: e.target.value || null })
+                                    }
+                                    className="w-full text-xs h-8 bg-card"
+                                  >
+                                    <option value="">Unassigned Editor</option>
+                                    {users
+                                      .filter((u) => u.role === "editor")
+                                      .map((ed) => (
+                                        <option key={ed.id} value={ed.id}>
+                                          {ed.name}
+                                        </option>
+                                      ))}
+                                  </Select>
+                                </div>
                               </div>
-                              <div>
-                                <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
-                                  Assign / Reassign Editor
-                                </label>
-                                <Select
-                                  value={task.adEditorId || ""}
-                                  onChange={(e) =>
-                                    executeAdFlowControl("assign_editor", { editorId: e.target.value || null })
-                                  }
-                                  className="w-full text-xs h-8 bg-card"
-                                >
-                                  <option value="">Unassigned Editor</option>
-                                  {users
-                                    .filter((u) => u.role === "editor")
-                                    .map((ed) => (
-                                      <option key={ed.id} value={ed.id}>
-                                        {ed.name}
-                                      </option>
-                                    ))}
-                                </Select>
-                              </div>
-                            </div>
+                            )}
 
                             <div>
                               <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
-                                Review Note / Revision Instructions / Rejection Reason
+                                {isReviewer
+                                  ? "Review Note / Revision Instructions / Rejection Reason"
+                                  : "Review Note / Revision Instructions for Editor"}
                               </label>
                               <Textarea
                                 rows={2}
-                                placeholder="Enter approval note, revision instructions for creator/editor, or rejection reason..."
+                                placeholder={
+                                  isReviewer
+                                    ? "Enter approval note, revision instructions for creator/editor, or rejection reason..."
+                                    : "Enter approval note or specific edit revisions needed..."
+                                }
                                 value={adflowNote}
                                 onChange={(e) => setAdflowNote(e.target.value)}
                                 className="w-full text-xs bg-card"
@@ -1228,6 +1240,8 @@ export function TaskDrawer() {
                                 <span>
                                   {task.productionStage === "approved"
                                     ? "Re-Approve in AdFlow"
+                                    : task.productionStage === "creator_review"
+                                    ? "Approve to Final Review"
                                     : "Approve in AdFlow"}
                                 </span>
                               </Button>
@@ -1237,7 +1251,11 @@ export function TaskDrawer() {
                                 size="sm"
                                 variant="secondary"
                                 disabled={adflowBusy || !adflowNote.trim()}
-                                onClick={() => executeAdFlowControl("request_changes")}
+                                onClick={() =>
+                                  executeAdFlowControl("request_changes", {
+                                    target: isReviewer ? adflowTarget : "editor",
+                                  })
+                                }
                                 title={
                                   !adflowNote.trim()
                                     ? "Enter a review note above to send revisions"
@@ -1249,26 +1267,28 @@ export function TaskDrawer() {
                                 <span>
                                   {task.productionStage === "approved"
                                     ? `Reopen & Send to ${adflowTarget === "creator" ? "Creator" : "Editor"}`
-                                    : `Send Revisions (${adflowTarget === "creator" ? "Creator" : "Editor"})`}
+                                    : `Send Revisions (${(isReviewer ? adflowTarget : "editor") === "creator" ? "Creator" : "Editor"})`}
                                 </span>
                               </Button>
 
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="secondary"
-                                disabled={adflowBusy || !adflowNote.trim()}
-                                onClick={() => executeAdFlowControl("reject")}
-                                title={
-                                  !adflowNote.trim()
-                                    ? "Enter a rejection reason above to reject"
-                                    : undefined
-                                }
-                                className="h-8 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 cursor-pointer"
-                              >
-                                <XCircle className="size-3.5" />
-                                <span>Reject Creative</span>
-                              </Button>
+                              {isReviewer && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="secondary"
+                                  disabled={adflowBusy || !adflowNote.trim()}
+                                  onClick={() => executeAdFlowControl("reject")}
+                                  title={
+                                    !adflowNote.trim()
+                                      ? "Enter a rejection reason above to reject"
+                                      : undefined
+                                  }
+                                  className="h-8 text-xs gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10 cursor-pointer"
+                                >
+                                  <XCircle className="size-3.5" />
+                                  <span>Reject Creative</span>
+                                </Button>
+                              )}
                             </div>
                           </div>
                         )}
@@ -1394,13 +1414,15 @@ export function TaskDrawer() {
             {/* TAB 3: DISCUSSION & ACTIVITY */}
             {activeTab === "activity" && (
               <div className="space-y-4">
-                {/* Manager Review & Approval Box */}
-                {isManagerOrAdmin && (
+                {/* Manager / Creator Review & Approval Box */}
+                {(isManagerOrAdmin || canCreatorReviewNow) && (
                   <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-3.5 text-xs space-y-2.5">
                     <div className="flex items-center justify-between">
                       <span className="font-semibold text-indigo-500 flex items-center gap-1.5">
                         <CheckCircle2 className="size-3.5" />
-                        <span>Manager Approval Gate</span>
+                        <span>
+                          {isManagerOrAdmin ? "Manager Approval Gate" : "Creator Review Gate"}
+                        </span>
                       </span>
                       <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-500 font-semibold">
                         {currentUser.role}
@@ -1417,7 +1439,13 @@ export function TaskDrawer() {
                         disabled={task.status === "completed"}
                       >
                         <Check className="size-3.5" />
-                        <span>{task.status === "completed" ? "Approved & Done" : "Approve Deliverable"}</span>
+                        <span>
+                          {task.status === "completed"
+                            ? "Approved & Done"
+                            : task.productionStage === "creator_review"
+                            ? "Approve to Final Review"
+                            : "Approve Deliverable"}
+                        </span>
                       </Button>
 
                       <Button
@@ -1435,22 +1463,29 @@ export function TaskDrawer() {
                     {/* Revision Form */}
                     {isRevisionOpen && (
                       <form onSubmit={handleRevisionSubmit} className="pt-2 border-t border-border/60 space-y-2">
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
-                              Send Changes To
-                            </label>
-                            <Select
-                              value={revisionTargetInput}
-                              onChange={(e) =>
-                                setRevisionTargetInput(e.target.value as "creator" | "editor")
-                              }
-                              className="text-xs h-8 bg-card w-full"
-                            >
-                              <option value="editor">Video Editor (Changes: Editor)</option>
-                              <option value="creator">Content Creator (Changes: Creator)</option>
-                            </Select>
-                          </div>
+                        <div
+                          className={cn(
+                            "grid grid-cols-1 gap-2",
+                            isManagerOrAdmin && "sm:grid-cols-2"
+                          )}
+                        >
+                          {isManagerOrAdmin && (
+                            <div>
+                              <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
+                                Send Changes To
+                              </label>
+                              <Select
+                                value={revisionTargetInput}
+                                onChange={(e) =>
+                                  setRevisionTargetInput(e.target.value as "creator" | "editor")
+                                }
+                                className="text-xs h-8 bg-card w-full"
+                              >
+                                <option value="editor">Video Editor (Changes: Editor)</option>
+                                <option value="creator">Content Creator (Changes: Creator)</option>
+                              </Select>
+                            </div>
+                          )}
                           <div>
                             <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
                               Revision Reason

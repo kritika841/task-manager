@@ -2201,13 +2201,14 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       const task = tasks.find((t) => t.id === taskId);
       if (!task) return;
 
+      const isCreatorReviewStage = task.productionStage === "creator_review";
       await updateTask(taskId, {
-        status: "completed",
-        productionStage: "approved",
+        status: isCreatorReviewStage ? "in_review" : "completed",
+        productionStage: isCreatorReviewStage ? "final_review" : "approved",
         isRevisionRequested: false,
         revisionReason: undefined,
         revisionNotes: undefined,
-        completedQuantity: task.targetQuantity,
+        ...(isCreatorReviewStage ? {} : { completedQuantity: task.targetQuantity }),
       }, "approve");
       await fetchTasks(false);
     },

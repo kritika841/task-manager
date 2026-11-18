@@ -1246,7 +1246,7 @@ export async function PATCH(req: Request) {
     let currentNotesMeta = parseNotes(existing?.notes);
     const adId = standaloneAdId || currentNotesMeta.adId;
     let linkedAdRecord: { creator_id?: string | null; editor_id?: string | null; production_stage?: string | null } | null = null;
-    if (!standaloneAdId && adId) {
+    if (adId) {
       const { data: ad } = await supabaseAdmin
         .from("ads")
         .select("creator_id, editor_id, production_stage")
@@ -1262,6 +1262,26 @@ export async function PATCH(req: Request) {
       : canAccessTask(actor, effectiveAssigneeId);
     if (!hasTaskAccess) {
       return NextResponse.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    const currentProdStage = String(
+      linkedAdRecord?.production_stage || currentNotesMeta.productionStage || ""
+    ).toLowerCase();
+    const isCreatorReviewStage = currentProdStage === "creator_review";
+    const isCreatorReviewActor =
+      isCreatorReviewStage &&
+      (actor.id === linkedAdRecord?.creator_id ||
+        actor.id === existing?.user_id ||
+        actor.role === "content_creator");
+
+    if (
+      workflowAction === "approve" &&
+      isCreatorReviewStage &&
+      (!body.finalApprove || !canReviewTasks(actor.role))
+    ) {
+      body.status = "in_review";
+      body.productionStage = "final_review";
+      delete body.completedQuantity;
     }
 
     if (!canReviewTasks(actor.role)) {
@@ -1347,18 +1367,17 @@ export async function PATCH(req: Request) {
 
     if (workflowAction !== undefined) {
       if (workflowAction === "approve" || workflowAction === "request_changes") {
-        if (!canReviewTasks(actor.role)) {
+        if (!canReviewTasks(actor.role) && !isCreatorReviewActor) {
           return NextResponse.json({ error: "Review permissions are required." }, { status: 403 });
         }
       }
 
       switch (workflowAction) {
         case "approve": {
-          const isCreatorReviewStage =
-            linked &&
-            currentNotesMeta.productionStage === "creator_review" &&
-            !body.finalApprove;
-          if (isCreatorReviewStage) {
+          const advanceToFinalReview =
+            (linked && isCreatorReviewStage && !body.finalApprove) ||
+            (isCreatorReviewActor && !canReviewTasks(actor.role));
+          if (advanceToFinalReview) {
             body.status = "in_review";
             body.productionStage = "final_review";
           } else {

@@ -49,6 +49,7 @@ export function TaskTable() {
     getMemberCapacity,
     approveTask,
     requestRevision,
+    currentUserId,
     templates,
     density,
   } = useTasks();
@@ -506,7 +507,11 @@ export function TaskTable() {
                       onClick={(e) => e.stopPropagation()}
                     >
                       <div className="flex items-center justify-end gap-1">
-                        {isManagerOrAdmin && task.status === "in_review" && (
+                        {(isManagerOrAdmin ||
+                          (task.productionStage === "creator_review" &&
+                            (currentUserId === task.adCreatorId ||
+                              currentUserId === task.assigneeId))) &&
+                          task.status === "in_review" && (
                           <>
                             <button
                               type="button"

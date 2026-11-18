@@ -152,7 +152,10 @@ export async function POST(req: Request) {
     const isCreatorStageHandoff =
       action === "update_stage" &&
       ["ready_to_shoot", "shoot_complete", "ready_for_edit"].includes(String(productionStage || ""));
-    if (!canReviewTasks(actor.role) && !isEditorAction && !isCreatorStageHandoff) {
+    const isCreatorReviewAction =
+      (action === "approve" || action === "request_changes") &&
+      actor.role === "content_creator";
+    if (!canReviewTasks(actor.role) && !isEditorAction && !isCreatorStageHandoff && !isCreatorReviewAction) {
       return NextResponse.json({ error: "Review permissions are required." }, { status: 403 });
     }
     const { id: actorId, name: actorName } = actor;
@@ -308,6 +311,20 @@ export async function POST(req: Request) {
     }
 
     const prevStage = existingAd.production_stage;
+    if (
+      !canReviewTasks(actor.role) &&
+      (action === "approve" || action === "request_changes")
+    ) {
+      const canCreatorReview =
+        String(existingAd.production_stage || "").toLowerCase() === "creator_review" &&
+        (actor.id === existingAd.creator_id || actor.role === "content_creator");
+      if (!canCreatorReview) {
+        return NextResponse.json(
+          { error: "Review permissions are required." },
+          { status: 403 }
+        );
+      }
+    }
     const patch: Record<string, any> = {
       updated_at: nowIso,
       ...(action !== "assign_editor" && { workflow_status_changed_at: nowIso }),
@@ -326,9 +343,10 @@ export async function POST(req: Request) {
     if (action === "approve") {
       reviewDecision = "approve";
       const isFinalReviewStage =
-        existingAd.production_stage === "final_review" ||
-        existingAd.approval_stage === "admin_final" ||
-        (actor.role === "admin" && body.finalApprove === true);
+        canReviewTasks(actor.role) &&
+        (existingAd.production_stage === "final_review" ||
+          existingAd.approval_stage === "admin_final" ||
+          (actor.role === "admin" && body.finalApprove === true));
 
       if (!isFinalReviewStage) {
         patch.production_stage = "final_review";
