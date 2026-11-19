@@ -462,18 +462,26 @@ function buildAttendanceLedgerCSV(
   users: AttendanceLedgerUser[],
   rows: AttendanceLedgerRow[]
 ): string {
-  const headers = ["Date"];
-  for (const u of users) {
-    headers.push(`${u.userName} (${u.employeeCode}) Check-In (IST)`);
-    headers.push(`${u.userName} (${u.employeeCode}) Check-Out (IST)`);
+  const headers = [
+    "Employee Code",
+    "Employee Name",
+    "Role",
+    "Department",
+    "Present Days",
+  ];
+  for (const row of rows) {
+    headers.push(`${row.date} Check-In (IST)`);
+    headers.push(`${row.date} Check-Out (IST)`);
   }
 
-  const csvRows = rows.map((row) => {
-    const cols = [escapeCSVField(row.date)];
-    for (const u of users) {
+  const csvRows = users.map((u) => {
+    let presentDays = 0;
+    const dateCols: string[] = [];
+    for (const row of rows) {
       const cell = row.cells[u.userId];
-      cols.push(escapeCSVField(formatISTTimeForCSV(cell?.checkInTime || null)));
-      cols.push(
+      if (cell?.status === "present") presentDays += 1;
+      dateCols.push(escapeCSVField(formatISTTimeForCSV(cell?.checkInTime || null)));
+      dateCols.push(
         escapeCSVField(
           cell?.checkOutTime
             ? formatISTTimeForCSV(cell.checkOutTime)
@@ -483,6 +491,15 @@ function buildAttendanceLedgerCSV(
         )
       );
     }
+
+    const cols = [
+      escapeCSVField(u.employeeCode),
+      escapeCSVField(u.userName),
+      escapeCSVField(u.role.replace(/_/g, " ")),
+      escapeCSVField(u.department),
+      escapeCSVField(`${presentDays}/${rows.length}`),
+      ...dateCols,
+    ];
     return cols.join(",");
   });
 

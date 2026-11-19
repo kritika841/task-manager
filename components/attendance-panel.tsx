@@ -525,24 +525,24 @@ export function AttendancePanel() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         <div className="panel p-4">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Team Columns</span>
+            <span>Team Members</span>
             <Users className="size-4 text-primary" />
           </div>
           <div className="mt-2 text-2xl font-bold text-foreground">
             {totalEmployees}
           </div>
           <div className="mt-1 text-[11px] text-muted-foreground">
-            Active workspace members
+            Active workspace roster
           </div>
         </div>
 
         <div className="panel p-4">
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>Date Range Rows</span>
+            <span>Date Range</span>
             <CalendarRange className="size-4 text-sky-500" />
           </div>
           <div className="mt-2 text-2xl font-bold text-foreground">
-            {rangeDays} <span className="text-sm font-medium text-muted-foreground">days</span>
+            {rangeDays} <span className="text-sm font-medium text-muted-foreground">{rangeDays === 1 ? "day" : "days"}</span>
           </div>
           <div className="mt-1 text-[11px] text-muted-foreground">
             {effectiveStart} to {effectiveEnd}
@@ -582,7 +582,7 @@ export function AttendancePanel() {
         </div>
       </div>
 
-      {/* Filters & Employee Column Search Toolbar */}
+      {/* Filters, Date Order & Employee Search Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs">
           {[
@@ -607,15 +607,27 @@ export function AttendancePanel() {
           ))}
         </div>
 
-        <div className="relative">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Filter user columns..."
-            className="w-full sm:w-64 rounded-lg border border-border bg-card pl-8 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
-          />
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setSortOrder((s) => (s === "desc" ? "asc" : "desc"))}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/40 transition cursor-pointer shrink-0"
+            title="Toggle date column order"
+          >
+            <ArrowUpDown className="size-3.5" />
+            <span>{sortOrder === "desc" ? "Newest First" : "Oldest First"}</span>
+          </button>
+
+          <div className="relative flex-1 sm:flex-initial">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search employee name, code..."
+              className="w-full sm:w-60 rounded-lg border border-border bg-card pl-8 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
+            />
+          </div>
         </div>
       </div>
 
@@ -625,78 +637,59 @@ export function AttendancePanel() {
         </div>
       )}
 
-      {/* Attendance Ledger Matrix Table */}
+      {/* Attendance Ledger Matrix Table (Names in Left Column, Dates Across Top Row) */}
       <div className="panel overflow-hidden">
         <div className="overflow-auto max-h-[68vh]">
           <table className="w-full text-left border-separate border-spacing-0">
             <thead className="sticky top-0 z-20">
               <tr className="bg-muted/95 backdrop-blur-xs">
-                {/* Sticky Top-Left Corner: Date Column Header */}
-                <th className="sticky left-0 z-30 min-w-[155px] bg-muted border-b border-r border-border py-3 px-3.5 align-middle">
-                  <button
-                    type="button"
-                    onClick={() => setSortOrder((s) => (s === "desc" ? "asc" : "desc"))}
-                    className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition cursor-pointer"
-                    title="Toggle date order"
-                  >
-                    <span>Date</span>
-                    <ArrowUpDown className="size-3" />
-                    <span className="text-[10px] font-mono lowercase text-primary">
-                      ({sortOrder === "desc" ? "newest" : "oldest"})
+                {/* Sticky Top-Left Corner: Employee Column Header */}
+                <th className="sticky left-0 z-30 min-w-[230px] bg-muted border-b border-r border-border py-3 px-4 align-middle">
+                  <div className="flex items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <span>Employee</span>
+                    <span className="font-mono text-[10px] text-primary">
+                      {filteredUsers.length} {filteredUsers.length === 1 ? "user" : "users"}
                     </span>
-                  </button>
+                  </div>
                 </th>
 
-                {/* One Column Header Per User */}
-                {filteredUsers.map((user) => {
-                  const code = user.employeeCode || getEmployeeCode(user.userName);
-                  const color = getUserColor(code, user.color);
-                  const stats = userStatsMap.get(user.userId);
-                  const presentDays = stats?.presentDays ?? 0;
+                {/* One Column Header Per Date */}
+                {displayedRows.map((row) => {
+                  const dateInfo = formatLedgerDateLabel(row.date);
+                  const isToday = row.date === todayIST;
+                  const datePresentCount = filteredUsers.reduce((acc, u) => {
+                    return acc + (row.cells[u.userId]?.status === "present" ? 1 : 0);
+                  }, 0);
 
                   return (
                     <th
-                      key={user.userId}
-                      className="min-w-[154px] border-b border-r last:border-r-0 border-border py-2.5 px-2.5 align-top bg-muted/95"
+                      key={row.date}
+                      className={cn(
+                        "min-w-[144px] border-b border-r last:border-r-0 border-border py-2.5 px-2.5 align-middle",
+                        isToday
+                          ? "bg-primary/10"
+                          : dateInfo.isWeekend
+                            ? "bg-muted/80"
+                            : "bg-muted/95"
+                      )}
                     >
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="size-7 rounded-full font-bold text-[11px] flex items-center justify-center shrink-0 ring-1"
-                          style={{
-                            backgroundColor: `${color}20`,
-                            color,
-                            borderColor: `${color}40`,
-                          }}
-                        >
-                          {user.avatar || code.slice(0, 2)}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1">
-                            <span
-                              className="text-xs font-semibold text-foreground truncate"
-                              title={user.userName}
-                            >
-                              {user.userName}
-                            </span>
-                            <span
-                              className="font-mono text-[9px] font-bold px-1 rounded shrink-0"
-                              style={{
-                                backgroundColor: `${color}15`,
-                                color,
-                              }}
-                            >
-                              {code}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between gap-1 mt-0.5">
-                            <span className="text-[10px] text-muted-foreground capitalize truncate font-normal">
-                              {user.role.replace(/_/g, " ")}
-                            </span>
-                            <span className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
-                              {presentDays}/{rangeDays}d
-                            </span>
-                          </div>
-                        </div>
+                      <div className="flex items-center justify-between gap-1.5">
+                        <span className="font-mono text-xs font-semibold text-foreground whitespace-nowrap">
+                          {dateInfo.shortDate}
+                        </span>
+                        {isToday && (
+                          <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-primary shrink-0">
+                            Today
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-between gap-1.5 mt-0.5 text-[10px] font-normal text-muted-foreground">
+                        <span className={cn(dateInfo.isWeekend && "text-amber-600 dark:text-amber-400 font-medium")}>
+                          {dateInfo.weekday}
+                        </span>
+                        <span className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                          {datePresentCount}/{filteredUsers.length}
+                        </span>
                       </div>
                     </th>
                   );
@@ -708,7 +701,7 @@ export function AttendancePanel() {
               {isLoading && rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={Math.max(2, filteredUsers.length + 1)}
+                    colSpan={Math.max(2, displayedRows.length + 1)}
                     className="py-14 text-center text-muted-foreground"
                   >
                     Loading attendance ledger...
@@ -717,7 +710,7 @@ export function AttendancePanel() {
               ) : filteredUsers.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={2}
+                    colSpan={Math.max(2, displayedRows.length + 1)}
                     className="py-14 text-center text-muted-foreground"
                   >
                     No employees match the current filter.
@@ -726,65 +719,75 @@ export function AttendancePanel() {
               ) : displayedRows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={filteredUsers.length + 1}
+                    colSpan={2}
                     className="py-14 text-center text-muted-foreground"
                   >
                     No dates found in the selected range.
                   </td>
                 </tr>
               ) : (
-                displayedRows.map((row) => {
-                  const dateInfo = formatLedgerDateLabel(row.date);
-                  const isToday = row.date === todayIST;
-                  const rowPresentCount = filteredUsers.reduce((acc, u) => {
-                    return acc + (row.cells[u.userId]?.status === "present" ? 1 : 0);
-                  }, 0);
+                filteredUsers.map((user) => {
+                  const code = user.employeeCode || getEmployeeCode(user.userName);
+                  const color = getUserColor(code, user.color);
+                  const stats = userStatsMap.get(user.userId);
+                  const presentDays = stats?.presentDays ?? 0;
 
                   return (
                     <tr
-                      key={row.date}
-                      className={cn(
-                        "group transition-colors",
-                        isToday
-                          ? "bg-primary/[0.03] hover:bg-primary/[0.06]"
-                          : dateInfo.isWeekend
-                            ? "bg-muted/20 hover:bg-muted/35"
-                            : "hover:bg-muted/25"
-                      )}
+                      key={user.userId}
+                      className="group hover:bg-muted/25 transition-colors"
                     >
-                      {/* Sticky Left Date Cell */}
-                      <td className="sticky left-0 z-10 border-b border-r border-border py-2.5 px-3.5 align-middle whitespace-nowrap bg-card">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
+                      {/* Sticky Left Employee Name Cell */}
+                      <td className="sticky left-0 z-10 border-b border-r border-border py-2.5 px-4 align-middle bg-card">
+                        <div className="flex items-center gap-2.5">
+                          <div
+                            className="size-8 rounded-full font-bold text-xs flex items-center justify-center shrink-0 ring-1"
+                            style={{
+                              backgroundColor: `${color}20`,
+                              color,
+                              borderColor: `${color}40`,
+                            }}
+                          >
+                            {user.avatar || code.slice(0, 2)}
+                          </div>
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-mono text-xs font-semibold text-foreground">
-                                {dateInfo.shortDate}
+                              <span
+                                className="text-xs font-semibold text-foreground truncate"
+                                title={user.userName}
+                              >
+                                {user.userName}
                               </span>
-                              {isToday && (
-                                <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-primary">
-                                  Today
-                                </span>
-                              )}
+                              <span
+                                className="font-mono text-[9px] font-bold px-1 rounded shrink-0"
+                                style={{
+                                  backgroundColor: `${color}15`,
+                                  color,
+                                }}
+                              >
+                                {code}
+                              </span>
                             </div>
-                            <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-muted-foreground">
-                              <span className={cn(dateInfo.isWeekend && "text-amber-600 dark:text-amber-400 font-medium")}>
-                                {dateInfo.weekday}
+                            <div className="flex items-center justify-between gap-2 mt-0.5">
+                              <span className="text-[10px] text-muted-foreground capitalize truncate">
+                                {user.role.replace(/_/g, " ")}
                               </span>
-                              <span>•</span>
-                              <span>
-                                {rowPresentCount}/{filteredUsers.length} present
+                              <span className="font-mono text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                                {presentDays}/{rangeDays}d
                               </span>
                             </div>
                           </div>
                         </div>
                       </td>
 
-                      {/* User Attendance Boxes (Top = Check-In, Bottom = Check-Out) */}
-                      {filteredUsers.map((user) => {
+                      {/* Date Attendance Boxes (Top = Check-In, Bottom = Check-Out) */}
+                      {displayedRows.map((row) => {
                         const cell = row.cells[user.userId];
                         const isPresent = cell?.status === "present" && Boolean(cell.checkInTime);
                         const hasCheckOut = Boolean(cell?.checkOutTime);
                         const isActive = isPresent && !hasCheckOut;
+                        const dateInfo = formatLedgerDateLabel(row.date);
+                        const isToday = row.date === todayIST;
 
                         const tooltipLines = [
                           `${user.userName} (${user.employeeCode}) — ${row.date}`,
@@ -809,8 +812,15 @@ export function AttendancePanel() {
 
                         return (
                           <td
-                            key={`${row.date}-${user.userId}`}
-                            className="border-b border-r last:border-r-0 border-border p-2 align-middle"
+                            key={`${user.userId}-${row.date}`}
+                            className={cn(
+                              "border-b border-r last:border-r-0 border-border p-2 align-middle",
+                              isToday
+                                ? "bg-primary/[0.03]"
+                                : dateInfo.isWeekend
+                                  ? "bg-muted/15"
+                                  : ""
+                            )}
                           >
                             {/* Check-In (Top) & Check-Out (Bottom) Box */}
                             <div
