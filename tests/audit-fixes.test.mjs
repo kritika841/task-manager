@@ -636,3 +636,74 @@ test("AdFlow profile role sync & Role Templates custom status nomenclature", asy
     )
   );
 });
+
+test("Attendance Ledger: date-range query, per-user check-in/out cells, and CSV export", async () => {
+  const admCookie = await loginAs("t-admin@test.local");
+  const memCookie = await loginAs("t-mem@test.local");
+
+  // Member checks in and checks out for today
+  const checkinRes = await api("/api/attendance", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie: memCookie },
+    body: JSON.stringify({ action: "checkin" }),
+  });
+  assert.equal(checkinRes.status, 200);
+  const todayDate = checkinRes.json.record.date;
+
+  const checkoutRes = await api("/api/attendance", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie: memCookie },
+    body: JSON.stringify({ action: "checkout" }),
+  });
+  assert.equal(checkoutRes.status, 200);
+
+  // Build 3-day range ending today
+  const [y, m, d] = todayDate.split("-").map(Number);
+  const startDt = new Date(Date.UTC(y, m - 1, d));
+  startDt.setUTCDate(startDt.getUTCDate() - 2);
+  const startDate = startDt.toISOString().slice(0, 10);
+
+  // Non-admin does not receive ledger data or CSV export
+  const memLedgerRes = await api(
+    `/api/attendance?startDate=${startDate}&endDate=${todayDate}`,
+    { headers: { cookie: memCookie } }
+  );
+  assert.equal(memLedgerRes.status, 200);
+  assert.equal(memLedgerRes.json.ledger, undefined);
+
+  const memCsvRes = await api(
+    `/api/attendance?startDate=${startDate}&endDate=${todayDate}&format=csv`,
+    { headers: { cookie: memCookie } }
+  );
+  assert.equal(memCsvRes.status, 403);
+
+  // Admin receives ledger with 3 date rows and user columns
+  const admLedgerRes = await api(
+    `/api/attendance?startDate=${startDate}&endDate=${todayDate}`,
+    { headers: { cookie: admCookie } }
+  );
+  assert.equal(admLedgerRes.status, 200);
+  assert.equal(admLedgerRes.json.mode, "ledger");
+  assert.equal(admLedgerRes.json.ledger.dates.length, 3);
+  assert.equal(admLedgerRes.json.ledger.rows.length, 3);
+  assert.equal(admLedgerRes.json.ledger.summary.totalDays, 3);
+
+  const todayRow = admLedgerRes.json.ledger.rows.find((r) => r.date === todayDate);
+  assert.ok(todayRow, "Expected today's row in ledger");
+  const memCell = todayRow.cells["22222222-2222-4222-8222-222222222205"];
+  assert.equal(memCell?.status, "present");
+  assert.ok(memCell?.checkInTime);
+  assert.ok(memCell?.checkOutTime);
+
+  const priorRow = admLedgerRes.json.ledger.rows.find((r) => r.date === startDate);
+  assert.equal(priorRow.cells["22222222-2222-4222-8222-222222222205"]?.status, "absent");
+
+  // Ledger CSV export includes formula-escaped user header and date rows
+  const ledgerCsv = await api(
+    `/api/attendance?startDate=${startDate}&endDate=${todayDate}&format=csv`,
+    { headers: { cookie: admCookie } }
+  );
+  assert.equal(ledgerCsv.status, 200);
+  assert.ok(ledgerCsv.text.includes(`"'=Test Admin`));
+  assert.ok(ledgerCsv.text.includes(todayDate));
+});

@@ -4,7 +4,15 @@ import { supabaseAdmin } from "@/lib/supabase";
 import { loadLocalDb, saveLocalDb, type LocalDbSchema } from "@/lib/local-supabase-fallback";
 import { canManageWorkspace, resolveRequestActor } from "@/lib/auth-server";
 import { sendCheckoutReminderEmail } from "@/lib/email";
-import { AttendanceRecord, EmployeeAttendanceRow, Role } from "@/lib/types";
+import {
+  AttendanceLedgerCell,
+  AttendanceLedgerRow,
+  AttendanceLedgerSummary,
+  AttendanceLedgerUser,
+  AttendanceRecord,
+  EmployeeAttendanceRow,
+  Role,
+} from "@/lib/types";
 import { getEmployeeCode, getUserColor, sanitizeCsvCell } from "@/lib/utils";
 
 const TARGET_TIMEZONE = "Asia/Kolkata";
@@ -261,30 +269,44 @@ if (typeof window === "undefined" && !globalWithScheduler.__satmiAttendance8PmIn
   globalWithScheduler.__satmiAttendance8PmInterval = timer;
 }
 
-function buildAttendanceSheet(
-  profiles: Record<string, any>[],
-  records: AttendanceRecord[],
-  targetDate: string
-): EmployeeAttendanceRow[] {
+const MAX_LEDGER_DAYS = 180;
+
+function isValidISODate(dateStr: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return (
+    dt.getUTCFullYear() === y &&
+    dt.getUTCMonth() === m - 1 &&
+    dt.getUTCDate() === d
+  );
+}
+
+function enumerateDateRange(startDate: string, endDate: string): string[] {
+  const [sy, sm, sd] = startDate.split("-").map(Number);
+  const [ey, em, ed] = endDate.split("-").map(Number);
+  const cur = new Date(Date.UTC(sy, sm - 1, sd));
+  const end = new Date(Date.UTC(ey, em - 1, ed));
+  const dates: string[] = [];
+
+  while (cur.getTime() <= end.getTime() && dates.length < MAX_LEDGER_DAYS) {
+    dates.push(cur.toISOString().slice(0, 10));
+    cur.setUTCDate(cur.getUTCDate() + 1);
+  }
+  return dates;
+}
+
+function buildLedgerUsers(profiles: Record<string, any>[]): AttendanceLedgerUser[] {
   const activeProfiles = profiles
     .filter((p) => p && p.active !== false && !p.deleted_at)
     .sort((a, b) =>
       String(a.name || a.email || "").localeCompare(String(b.name || b.email || ""))
     );
 
-  const dateRecordsByUserId = new Map<string, AttendanceRecord>();
-  for (const r of records) {
-    if (r.date === targetDate) {
-      dateRecordsByUserId.set(String(r.userId), r);
-    }
-  }
-
   return activeProfiles.map((p) => {
     const name = String(p.name || p.email?.split("@")[0] || "Team Member");
     const email = String(p.email || "");
     const meta = parseProfileMetadata(p.avatar_url, name, String(p.role || "member"));
-    const record = dateRecordsByUserId.get(String(p.id));
-    const isPresent = Boolean(record?.checkInTime);
 
     return {
       userId: String(p.id),
@@ -295,6 +317,30 @@ function buildAttendanceSheet(
       department: meta.department,
       color: meta.color,
       avatar: meta.employeeCode.slice(0, 2),
+    };
+  });
+}
+
+function buildAttendanceSheet(
+  profiles: Record<string, any>[],
+  records: AttendanceRecord[],
+  targetDate: string
+): EmployeeAttendanceRow[] {
+  const users = buildLedgerUsers(profiles);
+
+  const dateRecordsByUserId = new Map<string, AttendanceRecord>();
+  for (const r of records) {
+    if (r.date === targetDate) {
+      dateRecordsByUserId.set(String(r.userId), r);
+    }
+  }
+
+  return users.map((u) => {
+    const record = dateRecordsByUserId.get(u.userId);
+    const isPresent = Boolean(record?.checkInTime);
+
+    return {
+      ...u,
       date: targetDate,
       status: isPresent ? "present" : "absent",
       checkInTime: record?.checkInTime || null,
@@ -304,6 +350,80 @@ function buildAttendanceSheet(
       recordId: record?.id || null,
     };
   });
+}
+
+function buildAttendanceLedger(
+  profiles: Record<string, any>[],
+  records: AttendanceRecord[],
+  startDate: string,
+  endDate: string
+): {
+  users: AttendanceLedgerUser[];
+  dates: string[];
+  rows: AttendanceLedgerRow[];
+  summary: AttendanceLedgerSummary;
+} {
+  const users = buildLedgerUsers(profiles);
+  const dates = enumerateDateRange(startDate, endDate);
+  const dateSet = new Set(dates);
+
+  const recordsByDateUser = new Map<string, AttendanceRecord>();
+  for (const r of records) {
+    if (dateSet.has(r.date)) {
+      recordsByDateUser.set(`${r.date}::${String(r.userId)}`, r);
+    }
+  }
+
+  let presentEntries = 0;
+  let checkedOutEntries = 0;
+  let activeEntries = 0;
+
+  const rows: AttendanceLedgerRow[] = dates.map((date) => {
+    const cells: Record<string, AttendanceLedgerCell> = {};
+    for (const u of users) {
+      const record = recordsByDateUser.get(`${date}::${u.userId}`);
+      const isPresent = Boolean(record?.checkInTime);
+      const checkInTime = record?.checkInTime || null;
+      const checkOutTime = record?.checkOutTime || null;
+
+      if (isPresent) {
+        presentEntries += 1;
+        if (checkOutTime) {
+          checkedOutEntries += 1;
+        } else {
+          activeEntries += 1;
+        }
+      }
+
+      cells[u.userId] = {
+        userId: u.userId,
+        date,
+        status: isPresent ? "present" : "absent",
+        checkInTime,
+        checkOutTime,
+        checkoutReminderSent: Boolean(record?.checkoutReminderSent),
+        checkoutReminderSentAt: record?.checkoutReminderSentAt || null,
+        recordId: record?.id || null,
+      };
+    }
+    return { date, cells };
+  });
+
+  const totalPossibleEntries = users.length * dates.length;
+  return {
+    users,
+    dates,
+    rows,
+    summary: {
+      totalEmployees: users.length,
+      totalDays: dates.length,
+      totalPossibleEntries,
+      presentEntries,
+      absentEntries: totalPossibleEntries - presentEntries,
+      checkedOutEntries,
+      activeEntries,
+    },
+  };
 }
 
 function buildAttendanceCSV(sheet: EmployeeAttendanceRow[], targetDate: string): string {
@@ -338,6 +458,37 @@ function buildAttendanceCSV(sheet: EmployeeAttendanceRow[], targetDate: string):
   return [headers.join(","), ...rows].join("\n");
 }
 
+function buildAttendanceLedgerCSV(
+  users: AttendanceLedgerUser[],
+  rows: AttendanceLedgerRow[]
+): string {
+  const headers = ["Date"];
+  for (const u of users) {
+    headers.push(`${u.userName} (${u.employeeCode}) Check-In (IST)`);
+    headers.push(`${u.userName} (${u.employeeCode}) Check-Out (IST)`);
+  }
+
+  const csvRows = rows.map((row) => {
+    const cols = [escapeCSVField(row.date)];
+    for (const u of users) {
+      const cell = row.cells[u.userId];
+      cols.push(escapeCSVField(formatISTTimeForCSV(cell?.checkInTime || null)));
+      cols.push(
+        escapeCSVField(
+          cell?.checkOutTime
+            ? formatISTTimeForCSV(cell.checkOutTime)
+            : cell?.checkInTime
+              ? "Active"
+              : "-"
+        )
+      );
+    }
+    return cols.join(",");
+  });
+
+  return [headers.map((h) => escapeCSVField(h)).join(","), ...csvRows].join("\n");
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { actor } = await resolveRequestActor(req);
@@ -348,10 +499,20 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const { dateStr: todayDateStr } = getISTDateTimeParts();
     const rawDate = searchParams.get("date")?.trim();
+    const rawStartDate = searchParams.get("startDate")?.trim();
+    const rawEndDate = searchParams.get("endDate")?.trim();
+    const isLedgerMode = Boolean(rawStartDate || rawEndDate);
+
     const targetDate =
-      rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : todayDateStr;
+      rawDate && isValidISODate(rawDate) ? rawDate : todayDateStr;
     const format = searchParams.get("format")?.trim().toLowerCase();
     const isAdminCaller = canManageWorkspace(actor.role);
+
+    let startDate = rawStartDate && isValidISODate(rawStartDate) ? rawStartDate : todayDateStr;
+    let endDate = rawEndDate && isValidISODate(rawEndDate) ? rawEndDate : startDate;
+    if (startDate > endDate) {
+      [startDate, endDate] = [endDate, startDate];
+    }
 
     const { db, profiles } = await getProfilesAndDb();
     await checkAndSend8PmReminders(db, profiles, false);
@@ -375,6 +536,19 @@ export async function GET(req: NextRequest) {
         );
       }
 
+      if (isLedgerMode) {
+        const ledger = buildAttendanceLedger(profiles, records, startDate, endDate);
+        const csv = buildAttendanceLedgerCSV(ledger.users, ledger.rows);
+        return new NextResponse(csv, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/csv; charset=utf-8",
+            "Content-Disposition": `attachment; filename="satmi_attendance_ledger_${startDate}_to_${endDate}.csv"`,
+            "Cache-Control": "no-store",
+          },
+        });
+      }
+
       const sheet = buildAttendanceSheet(profiles, records, targetDate);
       const csv = buildAttendanceCSV(sheet, targetDate);
       return new NextResponse(csv, {
@@ -396,6 +570,22 @@ export async function GET(req: NextRequest) {
           myTodayRecord,
           sheet: [],
           summary: null,
+        },
+        { headers: { "Cache-Control": "no-store" } }
+      );
+    }
+
+    if (isLedgerMode) {
+      const ledger = buildAttendanceLedger(profiles, records, startDate, endDate);
+      return NextResponse.json(
+        {
+          ok: true,
+          mode: "ledger",
+          startDate,
+          endDate,
+          today: todayDateStr,
+          myTodayRecord,
+          ledger,
         },
         { headers: { "Cache-Control": "no-store" } }
       );

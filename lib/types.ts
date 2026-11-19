@@ -330,4 +330,41 @@ export interface EmployeeAttendanceRow {
   recordId?: string | null;
 }
 
+export interface AttendanceLedgerUser {
+  userId: string;
+  userName: string;
+  userEmail: string;
+  employeeCode: string;
+  role: Role;
+  department: string;
+  color?: string;
+  avatar?: string;
+}
+
+export interface AttendanceLedgerCell {
+  userId: string;
+  date: string;
+  status: 'present' | 'absent';
+  checkInTime: string | null;
+  checkOutTime: string | null;
+  checkoutReminderSent: boolean;
+  checkoutReminderSentAt: string | null;
+  recordId?: string | null;
+}
+
+export interface AttendanceLedgerRow {
+  date: string;
+  cells: Record<string, AttendanceLedgerCell>;
+}
+
+export interface AttendanceLedgerSummary {
+  totalEmployees: number;
+  totalDays: number;
+  totalPossibleEntries: number;
+  presentEntries: number;
+  absentEntries: number;
+  checkedOutEntries: number;
+  activeEntries: number;
+}
+
 
