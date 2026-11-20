@@ -143,10 +143,12 @@ export function AttendancePanel() {
   const [employeeFilter, setEmployeeFilter] = useState<LedgerEmployeeFilter>("all");
   const [sortOrder, setSortOrder] = useState<DateSortOrder>("desc");
 
-  const fetchAttendanceLedger = useCallback(async () => {
+  const fetchAttendanceLedger = useCallback(async (silent = false) => {
     if (!isAdmin) return;
-    setIsLoading(true);
-    setError(null);
+    if (!silent) {
+      setIsLoading(true);
+      setError(null);
+    }
     try {
       const s = startDate <= endDate ? startDate : endDate;
       const e = startDate <= endDate ? endDate : startDate;
@@ -162,16 +164,50 @@ export function AttendancePanel() {
       setUsers(Array.isArray(ledger.users) ? ledger.users : []);
       setRows(Array.isArray(ledger.rows) ? ledger.rows : []);
       setSummary(ledger.summary || null);
+      if (silent) setError(null);
     } catch (err: any) {
-      setError(err?.message || "Failed to load attendance ledger.");
+      if (!silent) {
+        setError(err?.message || "Failed to load attendance ledger.");
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [isAdmin, startDate, endDate]);
 
   useEffect(() => {
-    void fetchAttendanceLedger();
+    void fetchAttendanceLedger(false);
   }, [fetchAttendanceLedger, myTodayAttendance?.checkInTime, myTodayAttendance?.checkOutTime]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const interval = setInterval(() => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void fetchAttendanceLedger(true);
+      }
+    }, 2_500);
+    const onFocusOrVisible = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void fetchAttendanceLedger(true);
+      }
+    };
+    window.addEventListener("focus", onFocusOrVisible);
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel("satmi-attendance");
+      bc.onmessage = () => {
+        void fetchAttendanceLedger(true);
+      };
+    } catch {}
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocusOrVisible);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+      bc?.close();
+    };
+  }, [isAdmin, fetchAttendanceLedger]);
 
   const userStatsMap = useMemo(() => {
     const map = new Map<

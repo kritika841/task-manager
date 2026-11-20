@@ -1079,6 +1079,11 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         } else {
           await refreshMyAttendance();
         }
+        try {
+          const ch = new BroadcastChannel("satmi-attendance");
+          ch.postMessage({ type: "attendance-updated", userId: currentUserId });
+          ch.close();
+        } catch {}
         return { ok: true };
       } catch (err: any) {
         console.error(`Attendance ${action} error:`, err);
@@ -1104,9 +1109,30 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
     if (!isAuthenticated || !currentUserId || currentUserId === "default") return;
     void refreshMyAttendance();
     const interval = setInterval(() => {
-      void refreshMyAttendance();
-    }, 60_000);
-    return () => clearInterval(interval);
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void refreshMyAttendance();
+      }
+    }, 2_500);
+    const onFocusOrVisible = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") {
+        void refreshMyAttendance();
+      }
+    };
+    window.addEventListener("focus", onFocusOrVisible);
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+    let bc: BroadcastChannel | null = null;
+    try {
+      bc = new BroadcastChannel("satmi-attendance");
+      bc.onmessage = () => {
+        void refreshMyAttendance();
+      };
+    } catch {}
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocusOrVisible);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+      bc?.close();
+    };
   }, [isAuthenticated, currentUserId, refreshMyAttendance]);
 
   useEffect(() => {

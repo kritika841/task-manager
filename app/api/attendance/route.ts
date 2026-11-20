@@ -1,9 +1,14 @@
-import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
-import { loadLocalDb, saveLocalDb, type LocalDbSchema } from "@/lib/local-supabase-fallback";
+import { saveLocalDb, type LocalDbSchema } from "@/lib/local-supabase-fallback";
 import { canManageWorkspace, resolveRequestActor } from "@/lib/auth-server";
 import { sendCheckoutReminderEmail } from "@/lib/email";
+import {
+  getISTDateTimeParts,
+  getProfilesAndDb,
+  parseProfileMetadata,
+  recordAttendanceAction,
+  syncAttendanceFromSupabase,
+} from "@/lib/attendance-server";
 import {
   AttendanceLedgerCell,
   AttendanceLedgerRow,
@@ -11,36 +16,10 @@ import {
   AttendanceLedgerUser,
   AttendanceRecord,
   EmployeeAttendanceRow,
-  Role,
 } from "@/lib/types";
-import { getEmployeeCode, getUserColor, sanitizeCsvCell } from "@/lib/utils";
+import { sanitizeCsvCell } from "@/lib/utils";
 
 const TARGET_TIMEZONE = "Asia/Kolkata";
-
-function getISTDateTimeParts(date = new Date()): {
-  dateStr: string;
-  hour: number;
-  minute: number;
-} {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TARGET_TIMEZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
-
-  const values = Object.fromEntries(parts.map((p) => [p.type, p.value]));
-  const rawHour = Number(values.hour);
-  const hour = rawHour === 24 ? 0 : rawHour;
-  return {
-    dateStr: `${values.year}-${values.month}-${values.day}`,
-    hour,
-    minute: Number(values.minute) || 0,
-  };
-}
 
 function formatISTTimeForCSV(iso: string | null): string {
   if (!iso) return "-";
@@ -67,83 +46,6 @@ function formatDurationForCSV(checkInTime: string | null, checkOutTime: string |
 
 function escapeCSVField(value: string): string {
   return sanitizeCsvCell(value);
-}
-
-function getDepartment(role: string): string {
-  switch (role) {
-    case "admin":
-      return "Executive & Admin";
-    case "manager":
-      return "Operations & Review";
-    case "editor":
-      return "Video Editing";
-    case "content_creator":
-      return "Content & Creative";
-    case "media_buyer":
-      return "Media & Growth";
-    case "developer":
-      return "Engineering & Product";
-    default:
-      return "Operations";
-  }
-}
-
-function parseProfileMetadata(avatarUrl: string | null | undefined, name: string, role: string) {
-  let color: string | undefined;
-  let employeeCode: string | undefined;
-  let appRole: Role | undefined;
-
-  if (avatarUrl && typeof avatarUrl === "string") {
-    try {
-      if (avatarUrl.startsWith("{") && avatarUrl.endsWith("}")) {
-        const parsed = JSON.parse(avatarUrl);
-        color = parsed.color;
-        employeeCode = parsed.employeeCode;
-        appRole = parsed.appRole;
-      } else if (avatarUrl.startsWith("#")) {
-        color = avatarUrl;
-      }
-    } catch {
-      // ignore malformed metadata
-    }
-  }
-
-  const resolvedRole = (appRole || (role as Role) || "member") as Role;
-  const code = getEmployeeCode(name, employeeCode);
-  return {
-    employeeCode: code,
-    color: getUserColor(code, color),
-    role: resolvedRole,
-    department: getDepartment(resolvedRole),
-  };
-}
-
-async function getProfilesAndDb(): Promise<{
-  db: LocalDbSchema;
-  profiles: Record<string, any>[];
-}> {
-  const { data: liveProfiles } = await supabaseAdmin
-    .from("profiles")
-    .select("id, name, email, role, avatar_url, active, deleted_at");
-  const db = loadLocalDb();
-  if (!Array.isArray(db.attendance_records)) {
-    db.attendance_records = [];
-  }
-  if (!Array.isArray(db.notifications)) {
-    db.notifications = [];
-  }
-  if (!Array.isArray(db.audit_logs)) {
-    db.audit_logs = [];
-  }
-
-  const profiles =
-    Array.isArray(liveProfiles) && liveProfiles.length > 0
-      ? liveProfiles
-      : Array.isArray(db.profiles)
-        ? db.profiles
-        : [];
-
-  return { db, profiles };
 }
 
 let isChecking8PmReminders = false;
@@ -532,9 +434,8 @@ export async function GET(req: NextRequest) {
     }
 
     const { db, profiles } = await getProfilesAndDb();
+    const records = await syncAttendanceFromSupabase(db);
     await checkAndSend8PmReminders(db, profiles, false);
-
-    const records = (db.attendance_records || []) as AttendanceRecord[];
     const requestedUserId =
       isAdminCaller && searchParams.get("userId")?.trim()
         ? searchParams.get("userId")!.trim()
@@ -681,116 +582,22 @@ export async function POST(req: NextRequest) {
         ? body.userId.trim()
         : actor.id;
 
-    const targetProfile = profiles.find((p) => String(p.id) === String(targetUserId));
-    if (!targetProfile || targetProfile.active === false || targetProfile.deleted_at) {
-      return NextResponse.json({ error: "Employee profile not found" }, { status: 404 });
-    }
-
-    const { dateStr: todayDateStr } = getISTDateTimeParts();
-    const nowIso = new Date().toISOString();
-    const records = db.attendance_records as AttendanceRecord[];
-    let existing = records.find(
-      (r) => String(r.userId) === String(targetUserId) && r.date === todayDateStr
-    );
-
-    const userName = String(targetProfile.name || targetProfile.email?.split("@")[0] || actor.name);
-    const userEmail = String(targetProfile.email || actor.email);
-    const meta = parseProfileMetadata(
-      targetProfile.avatar_url,
-      userName,
-      String(targetProfile.role || actor.role)
-    );
-
-    if (action === "checkin") {
-      if (existing && existing.checkInTime) {
-        return NextResponse.json({
-          ok: true,
-          record: existing,
-          alreadyCheckedIn: true,
-        });
-      }
-
-      if (existing) {
-        existing.status = "present";
-        existing.checkInTime = nowIso;
-        existing.updatedAt = nowIso;
-      } else {
-        existing = {
-          id: `att-${crypto.randomUUID()}`,
-          userId: String(targetProfile.id),
-          userName,
-          userEmail,
-          employeeCode: meta.employeeCode,
-          role: meta.role,
-          department: meta.department,
-          date: todayDateStr,
-          status: "present",
-          checkInTime: nowIso,
-          checkOutTime: null,
-          checkoutReminderSent: false,
-          checkoutReminderSentAt: null,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        };
-        records.push(existing);
-      }
-
-      db.audit_logs.unshift({
-        id: `aud-att-${crypto.randomUUID()}`,
-        actor_id: actor.id,
-        action: "attendance_checkin",
-        target_type: "attendance",
-        target_id: existing.id,
-        metadata: {
-          userId: existing.userId,
-          userName: existing.userName,
-          date: todayDateStr,
-          checkInTime: existing.checkInTime,
-        },
-        created_at: nowIso,
-      });
-
-      saveLocalDb(db);
-      return NextResponse.json({ ok: true, record: existing });
-    }
-
-    // action === "checkout"
-    if (!existing || !existing.checkInTime) {
-      return NextResponse.json(
-        { error: "Please check in first before checking out." },
-        { status: 400 }
-      );
-    }
-
-    if (existing.checkOutTime) {
-      return NextResponse.json({
-        ok: true,
-        record: existing,
-        alreadyCheckedOut: true,
-      });
-    }
-
-    existing.checkOutTime = nowIso;
-    existing.updatedAt = nowIso;
-
-    db.audit_logs.unshift({
-      id: `aud-att-${crypto.randomUUID()}`,
-      actor_id: actor.id,
-      action: "attendance_checkout",
-      target_type: "attendance",
-      target_id: existing.id,
-      metadata: {
-        userId: existing.userId,
-        userName: existing.userName,
-        date: todayDateStr,
-        checkInTime: existing.checkInTime,
-        checkOutTime: existing.checkOutTime,
-      },
-      created_at: nowIso,
+    const result = await recordAttendanceAction({
+      db,
+      profiles,
+      action: action as "checkin" | "checkout",
+      targetUserId,
+      actorId: actor.id,
+      fallbackName: actor.name,
+      fallbackEmail: actor.email,
+      fallbackRole: actor.role,
     });
 
-    saveLocalDb(db);
-    return NextResponse.json({ ok: true, record: existing });
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: result.status });
+    }
+
+    return NextResponse.json(result);
   } catch (error: any) {
     console.error("POST /api/attendance error:", error);
     return NextResponse.json(
