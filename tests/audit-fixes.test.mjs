@@ -150,8 +150,28 @@ test.before(async () => {
     }
     if (urlObj.pathname === "/rest/v1/ads") {
       const idFilter = urlObj.searchParams.get("id")?.replace(/^eq\./, "");
+      const nameIlike = urlObj.searchParams.get("name")?.replace(/^ilike\./, "");
+      const deletedNull = urlObj.searchParams.get("deleted_at") === "is.null";
       if (req.method === "GET") {
-        return send(200, idFilter ? mockAds.filter((a) => a.id === idFilter) : mockAds);
+        let rows = mockAds;
+        if (idFilter) rows = rows.filter((a) => a.id === idFilter);
+        if (nameIlike) {
+          const prefix = nameIlike.replace(/\*$/, "").toUpperCase();
+          rows = rows.filter((a) => String(a.name || "").toUpperCase().startsWith(prefix));
+        }
+        if (deletedNull) rows = rows.filter((a) => !a.deleted_at);
+        return send(200, rows);
+      }
+      if (req.method === "POST") {
+        const created = {
+          id: crypto.randomUUID(),
+          deleted_at: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          ...(body || {}),
+        };
+        mockAds.push(created);
+        return send(201, [created]);
       }
       if (req.method === "PATCH") {
         const updated = [];
@@ -637,25 +657,97 @@ test("AdFlow profile role sync & Role Templates custom status nomenclature", asy
   );
 });
 
-test("Attendance Ledger: date-range query, per-user check-in/out cells, and CSV export", async () => {
+test("Attendance Ledger: date-range query, per-user check-in/out cells, office-hours gate, and 12:01 PM check-in reminder", async () => {
   const admCookie = await loginAs("t-admin@test.local");
   const memCookie = await loginAs("t-mem@test.local");
 
-  // Member checks in and checks out for today
+  const istParts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const istVals = Object.fromEntries(istParts.map((p) => [p.type, p.value]));
+  const istHourRaw = Number(istVals.hour);
+  const istHour = istHourRaw === 24 ? 0 : istHourRaw;
+  const todayDate = `${istVals.year}-${istVals.month}-${istVals.day}`;
+  const inOfficeHours = istHour >= 10 && istHour < 18;
+
+  // Attempt check-in and verify office-hours enforcement (10:00 AM – 6:00 PM IST)
   const checkinRes = await api("/api/attendance", {
     method: "POST",
     headers: { "Content-Type": "application/json", cookie: memCookie },
     body: JSON.stringify({ action: "checkin" }),
   });
-  assert.equal(checkinRes.status, 200);
-  const todayDate = checkinRes.json.record.date;
+  if (inOfficeHours) {
+    assert.equal(checkinRes.status, 200);
+    const checkoutRes = await api("/api/attendance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", cookie: memCookie },
+      body: JSON.stringify({ action: "checkout" }),
+    });
+    assert.equal(checkoutRes.status, 200);
+  } else {
+    assert.equal(checkinRes.status, 403);
+    assert.match(checkinRes.json.error || "", /office hours|10:00 AM|6:00 PM/i);
 
-  const checkoutRes = await api("/api/attendance", {
+    // Seed member check-in/out record for today in local-db.json so ledger tests remain deterministic outside 10–6 IST
+    const curDb = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+    curDb.attendance_records = curDb.attendance_records || [];
+    const nowIso = new Date().toISOString();
+    curDb.attendance_records.push({
+      id: `att-${crypto.randomUUID()}`,
+      userId: "22222222-2222-4222-8222-222222222205",
+      userName: "Test Member",
+      userEmail: "t-mem@test.local",
+      employeeCode: "TST",
+      role: "member",
+      department: "Operations",
+      date: todayDate,
+      status: "present",
+      checkInTime: nowIso,
+      checkOutTime: nowIso,
+      checkoutReminderSent: false,
+      checkoutReminderSentAt: null,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+    fs.writeFileSync(DB_PATH, JSON.stringify(curDb, null, 2), "utf8");
+  }
+
+  // Clear any earlier automatic 12:01 PM reminder log from prior tests so this test is deterministic at any IST hour
+  const dbBeforeRem = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+  dbBeforeRem.checkin_reminders_sent = {};
+  fs.writeFileSync(DB_PATH, JSON.stringify(dbBeforeRem, null, 2), "utf8");
+
+  // Trigger 12:01 PM check-in reminder (force: true for deterministic test) -> sends to unchecked-in users, skips checked-in member, and is idempotent
+  const emailCountBefore = capturedEmails.length;
+  const remRes1 = await api("/api/attendance", {
     method: "POST",
-    headers: { "Content-Type": "application/json", cookie: memCookie },
-    body: JSON.stringify({ action: "checkout" }),
+    headers: { "Content-Type": "application/json", cookie: admCookie },
+    body: JSON.stringify({ action: "check_checkin_reminders", force: true }),
   });
-  assert.equal(checkoutRes.status, 200);
+  assert.equal(remRes1.status, 200);
+  assert.ok(remRes1.json.remindedCount >= 1);
+  assert.ok(!remRes1.json.remindedUsers.includes("Test Member"));
+  assert.ok(capturedEmails.length > emailCountBefore);
+  assert.ok(
+    capturedEmails
+      .slice(emailCountBefore)
+      .some((e) => String(e.subject || "").includes("Check-In Reminder"))
+  );
+
+  // Second trigger same day must not resend duplicates
+  const remRes2 = await api("/api/attendance", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie: admCookie },
+    body: JSON.stringify({ action: "check_checkin_reminders", force: true }),
+  });
+  assert.equal(remRes2.status, 200);
+  assert.equal(remRes2.json.remindedCount, 0);
 
   // Build 3-day range ending today
   const [y, m, d] = todayDate.split("-").map(Number);
@@ -706,4 +798,160 @@ test("Attendance Ledger: date-range query, per-user check-in/out cells, and CSV 
   assert.equal(ledgerCsv.status, 200);
   assert.ok(ledgerCsv.text.includes(`"'=Test Admin`));
   assert.ok(ledgerCsv.text.includes(todayDate));
+});
+
+test("AdFlow creative queue: normal tasks stay non-AdFlow unless ticked, blank creative auto-created when ticked, & deleted ads never reappear", async () => {
+  const admCookie = await loginAs("t-admin@test.local");
+  const creatorId = "c4259f60-f408-4a4b-8dbf-81e94c0f9a64";
+
+  // 0. Creating a normal task (even for a content creator with "script" in title) WITHOUT ticking isAdflowTask
+  //    must NOT generate a Creative ID or create an AdFlow blank creative, and must stay non-AdFlow.
+  const adsBeforeNormal = mockAds.length;
+  const normalRes = await api("/api/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie: admCookie },
+    body: JSON.stringify({
+      title: "Review script notes for weekly call",
+      assigneeId: creatorId,
+      description: "Normal operational task",
+      dueDate: new Date().toISOString().slice(0, 10),
+      isAdflowTask: false,
+      generateCreativeId: false,
+    }),
+  });
+  assert.equal(normalRes.status, 200);
+  assert.deepEqual(normalRes.json.creativeIds, []);
+  assert.equal(mockAds.length, adsBeforeNormal);
+
+  const tasksListRes = await api("/api/tasks", { headers: { cookie: admCookie } });
+  assert.equal(tasksListRes.status, 200);
+  const createdNormalTask = tasksListRes.json.tasks.find(
+    (t) => t.id === normalRes.json.target?.id
+  );
+  assert.ok(createdNormalTask);
+  assert.equal(createdNormalTask.isAdflowTask, false);
+
+  // Non-AdFlow task revision does not stamp AdFlow editor/creator productionStage
+  const revNormalRes = await api("/api/tasks", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", cookie: admCookie },
+    body: JSON.stringify({
+      id: createdNormalTask.id,
+      workflowAction: "request_changes",
+      revisionReason: "Revision Requested",
+      revisionNotes: "Please expand notes",
+    }),
+  });
+  assert.equal(revNormalRes.status, 200);
+  const tasksAfterRev = await api("/api/tasks", { headers: { cookie: admCookie } });
+  const revisedNormalTask = tasksAfterRev.json.tasks.find(
+    (t) => t.id === createdNormalTask.id
+  );
+  assert.equal(revisedNormalTask?.isRevisionRequested, true);
+  assert.equal(revisedNormalTask?.productionStage, undefined);
+
+  // 1. Seed a creative task for creator whose ad in AdFlow was soft-deleted (like KRI0038/39/47)
+  const deletedAdId = crypto.randomUUID();
+  const deletedCode = "KRI9001";
+  mockAds.push({
+    id: deletedAdId,
+    name: deletedCode,
+    status: "approved",
+    production_stage: "approved",
+    creator_id: creatorId,
+    deleted_at: new Date().toISOString(),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  const curDb = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
+  curDb.daily_team_targets.push({
+    id: crypto.randomUUID(),
+    user_id: creatorId,
+    assigned_by: "22222222-2222-4222-8222-222222222201",
+    target_date: new Date().toISOString().slice(0, 10),
+    task_name: `${deletedCode} — Creative creation`,
+    target_quantity: 1,
+    completed_quantity: 0,
+    manual_completed_quantity: 0,
+    auto_completed_quantity: 0,
+    notes: JSON.stringify({
+      __meta__: true,
+      desc: "Deleted in AdFlow test",
+      creativeName: deletedCode,
+      adId: deletedAdId,
+      productionStage: "approved",
+      statusOverride: "completed",
+      isAdflowTask: true,
+    }),
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+  fs.writeFileSync(DB_PATH, JSON.stringify(curDb, null, 2), "utf8");
+
+  // 2. Assign a brand-new AdFlow creative task (with tick box enabled: isAdflowTask: true) -> auto-creates blank creative
+  const createRes = await api("/api/tasks", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie: admCookie },
+    body: JSON.stringify({
+      title: "Creative creation",
+      assigneeId: creatorId,
+      description: "Test blank creative auto creation",
+      dueDate: new Date().toISOString().slice(0, 10),
+      isAdflowTask: true,
+      generateCreativeId: true,
+    }),
+  });
+  assert.equal(createRes.status, 200);
+  const newCode = createRes.json.creativeIds?.[0];
+  assert.ok(newCode, "Expected a generated Creative ID");
+
+  const createdBlankAd = mockAds.find((a) => a.name === newCode && !a.deleted_at);
+  assert.ok(createdBlankAd, "Expected blank creative to be created in AdFlow");
+  assert.equal(createdBlankAd.creator_id, creatorId);
+  assert.equal(createdBlankAd.status, "draft");
+  assert.equal(createdBlankAd.production_stage, "script_writing");
+
+  // 3. Query /api/adflow/creative-ids -> neither deleted ad nor newly created blank ad should appear in pendingCreativeIds
+  const queueRes = await api(`/api/adflow/creative-ids?creatorId=${creatorId}`);
+  assert.equal(queueRes.status, 200);
+  assert.ok(
+    !queueRes.json.pendingCreativeIds.includes(deletedCode),
+    `Deleted creative ${deletedCode} must not reappear in pendingCreativeIds`
+  );
+  assert.ok(
+    !queueRes.json.pendingCreativeIds.includes(newCode),
+    `Auto-created creative ${newCode} must not appear in pendingCreativeIds`
+  );
+});
+
+test("Feedback & Feature Requests: screenshot attachments are sanitized, persisted, and included in email", async () => {
+  const memCookie = await loginAs("t-mem@test.local");
+  const admCookie = await loginAs("t-admin@test.local");
+
+  const fbRes = await api("/api/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie: memCookie },
+    body: JSON.stringify({
+      type: "bug",
+      title: "Attachment screenshot test",
+      details: "Screenshot attached via drag-and-drop",
+      attachments: [
+        { name: "screen.png", url: "/uploads/screen-123.png", size: 2048, type: "image/png" },
+        { name: "evil.html", url: "javascript:alert(1)", size: 100, type: "text/html" },
+      ],
+    }),
+  });
+  assert.equal(fbRes.status, 201);
+  assert.equal(fbRes.json.request.attachments?.length, 1);
+  assert.equal(fbRes.json.request.attachments[0].url, "/uploads/screen-123.png");
+
+  const lastEmail = capturedEmails[capturedEmails.length - 1];
+  assert.ok(lastEmail?.html.includes("/uploads/screen-123.png"));
+  assert.ok(!lastEmail?.html.includes("javascript:alert(1)"));
+
+  const inboxRes = await api("/api/feedback", { headers: { cookie: admCookie } });
+  assert.equal(inboxRes.status, 200);
+  const found = inboxRes.json.requests.find((r) => r.id === fbRes.json.request.id);
+  assert.equal(found?.attachments?.length, 1);
 });

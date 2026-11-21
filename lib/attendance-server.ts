@@ -6,12 +6,15 @@ import { AttendanceRecord, Role } from "@/lib/types";
 import { getEmployeeCode, getUserColor } from "@/lib/utils";
 
 export const ATTENDANCE_TIMEZONE = "Asia/Kolkata";
+export const OFFICE_START_HOUR_IST = 10; // 10:00 AM IST
+export const OFFICE_END_HOUR_IST = 18; // 6:00 PM IST
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function getISTDateTimeParts(date = new Date()): {
   dateStr: string;
   hour: number;
   minute: number;
+  weekday: number; // 0 = Sunday .. 6 = Saturday
 } {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: ATTENDANCE_TIMEZONE,
@@ -26,11 +29,42 @@ export function getISTDateTimeParts(date = new Date()): {
   const values = Object.fromEntries(parts.map((p) => [p.type, p.value]));
   const rawHour = Number(values.hour);
   const hour = rawHour === 24 ? 0 : rawHour;
+  const year = Number(values.year);
+  const month = Number(values.month);
+  const day = Number(values.day);
+  const weekday = new Date(Date.UTC(year, (month || 1) - 1, day || 1)).getUTCDay();
   return {
     dateStr: `${values.year}-${values.month}-${values.day}`,
     hour,
     minute: Number(values.minute) || 0,
+    weekday,
   };
+}
+
+export function isWithinOfficeHoursIST(date = new Date()): {
+  allowed: boolean;
+  hour: number;
+  minute: number;
+  reason?: string;
+} {
+  const { hour, minute } = getISTDateTimeParts(date);
+  if (hour < OFFICE_START_HOUR_IST) {
+    return {
+      allowed: false,
+      hour,
+      minute,
+      reason: "Check-in is only allowed during office hours (10:00 AM – 6:00 PM IST).",
+    };
+  }
+  if (hour >= OFFICE_END_HOUR_IST) {
+    return {
+      allowed: false,
+      hour,
+      minute,
+      reason: "Office hours (10:00 AM – 6:00 PM IST) have ended. Check-in is not allowed after 6:00 PM IST.",
+    };
+  }
+  return { allowed: true, hour, minute };
 }
 
 export function getDepartment(role: string): string {
@@ -345,6 +379,17 @@ export async function recordAttendanceAction(params: {
   if (action === "checkin") {
     if (existing && existing.checkInTime) {
       return { ok: true, record: existing, alreadyCheckedIn: true };
+    }
+
+    const officeHours = isWithinOfficeHoursIST();
+    if (!officeHours.allowed) {
+      return {
+        ok: false,
+        status: 403,
+        error:
+          officeHours.reason ||
+          "Check-in is only allowed during office hours (10:00 AM – 6:00 PM IST).",
+      };
     }
 
     if (existing) {

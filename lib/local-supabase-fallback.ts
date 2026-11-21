@@ -71,6 +71,7 @@ export interface LocalDbSchema {
   reminders: Record<string, any>[];
   feature_requests: Record<string, any>[];
   attendance_records?: Record<string, any>[];
+  checkin_reminders_sent?: Record<string, string[]>;
   adflow_stage_mapping?: Record<string, any>;
   revoked_tokens?: Record<string, number>;
 }
@@ -218,6 +219,7 @@ function createInitialSeed(): LocalDbSchema {
     reminders: [],
     feature_requests: [],
     attendance_records: [],
+    checkin_reminders_sent: {},
     revoked_tokens: {},
   };
 }
@@ -263,6 +265,10 @@ export function loadLocalDb(): LocalDbSchema {
       reminders: parsed.reminders || [],
       feature_requests: parsed.feature_requests || [],
       attendance_records: Array.isArray(parsed.attendance_records) ? parsed.attendance_records : [],
+      checkin_reminders_sent:
+        parsed.checkin_reminders_sent && typeof parsed.checkin_reminders_sent === "object"
+          ? parsed.checkin_reminders_sent
+          : {},
       adflow_stage_mapping:
         parsed.adflow_stage_mapping && typeof parsed.adflow_stage_mapping === "object"
           ? parsed.adflow_stage_mapping

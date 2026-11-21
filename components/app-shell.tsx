@@ -124,7 +124,48 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const getISTOfficeHoursState = () => {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Kolkata",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).formatToParts(new Date());
+    const vals = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+    const rawHour = Number(vals.hour);
+    const hour = rawHour === 24 ? 0 : rawHour;
+    if (hour < 10) {
+      return {
+        allowed: false,
+        reason: "Check-in opens at 10:00 AM IST (Office hours: 10 AM – 6 PM IST).",
+      };
+    }
+    if (hour >= 18) {
+      return {
+        allowed: false,
+        reason: "Office hours (10:00 AM – 6:00 PM IST) have ended. Check-in is closed.",
+      };
+    }
+    return { allowed: true, reason: "Check in for today (Office hours: 10 AM – 6 PM IST)" };
+  };
+
+  const [officeHours, setOfficeHours] = useState<{ allowed: boolean; reason: string }>(() =>
+    getISTOfficeHoursState()
+  );
+
+  useEffect(() => {
+    setOfficeHours(getISTOfficeHoursState());
+    const id = setInterval(() => {
+      setOfficeHours(getISTOfficeHoursState());
+    }, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
   const handleAttendanceAction = async (action: "checkin" | "checkout") => {
+    if (action === "checkin" && !officeHours.allowed) {
+      window.alert(officeHours.reason);
+      return;
+    }
     const res = action === "checkin" ? await checkInToday() : await checkOutToday();
     if (!res.ok && res.error) {
       window.alert(res.error);
@@ -773,14 +814,27 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <Button
                 type="button"
                 size="sm"
-                disabled={isAttendanceLoading}
+                disabled={isAttendanceLoading || !officeHours.allowed}
                 onClick={() => handleAttendanceAction("checkin")}
-                className="gap-1 text-xs h-8 px-2 sm:px-3 bg-emerald-600 hover:bg-emerald-500 text-white border-0 shadow-xs cursor-pointer whitespace-nowrap shrink-0"
-                title="Check in for today"
+                className={cn(
+                  "gap-1 text-xs h-8 px-2 sm:px-3 border-0 shadow-xs whitespace-nowrap shrink-0",
+                  officeHours.allowed
+                    ? "bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer"
+                    : "bg-muted text-muted-foreground cursor-not-allowed opacity-70"
+                )}
+                title={officeHours.reason}
               >
                 <LogIn className="size-3.5 shrink-0" />
-                <span className="hidden sm:inline">{isAttendanceLoading ? "Checking in..." : "Check In"}</span>
-                <span className="sm:hidden">{isAttendanceLoading ? "..." : "In"}</span>
+                <span className="hidden sm:inline">
+                  {isAttendanceLoading
+                    ? "Checking in..."
+                    : officeHours.allowed
+                      ? "Check In"
+                      : "Check-In Closed"}
+                </span>
+                <span className="sm:hidden">
+                  {isAttendanceLoading ? "..." : officeHours.allowed ? "In" : "Closed"}
+                </span>
               </Button>
             ) : !myTodayAttendance?.checkOutTime ? (
               <Button

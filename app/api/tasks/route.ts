@@ -170,6 +170,7 @@ interface ParsedNotes {
   creativeName?: string;
   adId?: string;
   productionStage?: string;
+  isAdflowTask?: boolean;
 }
 
 function parseNotes(raw: string | null): ParsedNotes {
@@ -204,6 +205,7 @@ function parseNotes(raw: string | null): ParsedNotes {
     creativeName: parsed.creativeName,
     adId: parsed.adId,
     productionStage: parsed.productionStage,
+    isAdflowTask: typeof parsed.isAdflowTask === "boolean" ? parsed.isAdflowTask : undefined,
   };
 }
 
@@ -235,7 +237,8 @@ function stringifyNotes(meta: ParsedNotes): string {
     meta.completedAt ||
     meta.creativeName ||
     meta.adId ||
-    meta.productionStage;
+    meta.productionStage ||
+    meta.isAdflowTask !== undefined;
 
   if (!hasExtra) {
     return meta.description || "";
@@ -271,6 +274,7 @@ function stringifyNotes(meta: ParsedNotes): string {
     creativeName: meta.creativeName,
     adId: meta.adId,
     productionStage: meta.productionStage,
+    isAdflowTask: meta.isAdflowTask,
   });
 }
 
@@ -633,7 +637,26 @@ export async function GET(req: Request) {
         isArchived,
         archivedAt: parsedNotes.archivedAt,
         archivedBy: parsedNotes.archivedBy,
-        isCanonicalAdflowTask: isStandardAdflow || Boolean(resolvedCreativeName),
+        isCanonicalAdflowTask:
+          parsedNotes.isAdflowTask === false
+            ? Boolean(matchedAd?.id || parsedNotes.adId || resolvedCreativeName)
+            : Boolean(
+                parsedNotes.isAdflowTask ||
+                  matchedAd?.id ||
+                  parsedNotes.adId ||
+                  resolvedCreativeName ||
+                  isStandardAdflow
+              ),
+        isAdflowTask:
+          parsedNotes.isAdflowTask === false
+            ? Boolean(matchedAd?.id || parsedNotes.adId || resolvedCreativeName)
+            : Boolean(
+                parsedNotes.isAdflowTask ||
+                  matchedAd?.id ||
+                  parsedNotes.adId ||
+                  resolvedCreativeName ||
+                  isStandardAdflow
+              ),
         adId: matchedAd?.id || parsedNotes.adId,
         creativeName: resolvedCreativeName || matchedAd?.name,
         productionStage: liveProdStage,
@@ -1015,28 +1038,24 @@ export async function POST(req: Request) {
 
     // Check if this task is an AdFlow creative task so we generate sequential Creative IDs (e.g. KRI0036..KRI0039)
     const dbSnapshot = loadLocalDb();
-    const assigneeProfile = dbSnapshot.profiles.find((p) => p.id === userId);
+    let assigneeProfile = dbSnapshot.profiles.find((p) => p.id === userId);
+    if (!assigneeProfile) {
+      const { data: liveAssignee } = await supabaseAdmin
+        .from("profiles")
+        .select("id, role, name")
+        .eq("id", userId)
+        .maybeSingle();
+      if (liveAssignee) {
+        assigneeProfile = liveAssignee;
+      }
+    }
     const assigneeRole = String(assigneeProfile?.role || "").toLowerCase();
-    const taskLower = taskName.toLowerCase();
+    // Only treat a new task as an AdFlow creative task when explicitly opted in via the AdFlow checkbox
+    // (`isAdflowTask === true` or `generateCreativeId === true`).
     const isCreativeTask =
       body.generateCreativeId !== false &&
-      (Boolean(body.generateCreativeId) ||
-        isCanonicalAdflowTask(taskName) ||
-        assigneeRole === "content_creator" ||
-        assigneeRole === "editor" ||
-        taskLower.includes("script") ||
-        taskLower.includes("shoot") ||
-        taskLower.includes("creative") ||
-        taskLower.includes("edit") ||
-        taskLower.includes("video") ||
-        taskLower.includes("ad ") ||
-        taskLower.includes("ads") ||
-        (Array.isArray(body.tags) &&
-          body.tags.some((t: string) =>
-            ["adflow", "creative", "video ads", "production"].includes(
-              String(t).toLowerCase()
-            )
-          )));
+      body.isAdflowTask !== false &&
+      (body.isAdflowTask === true || body.generateCreativeId === true);
 
     let generatedCreativeIds: string[] = [];
     const stageMappingCfg = getAdFlowStageMappingConfig();
@@ -1080,6 +1099,11 @@ export async function POST(req: Request) {
         });
         if (blankRes.ok && blankRes.adId) {
           autoCreatedAdId = blankRes.adId;
+        } else if (!blankRes.ok) {
+          console.error(
+            `Failed to auto-create blank AdFlow creative ${assignedCreativeId}:`,
+            blankRes.error
+          );
         }
       }
 
@@ -1119,6 +1143,7 @@ export async function POST(req: Request) {
         creativeName: assignedCreativeId,
         adId: autoCreatedAdId,
         productionStage: initialProdStage,
+        isAdflowTask: isCreativeTask,
       };
 
       const initialCompleted = initialStatus === "completed" ? 1 : 0;
@@ -1323,7 +1348,8 @@ export async function PATCH(req: Request) {
           !standaloneAdId &&
           !adId &&
           !currentNotesMeta.creativeName &&
-          !isCanonicalAdflowTask(existing.task_name) &&
+          currentNotesMeta.isAdflowTask !== true &&
+          (currentNotesMeta.isAdflowTask === false || !isCanonicalAdflowTask(existing.task_name)) &&
           existing.assigned_by === actor.id &&
           existing.user_id === actor.id
       );
@@ -1372,6 +1398,12 @@ export async function PATCH(req: Request) {
         }
       }
 
+      const isAdflowWorkflowTask =
+        linked ||
+        currentNotesMeta.isAdflowTask === true ||
+        (currentNotesMeta.isAdflowTask !== false &&
+          Boolean(existing && isCanonicalAdflowTask(existing.task_name)));
+
       switch (workflowAction) {
         case "approve": {
           const advanceToFinalReview =
@@ -1379,10 +1411,10 @@ export async function PATCH(req: Request) {
             (isCreatorReviewActor && !canReviewTasks(actor.role));
           if (advanceToFinalReview) {
             body.status = "in_review";
-            body.productionStage = "final_review";
+            if (isAdflowWorkflowTask) body.productionStage = "final_review";
           } else {
             body.status = "completed";
-            body.productionStage = "approved";
+            if (isAdflowWorkflowTask) body.productionStage = "approved";
           }
           body.isRevisionRequested = false;
           break;
@@ -1392,13 +1424,19 @@ export async function PATCH(req: Request) {
             return NextResponse.json({ error: "A revision reason is required." }, { status: 400 });
           }
           body.status = "in_progress";
-          body.revisionTarget = body.revisionTarget === "creator" ? "creator" : "editor";
-          body.productionStage = body.revisionTarget === "creator" ? "creator_changes_requested" : "changes_requested";
+          if (isAdflowWorkflowTask) {
+            body.revisionTarget = body.revisionTarget === "creator" ? "creator" : "editor";
+            body.productionStage =
+              body.revisionTarget === "creator" ? "creator_changes_requested" : "changes_requested";
+          } else {
+            delete body.revisionTarget;
+            delete body.productionStage;
+          }
           body.isRevisionRequested = true;
           break;
         case "submit_for_review":
           body.status = "in_review";
-          body.productionStage = "final_review";
+          if (isAdflowWorkflowTask) body.productionStage = "final_review";
           body.isRevisionRequested = false;
           break;
         default:
@@ -1714,7 +1752,9 @@ export async function PATCH(req: Request) {
     }
 
     // Canonical pipeline task title locking
-    const isStandardTask = isCanonicalAdflowTask(existing.task_name);
+    const isStandardTask =
+      currentNotesMeta.isAdflowTask !== false &&
+      (currentNotesMeta.isAdflowTask === true || isCanonicalAdflowTask(existing.task_name));
     if (title) {
       if (isStandardTask) {
         updates.task_name = existing.task_name;
@@ -1762,14 +1802,22 @@ export async function PATCH(req: Request) {
       }
     }
 
+    const isAdflowTargetTask =
+      linked ||
+      currentNotesMeta.isAdflowTask === true ||
+      (currentNotesMeta.isAdflowTask !== false &&
+        Boolean(existing && isCanonicalAdflowTask(existing.task_name)));
+
     if (isRevisionRequested === true) {
-      const resolvedRevStage =
-        productionStage === "creator_changes_requested" ||
-        revisionTarget === "creator" ||
-        String(revisionReason || "").toLowerCase().includes("creator")
-          ? "creator_changes_requested"
-          : "changes_requested";
-      currentNotesMeta.productionStage = resolvedRevStage;
+      if (isAdflowTargetTask) {
+        const resolvedRevStage =
+          productionStage === "creator_changes_requested" ||
+          revisionTarget === "creator" ||
+          String(revisionReason || "").toLowerCase().includes("creator")
+            ? "creator_changes_requested"
+            : "changes_requested";
+        currentNotesMeta.productionStage = resolvedRevStage;
+      }
       currentNotesMeta.statusOverride = "in_progress";
       currentNotesMeta.isRevisionRequested = true;
     }
@@ -1777,7 +1825,7 @@ export async function PATCH(req: Request) {
     // Handle status changes
     if (status && !isRevisionRequested) {
       currentNotesMeta.statusOverride = status;
-      if (productionStage === undefined) {
+      if (isAdflowTargetTask && productionStage === undefined) {
         currentNotesMeta.productionStage = mapTaskStatusToDefaultAdFlowStage(
           status,
           undefined,
@@ -2000,7 +2048,8 @@ export async function DELETE(req: Request) {
     const isSelfAssignedPersonalTask = Boolean(
       !currentNotesMeta.adId &&
         !currentNotesMeta.creativeName &&
-        !isCanonicalAdflowTask(existing.task_name) &&
+        currentNotesMeta.isAdflowTask !== true &&
+        (currentNotesMeta.isAdflowTask === false || !isCanonicalAdflowTask(existing.task_name)) &&
         existing.assigned_by === actor.id &&
         existing.user_id === actor.id
     );

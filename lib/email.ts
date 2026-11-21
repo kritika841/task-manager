@@ -1,4 +1,6 @@
 import { Resend } from "resend";
+import type { FeatureRequestAttachment } from "./types";
+import { sanitizeUrl } from "./utils";
 
 const DEFAULT_KEY = ["re", "bNveV8sc", "EHEXSA7DUbAXeqTb1aznL5GT"].join("_");
 const RESEND_API_KEY = process.env.RESEND_API_KEY || DEFAULT_KEY;
@@ -239,6 +241,7 @@ export async function sendFeedbackEmail(params: {
   authorName: string;
   authorRole: string;
   profiles: Record<string, any>[];
+  attachments?: FeatureRequestAttachment[];
 }) {
   const { developerEmails, ccEmails } = resolveDeveloperAndCcFromUsers(
     params.profiles
@@ -252,6 +255,26 @@ export async function sendFeedbackEmail(params: {
         : "Feature Request";
 
   const subject = `[Satmi ${typeLabel}] ${params.title}`;
+  const validAttachments = (params.attachments || []).filter((a) => a && a.url);
+  const attachmentsHtml =
+    validAttachments.length > 0
+      ? `
+        <div style="margin: 0 0 16px; padding: 12px; border-radius: 8px; background: #f8fafc; border: 1px solid #e4e4e7;">
+          <div style="font-size: 12px; font-weight: 700; color: #3f3f46; margin-bottom: 6px;">
+            Attachments (${validAttachments.length})
+          </div>
+          <ul style="margin: 0; padding-left: 18px; font-size: 13px; color: #2563eb;">
+            ${validAttachments
+              .map((att) => {
+                const safeHref = escapeHtml(sanitizeUrl(att.url));
+                const label = escapeHtml(att.name || "Screenshot");
+                return `<li style="margin: 3px 0;"><a href="${safeHref}" style="color: #2563eb; text-decoration: underline;">${label}</a></li>`;
+              })
+              .join("")}
+          </ul>
+        </div>
+      `
+      : "";
 
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e4e4e7; border-radius: 12px; background: #ffffff; color: #18181b;">
@@ -262,6 +285,7 @@ export async function sendFeedbackEmail(params: {
         ${escapeHtml(params.title)}
       </h2>
       <div style="margin: 0 0 16px; padding: 14px; border-radius: 8px; background: #f4f4f5; font-size: 14px; line-height: 1.6; color: #27272a; white-space: pre-wrap;">${escapeHtml(params.details || params.title)}</div>
+      ${attachmentsHtml}
       <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #52525b;">
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">From:</td>
@@ -345,6 +369,56 @@ export async function sendCheckoutReminderEmail(params: {
         <tr>
           <td style="padding: 6px 0; font-weight: 600;">Status:</td>
           <td style="padding: 6px 0; color: #dc2626; font-weight: 600;">Pending Check-Out</td>
+        </tr>
+      </table>
+      <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 18px 0 12px;" />
+      <p style="margin: 0; font-size: 11px; color: #71717a;">
+        Satmi Task Manager • Automated Attendance Notification (From: ${RESEND_FROM_EMAIL})
+      </p>
+    </div>
+  `;
+
+  return dispatchResendMail({
+    to: [params.userEmail.trim().toLowerCase()],
+    subject,
+    html,
+  });
+}
+
+export async function sendCheckinReminderEmail(params: {
+  userName: string;
+  userEmail: string;
+  date: string;
+}) {
+  const subject = `⏰ Check-In Reminder: Please check in on Satmi Dashboard (${params.date})`;
+
+  const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e4e4e7; border-radius: 12px; background: #ffffff; color: #18181b;">
+      <div style="display: inline-block; padding: 4px 10px; border-radius: 9999px; background: #fef3c7; color: #b45309; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; margin-bottom: 12px;">
+        ATTENDANCE CHECK-IN REMINDER • 12:01 PM IST
+      </div>
+      <h2 style="margin: 0 0 12px; font-size: 18px; font-weight: 700; color: #09090b;">
+        Hi ${escapeHtml(params.userName)}, you haven't checked in for today yet!
+      </h2>
+      <p style="margin: 0 0 16px; padding: 12px; border-radius: 8px; background: #f4f4f5; font-size: 14px; line-height: 1.5; color: #3f3f46;">
+        Our attendance system shows that you have not checked in yet today (${escapeHtml(params.date)}). Office hours are <strong>10:00 AM – 6:00 PM IST</strong>, and check-in closes after 6:00 PM IST. Please open the Satmi Task Manager dashboard and click <strong>Check In</strong> in the top bar.
+      </p>
+      <table style="width: 100%; border-collapse: collapse; font-size: 13px; color: #52525b;">
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Employee:</td>
+          <td style="padding: 6px 0;">${escapeHtml(params.userName)} (${escapeHtml(params.userEmail)})</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Date:</td>
+          <td style="padding: 6px 0;">${escapeHtml(params.date)}</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Office Hours:</td>
+          <td style="padding: 6px 0;">10:00 AM – 6:00 PM IST (Mon–Sat)</td>
+        </tr>
+        <tr>
+          <td style="padding: 6px 0; font-weight: 600;">Status:</td>
+          <td style="padding: 6px 0; color: #d97706; font-weight: 600;">Not Checked In Yet</td>
         </tr>
       </table>
       <hr style="border: none; border-top: 1px solid #e4e4e7; margin: 18px 0 12px;" />

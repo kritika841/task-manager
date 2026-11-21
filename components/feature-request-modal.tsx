@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   X,
   Sparkles,
@@ -12,11 +12,17 @@ import {
   ShieldAlert,
   Send,
   RefreshCw,
+  Upload,
+  FileImage,
+  FileText,
+  ExternalLink,
+  Loader2,
+  Paperclip,
 } from "lucide-react";
 import { useTasks } from "@/lib/store";
-import { Role, TaskPriority } from "@/lib/types";
+import { FeatureRequestAttachment, Role, TaskPriority } from "@/lib/types";
 import { Button } from "./ui/button";
-import { cn } from "@/lib/utils";
+import { cn, sanitizeUrl } from "@/lib/utils";
 
 export interface FeatureRequestItem {
   id: string;
@@ -26,6 +32,7 @@ export interface FeatureRequestItem {
   type: "feature" | "feedback" | "bug";
   title: string;
   details: string;
+  attachments?: FeatureRequestAttachment[];
   priority?: TaskPriority;
   status: "open" | "in_progress" | "resolved";
   adminNotes?: string;
@@ -60,6 +67,10 @@ export function FeatureRequestModal({
   const [title, setTitle] = useState("");
   const [details, setDetails] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
+  const [attachments, setAttachments] = useState<FeatureRequestAttachment[]>([]);
+  const [isUploadingAttachment, setIsUploadingAttachment] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -122,6 +133,52 @@ export function FeatureRequestModal({
 
   if (!isOpen) return null;
 
+  const uploadFiles = async (files: FileList | File[]) => {
+    const fileList = Array.from(files);
+    if (fileList.length === 0) return;
+
+    const remainingSlots = Math.max(0, 5 - attachments.length);
+    if (remainingSlots === 0) {
+      setErrorMsg("You can attach up to 5 screenshots or files per request.");
+      return;
+    }
+
+    setErrorMsg(null);
+    setIsUploadingAttachment(true);
+    try {
+      const uploaded: FeatureRequestAttachment[] = [];
+      for (const file of fileList.slice(0, remainingSlots)) {
+        if (file.size > 20 * 1024 * 1024) {
+          throw new Error(`${file.name} exceeds the 20MB file size limit.`);
+        }
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.asset) {
+          throw new Error(data.error || `Failed to upload ${file.name}`);
+        }
+        uploaded.push({
+          name: data.asset.name || file.name,
+          url: data.asset.url,
+          size: data.asset.size,
+          type: data.asset.type,
+          uploadedAt: data.asset.uploadedAt,
+        });
+      }
+      if (uploaded.length > 0) {
+        setAttachments((prev) => [...prev, ...uploaded].slice(0, 5));
+      }
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to upload attachment");
+    } finally {
+      setIsUploadingAttachment(false);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
@@ -143,6 +200,7 @@ export function FeatureRequestModal({
           type,
           title: title.trim(),
           details: details.trim(),
+          attachments,
           priority,
         }),
       });
@@ -154,6 +212,7 @@ export function FeatureRequestModal({
 
       setTitle("");
       setDetails("");
+      setAttachments([]);
       setType("feature");
       setPriority("medium");
       setSubmittedSuccess(true);
@@ -330,7 +389,20 @@ export function FeatureRequestModal({
 
         {/* Body */}
         {activeTab === "submit" || !isAdminOrDeveloper ? (
-          <form onSubmit={handleSubmit} className="p-5 space-y-4">
+          <form
+            onSubmit={handleSubmit}
+            onPaste={(e) => {
+              const items = Array.from(e.clipboardData?.items || []);
+              const imageFiles = items
+                .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+                .map((item) => item.getAsFile())
+                .filter((f): f is File => Boolean(f));
+              if (imageFiles.length > 0) {
+                void uploadFiles(imageFiles);
+              }
+            }}
+            className="p-5 space-y-4 max-h-[75vh] overflow-y-auto"
+          >
             {/* Type selector */}
             <div className="grid grid-cols-3 gap-2">
               {(
@@ -392,6 +464,129 @@ export function FeatureRequestModal({
                 placeholder="What would make your workflow faster or better?"
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none resize-none"
               />
+            </div>
+
+            {/* Screenshot / Attachment Box (Drag & Drop + Browse + Paste) */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                  <Paperclip className="size-3.5 text-primary" />
+                  <span>Screenshots / Attachments</span>
+                </label>
+                <span className="text-[10px] text-muted-foreground">
+                  {attachments.length}/5 · Max 20MB
+                </span>
+              </div>
+
+              <div
+                role="button"
+                tabIndex={0}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOver(true);
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDragOver(false);
+                  if (e.dataTransfer.files?.length) {
+                    void uploadFiles(e.dataTransfer.files);
+                  }
+                }}
+                onClick={() => fileInputRef.current?.click()}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    fileInputRef.current?.click();
+                  }
+                }}
+                className={cn(
+                  "rounded-xl border-2 border-dashed p-3.5 text-center transition cursor-pointer select-none",
+                  dragOver
+                    ? "border-primary bg-primary/10"
+                    : "border-border hover:border-primary/50 hover:bg-muted/30"
+                )}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,.pdf,.png,.jpg,.jpeg,.webp,.gif"
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files?.length) {
+                      void uploadFiles(e.target.files);
+                    }
+                    e.target.value = "";
+                  }}
+                />
+                {isUploadingAttachment ? (
+                  <div className="flex items-center justify-center gap-2 py-1 text-xs font-medium text-primary">
+                    <Loader2 className="size-4 animate-spin" />
+                    <span>Uploading screenshot...</span>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-1">
+                    <Upload className="size-4 text-muted-foreground" />
+                    <p className="text-xs font-medium text-foreground">
+                      Drag &amp; drop screenshots here, <span className="text-primary underline">browse files</span>, or paste (Ctrl/Cmd+V)
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      PNG, JPG, WEBP, GIF, PDF up to 20MB
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {attachments.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {attachments.map((att, idx) => {
+                    const isImage =
+                      att.type?.startsWith("image/") ||
+                      /\.(png|jpe?g|webp|gif)$/i.test(att.name || att.url);
+                    return (
+                      <div
+                        key={`${att.url}-${idx}`}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/25 p-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {isImage ? (
+                            <img
+                              src={sanitizeUrl(att.url)}
+                              alt={att.name}
+                              className="size-9 rounded object-cover border border-border shrink-0"
+                            />
+                          ) : (
+                            <div className="size-9 rounded bg-muted flex items-center justify-center shrink-0">
+                              <FileText className="size-4 text-muted-foreground" />
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <div className="text-[11px] font-medium text-foreground truncate">
+                              {att.name}
+                            </div>
+                            {typeof att.size === "number" && (
+                              <div className="text-[10px] text-muted-foreground">
+                                {Math.max(1, Math.round(att.size / 1024))} KB
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAttachments((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                          className="size-6 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive flex items-center justify-center transition cursor-pointer shrink-0"
+                          title="Remove attachment"
+                        >
+                          <X className="size-3.5" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Priority */}
@@ -575,6 +770,38 @@ export function FeatureRequestModal({
                       <p className="text-xs text-foreground/90 whitespace-pre-wrap bg-card/60 rounded-lg p-2.5 border border-border/60">
                         {req.details}
                       </p>
+                    )}
+
+                    {Array.isArray(req.attachments) && req.attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2 pt-0.5">
+                        {req.attachments.map((att, idx) => {
+                          const isImage =
+                            att.type?.startsWith("image/") ||
+                            /\.(png|jpe?g|webp|gif)$/i.test(att.name || att.url);
+                          const safeHref = sanitizeUrl(att.url);
+                          return (
+                            <a
+                              key={`${att.url}-${idx}`}
+                              href={safeHref}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-2 py-1.5 text-[11px] font-medium text-foreground hover:border-primary/50 hover:text-primary transition"
+                            >
+                              {isImage ? (
+                                <img
+                                  src={safeHref}
+                                  alt={att.name}
+                                  className="size-6 rounded object-cover border border-border shrink-0"
+                                />
+                              ) : (
+                                <FileImage className="size-3.5 text-primary shrink-0" />
+                              )}
+                              <span className="max-w-[140px] truncate">{att.name}</span>
+                              <ExternalLink className="size-3 opacity-60 shrink-0" />
+                            </a>
+                          );
+                        })}
+                      </div>
                     )}
 
                     {/* Developer / Admin Notes */}

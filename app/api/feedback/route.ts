@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { loadLocalDb, saveLocalDb } from "@/lib/local-supabase-fallback";
 import { resolveRequestActor } from "@/lib/auth-server";
-import { Role, TaskPriority } from "@/lib/types";
+import { FeatureRequestAttachment, Role, TaskPriority } from "@/lib/types";
 import { sendFeedbackEmail } from "@/lib/email";
+import { isSafeUrl } from "@/lib/utils";
 
 export interface FeatureRequestRecord {
   id: string;
@@ -13,6 +14,7 @@ export interface FeatureRequestRecord {
   type: "feature" | "feedback" | "bug";
   title: string;
   details: string;
+  attachments?: FeatureRequestAttachment[];
   priority?: TaskPriority;
   status: "open" | "in_progress" | "resolved";
   adminNotes?: string;
@@ -160,6 +162,18 @@ export async function POST(req: NextRequest) {
     const type: "feature" | "feedback" | "bug" =
       rawType === "bug" ? "bug" : rawType === "feedback" ? "feedback" : "feature";
 
+    const rawAttachments = Array.isArray(body.attachments) ? body.attachments : [];
+    const attachments: FeatureRequestAttachment[] = rawAttachments
+      .filter((a: any) => a && typeof a.url === "string" && isSafeUrl(a.url))
+      .slice(0, 5)
+      .map((a: any) => ({
+        name: String(a.name || "Screenshot").slice(0, 180),
+        url: String(a.url).trim(),
+        size: typeof a.size === "number" ? a.size : undefined,
+        type: typeof a.type === "string" ? a.type.slice(0, 120) : undefined,
+        uploadedAt: typeof a.uploadedAt === "string" ? a.uploadedAt : undefined,
+      }));
+
     const now = new Date().toISOString();
     const item: FeatureRequestRecord = {
       id: `fb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -169,6 +183,7 @@ export async function POST(req: NextRequest) {
       type,
       title: rawTitle || rawDetails.slice(0, 60),
       details: rawDetails || rawTitle,
+      ...(attachments.length > 0 ? { attachments } : {}),
       priority: (body.priority as TaskPriority) || "medium",
       status: "open",
       createdAt: now,
@@ -211,6 +226,7 @@ export async function POST(req: NextRequest) {
       authorName: item.authorName,
       authorRole: item.authorRole,
       profiles,
+      attachments: item.attachments,
     });
 
     return NextResponse.json(

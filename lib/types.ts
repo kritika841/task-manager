@@ -103,6 +103,7 @@ export interface Task {
   archivedAt?: string;
   archivedBy?: string | null;
   isCanonicalAdflowTask?: boolean;
+  isAdflowTask?: boolean;
   // AdFlow Creative Ingestion & Control Fields:
   adId?: string;
   creativeName?: string;
@@ -279,6 +280,14 @@ export interface Reminder {
 export type FeatureRequestType = 'feature' | 'feedback' | 'bug';
 export type FeatureRequestStatus = 'open' | 'in_progress' | 'resolved';
 
+export interface FeatureRequestAttachment {
+  name: string;
+  url: string;
+  size?: number;
+  type?: string;
+  uploadedAt?: string;
+}
+
 export interface FeatureRequest {
   id: string;
   authorId: string;
@@ -287,6 +296,7 @@ export interface FeatureRequest {
   type: FeatureRequestType;
   title: string;
   details: string;
+  attachments?: FeatureRequestAttachment[];
   priority?: TaskPriority;
   status: FeatureRequestStatus;
   adminNotes?: string;

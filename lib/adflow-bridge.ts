@@ -359,8 +359,9 @@ export async function getPendingCreativeIdsForCreator(creatorId: string): Promis
 
   const prefix = deriveCreatorPrefix(creatorName);
 
-  // Fetch all existing ads in AdFlow with this prefix
+  // Fetch all existing ads in AdFlow with this prefix (both active and soft-deleted)
   const existingAdsByName = new Map<string, string>();
+  const deletedAdsByName = new Map<string, string>();
   try {
     const res = await fetch(
       `${ADFLOW_SUPABASE_URL}/rest/v1/ads?name=ilike.${encodeURIComponent(prefix)}*&select=id,name,deleted_at`,
@@ -370,16 +371,33 @@ export async function getPendingCreativeIdsForCreator(creatorId: string): Promis
       const ads = await res.json();
       if (Array.isArray(ads)) {
         for (const ad of ads) {
-          if (!ad.deleted_at && ad.name) {
-            existingAdsByName.set(String(ad.name).trim().toUpperCase(), ad.id);
+          if (!ad.name) continue;
+          const upperName = String(ad.name).trim().toUpperCase();
+          if (ad.deleted_at) {
+            deletedAdsByName.set(upperName, ad.id);
+          } else {
+            existingAdsByName.set(upperName, ad.id);
           }
         }
       }
     }
   } catch {}
 
-  const allCreatorTasks: PendingCreativeTaskInfo[] = [];
+  for (const ad of db.ads || []) {
+    if (!ad?.name) continue;
+    const upperName = String(ad.name).trim().toUpperCase();
+    if (!upperName.startsWith(prefix)) continue;
+    if (ad.deleted_at) {
+      if (!deletedAdsByName.has(upperName)) deletedAdsByName.set(upperName, ad.id);
+    } else if (!existingAdsByName.has(upperName)) {
+      existingAdsByName.set(upperName, ad.id);
+    }
+  }
+
+  const stageMappingCfg = getAdFlowStageMappingConfig();
+  const allCreatorTasks: Array<PendingCreativeTaskInfo & { _queueEligible: boolean }> = [];
   const seenCodes = new Set<string>();
+  let dbDirty = false;
 
   // Match tasks assigned to this creatorId OR sharing the same 3-letter prefix (e.g. KRI)
   const targets = db.daily_team_targets || [];
@@ -389,14 +407,18 @@ export async function getPendingCreativeIdsForCreator(creatorId: string): Promis
     let desc = "";
     let status = "todo";
     let isArchived = false;
+    let parsedAdId = "";
+    let parsedNotesObj: Record<string, any> | null = null;
 
     if (row.notes && String(row.notes).startsWith("{")) {
       try {
         const parsed = JSON.parse(row.notes);
+        parsedNotesObj = parsed;
         creativeId = parsed.creativeName || "";
         desc = parsed.desc || "";
         status = parsed.statusOverride || "todo";
         isArchived = Boolean(parsed.isArchived);
+        parsedAdId = parsed.adId ? String(parsed.adId) : "";
       } catch {}
     }
 
@@ -416,7 +438,50 @@ export async function getPendingCreativeIdsForCreator(creatorId: string): Promis
     if (seenCodes.has(normalizedCode)) continue;
     seenCodes.add(normalizedCode);
 
-    const matchedAdId = existingAdsByName.get(normalizedCode);
+    let matchedAdId = existingAdsByName.get(normalizedCode);
+    const deletedAdId = deletedAdsByName.get(normalizedCode);
+    const alreadyMaterialized = Boolean(matchedAdId || deletedAdId || parsedAdId);
+
+    // If a creative task was assigned without a blank AdFlow row yet and auto-create is enabled,
+    // materialize the blank creative directly in AdFlow instead of leaving it in a manual queue.
+    if (
+      !alreadyMaterialized &&
+      status !== "completed" &&
+      stageMappingCfg.autoCreateBlankCreative !== false
+    ) {
+      const assigneeProfile = db.profiles.find((p) => p.id === (row.user_id || creatorId));
+      const blankRes = await createBlankAdFlowCreative({
+        creativeName: normalizedCode,
+        assigneeId: row.user_id || creatorId,
+        assigneeRole: String(assigneeProfile?.role || "content_creator"),
+        taskTitle: row.task_name,
+        description: desc,
+        dueDate: row.target_date,
+        productionStage: parsedNotesObj?.productionStage,
+        actorId: row.assigned_by,
+      });
+
+      if (blankRes.ok && blankRes.adId) {
+        matchedAdId = blankRes.adId;
+        existingAdsByName.set(normalizedCode, blankRes.adId);
+        if (parsedNotesObj) {
+          parsedNotesObj.adId = blankRes.adId;
+          parsedNotesObj.creativeName = normalizedCode;
+          row.notes = JSON.stringify(parsedNotesObj);
+        } else {
+          row.notes = JSON.stringify({
+            __meta__: true,
+            desc: typeof row.notes === "string" ? row.notes : "",
+            creativeName: normalizedCode,
+            adId: blankRes.adId,
+          });
+        }
+        dbDirty = true;
+      }
+    }
+
+    const queueEligible =
+      !matchedAdId && !deletedAdId && !parsedAdId && status !== "completed";
 
     allCreatorTasks.push({
       taskId: row.id,
@@ -427,13 +492,23 @@ export async function getPendingCreativeIdsForCreator(creatorId: string): Promis
       description: desc,
       isLinkedInAdFlow: Boolean(matchedAdId),
       adId: matchedAdId,
+      _queueEligible: queueEligible,
     });
+  }
+
+  if (dbDirty) {
+    saveLocalDb(db);
   }
 
   // Sort by numeric code so KRI0036 -> KRI0037 -> KRI0040 -> KRI0041 -> KRI0042 are strictly in order
   allCreatorTasks.sort((a, b) => a.creativeId.localeCompare(b.creativeId));
 
-  const pendingTasks = allCreatorTasks.filter((t) => !t.isLinkedInAdFlow);
+  const pendingTasks: PendingCreativeTaskInfo[] = allCreatorTasks
+    .filter((t) => t._queueEligible)
+    .map(({ _queueEligible: _, ...rest }) => rest);
+  const cleanAllCreatorTasks: PendingCreativeTaskInfo[] = allCreatorTasks.map(
+    ({ _queueEligible: _, ...rest }) => rest
+  );
   const pendingCreativeIds = pendingTasks.map((t) => t.creativeId);
 
   let nextCreativeId = pendingCreativeIds[0] || "";
@@ -448,7 +523,7 @@ export async function getPendingCreativeIdsForCreator(creatorId: string): Promis
     nextCreativeId,
     pendingCreativeIds,
     pendingTasks,
-    allCreatorTasks,
+    allCreatorTasks: cleanAllCreatorTasks,
   };
 }
 
@@ -899,6 +974,7 @@ export async function createBlankAdFlowCreative(params: {
 
     if (!createRes.ok) {
       const errText = await createRes.text();
+      console.error("createBlankAdFlowCreative failed:", createRes.status, errText);
       return { ok: false, error: errText };
     }
 

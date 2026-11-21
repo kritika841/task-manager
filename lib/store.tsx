@@ -199,6 +199,8 @@ interface TaskContextType {
     subColumnId?: string;
     parentColumnId?: TaskStatus;
     templateRole?: Role;
+    isAdflowTask?: boolean;
+    generateCreativeId?: boolean;
   }) => Promise<Task | null>;
   updateTask: (taskId: string, updates: Partial<Task>) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
@@ -1627,6 +1629,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       subColumnId?: string;
       parentColumnId?: TaskStatus;
       templateRole?: Role;
+      isAdflowTask?: boolean;
+      generateCreativeId?: boolean;
     }): Promise<Task | null> => {
       const today = dateInTargetTimeZone();
       const targetQty = Math.max(1, Number(data.targetQuantity) || 1);
@@ -1688,6 +1692,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
           subColumnId: data.subColumnId,
           parentColumnId: data.parentColumnId || initialStatus,
           templateRole: data.templateRole,
+          isAdflowTask: Boolean(data.isAdflowTask),
+          isCanonicalAdflowTask: Boolean(data.isAdflowTask),
           stageHistory: [initialStageEntry],
           completedAt: initialStatus === "completed" ? nowIso : undefined,
           createdAt: nowIso,
@@ -1725,6 +1731,8 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         subColumnId: data.subColumnId,
         parentColumnId: data.parentColumnId || data.status,
         templateRole: data.templateRole,
+        isAdflowTask: Boolean(data.isAdflowTask),
+        generateCreativeId: Boolean(data.generateCreativeId ?? data.isAdflowTask),
       };
 
       try {
@@ -1770,7 +1778,9 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         prev.map((t) => {
           if (t.id !== taskId) return t;
 
-          const isStandardAdflow = isCanonicalAdflowTask(t.title);
+          const isStandardAdflow =
+            t.isAdflowTask !== false &&
+            (Boolean(t.isAdflowTask) || isCanonicalAdflowTask(t.title));
           const autoQty = t.autoCompletedQuantity || 0;
 
           let nextCompleted = t.completedQuantity;
@@ -1863,7 +1873,10 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
         })
       );
 
-      const isStandard = target ? isCanonicalAdflowTask(target.title) : false;
+      const isStandard = target
+        ? target.isAdflowTask !== false &&
+          (Boolean(target.isAdflowTask) || isCanonicalAdflowTask(target.title))
+        : false;
 
       if (
         updates.assigneeId &&
@@ -2248,6 +2261,29 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       notes?: string,
       revisionTarget?: "creator" | "editor"
     ) => {
+      const targetTask = tasks.find((t) => t.id === taskId);
+      const isAdFlow = Boolean(
+        targetTask &&
+          (isAdFlowLinkedTask(targetTask) ||
+            targetTask.isAdflowTask === true ||
+            (targetTask.isAdflowTask !== false && isCanonicalAdflowTask(targetTask.title)))
+      );
+
+      if (!isAdFlow) {
+        await updateTask(
+          taskId,
+          {
+            status: "in_progress",
+            isRevisionRequested: true,
+            revisionReason: reason,
+            revisionNotes: notes,
+          },
+          "request_changes"
+        );
+        await fetchTasks(false);
+        return;
+      }
+
       const targetStage =
         revisionTarget === "creator" ||
         reason.toLowerCase().includes("creator")
@@ -2262,7 +2298,7 @@ export function TaskProvider({ children }: { children: React.ReactNode }) {
       }, "request_changes", targetStage === "creator_changes_requested" ? "creator" : "editor");
       await fetchTasks(false);
     },
-    [updateTask, fetchTasks]
+    [tasks, updateTask, fetchTasks]
   );
 
   const submitForReview = useCallback(

@@ -120,7 +120,9 @@ export function TaskDrawer() {
   const pct = Math.min(100, Math.round((completedQty / targetQty) * 100));
   const { blocked, blockingTasks } = isTaskBlocked(task);
   const taskAuditLogs = getTaskAuditLogs(task.id);
-  const isStandardAdflow = isCanonicalAdflowTask(task.title);
+  const isStandardAdflow =
+    task.isAdflowTask !== false &&
+    (task.isAdflowTask === true || isCanonicalAdflowTask(task.title));
   const isTitleLocked = isStandardAdflow && isAdsManagementConnected && enforceCanonicalLock;
 
   const otherTasks = tasks.filter((t) => t.id !== task.id);
@@ -143,19 +145,27 @@ export function TaskDrawer() {
   const canCreatorReviewNow =
     isAssignedCreator && task.productionStage === "creator_review";
 
+  const linked = isAdFlowLinkedTask(task);
+  const isAdFlowTask =
+    task.isAdflowTask === false
+      ? linked
+      : Boolean(task.isAdflowTask || linked || isStandardAdflow);
+
   const handleRevisionSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!revisionReasonInput.trim() && !revisionNotesInput.trim()) return;
     const reasonText =
       revisionReasonInput.trim() ||
-      (revisionTargetInput === "creator"
-        ? "Creator Changes Requested"
-        : "Editor Changes Requested");
+      (isAdFlowTask
+        ? revisionTargetInput === "creator"
+          ? "Creator Changes Requested"
+          : "Editor Changes Requested"
+        : "Revision Requested");
     await requestRevision(
       task.id,
       reasonText,
       revisionNotesInput.trim() || undefined,
-      revisionTargetInput
+      isAdFlowTask ? revisionTargetInput : undefined
     );
     setIsRevisionOpen(false);
     setRevisionReasonInput("");
@@ -169,9 +179,6 @@ export function TaskDrawer() {
       : [...current, depTaskId];
     updateTask(task.id, { blockedByTaskIds: updated });
   };
-
-  const linked = isAdFlowLinkedTask(task);
-  const isAdFlowTask = linked || isStandardAdflow;
 
   const executeAdFlowControl = async (
     action:
@@ -492,8 +499,8 @@ export function TaskDrawer() {
                         ))}
                       </div>
 
-                      {/* All 10 AdFlow Statuses mapped into the 5 main statuses */}
-                      {!linked && (
+                      {/* All 10 AdFlow Statuses mapped into the 5 main statuses (AdFlow tasks only) */}
+                      {isAdFlowTask && !linked && (
                         <div className="pt-1.5 border-t border-border/50 space-y-1">
                           <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground block">
                             AdFlow Pipeline Statuses (10 Stages)
@@ -1466,10 +1473,10 @@ export function TaskDrawer() {
                         <div
                           className={cn(
                             "grid grid-cols-1 gap-2",
-                            isManagerOrAdmin && "sm:grid-cols-2"
+                            isAdFlowTask && isManagerOrAdmin && "sm:grid-cols-2"
                           )}
                         >
-                          {isManagerOrAdmin && (
+                          {isAdFlowTask && isManagerOrAdmin && (
                             <div>
                               <label className="text-[11px] font-semibold text-muted-foreground block mb-1">
                                 Send Changes To
@@ -1508,7 +1515,7 @@ export function TaskDrawer() {
                         </div>
                         <div>
                           <Textarea
-                            placeholder="Provide specific timestamped instructions or fix details..."
+                            placeholder="Provide specific instructions or fix details..."
                             value={revisionNotesInput}
                             onChange={(e) => setRevisionNotesInput(e.target.value)}
                             rows={2}
@@ -1531,7 +1538,9 @@ export function TaskDrawer() {
                             size="sm"
                             className="text-xs h-7 text-warning"
                           >
-                            Send to {revisionTargetInput === "creator" ? "Creator" : "Editor"}
+                            {isAdFlowTask
+                              ? `Send to ${revisionTargetInput === "creator" ? "Creator" : "Editor"}`
+                              : "Send Revision"}
                           </Button>
                         </div>
                       </form>

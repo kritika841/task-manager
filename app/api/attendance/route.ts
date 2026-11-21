@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { saveLocalDb, type LocalDbSchema } from "@/lib/local-supabase-fallback";
 import { canManageWorkspace, resolveRequestActor } from "@/lib/auth-server";
-import { sendCheckoutReminderEmail } from "@/lib/email";
+import { sendCheckinReminderEmail, sendCheckoutReminderEmail } from "@/lib/email";
 import {
   getISTDateTimeParts,
   getProfilesAndDb,
+  isWithinOfficeHoursIST,
   parseProfileMetadata,
   recordAttendanceAction,
   syncAttendanceFromSupabase,
@@ -149,19 +150,146 @@ async function checkAndSend8PmReminders(
   }
 }
 
-// Server-side singleton interval (every 60s) to automatically send 8:00 PM IST checkout reminder emails
+let isChecking1201PmCheckinReminders = false;
+
+async function checkAndSend1201PmCheckinReminders(
+  db: LocalDbSchema,
+  profiles: Record<string, any>[],
+  records?: AttendanceRecord[],
+  force = false
+): Promise<{ remindedCount: number; remindedUsers: string[] }> {
+  if (isChecking1201PmCheckinReminders) {
+    return { remindedCount: 0, remindedUsers: [] };
+  }
+
+  isChecking1201PmCheckinReminders = true;
+  try {
+    const { dateStr: todayDateStr, hour, minute, weekday } = getISTDateTimeParts();
+    const totalMinutes = hour * 60 + minute;
+
+    // Monday to Saturday only (skip Sundays: weekday === 0), from 12:01 PM IST until 6:00 PM IST
+    if (!force && (weekday === 0 || totalMinutes < 12 * 60 + 1 || hour >= 18)) {
+      return { remindedCount: 0, remindedUsers: [] };
+    }
+
+    const effectiveRecords =
+      records || (await syncAttendanceFromSupabase(db, { startDate: todayDateStr, endDate: todayDateStr }));
+
+    if (!db.checkin_reminders_sent || typeof db.checkin_reminders_sent !== "object") {
+      db.checkin_reminders_sent = {};
+    }
+    const alreadySentIds = new Set<string>(
+      Array.isArray(db.checkin_reminders_sent[todayDateStr])
+        ? db.checkin_reminders_sent[todayDateStr].map(String)
+        : []
+    );
+
+    const checkedInUserIds = new Set<string>();
+    for (const r of effectiveRecords) {
+      if (r.date === todayDateStr && r.checkInTime) {
+        checkedInUserIds.add(String(r.userId));
+      }
+    }
+
+    const pendingCheckinProfiles = profiles.filter((p) => {
+      if (!p || p.active === false || p.deleted_at) return false;
+      const uid = String(p.id || "");
+      const email = String(p.email || "").trim().toLowerCase();
+      if (!uid || !email) return false;
+      if (checkedInUserIds.has(uid)) return false;
+      if (alreadySentIds.has(uid)) return false;
+      return true;
+    });
+
+    if (pendingCheckinProfiles.length === 0) {
+      return { remindedCount: 0, remindedUsers: [] };
+    }
+
+    if (!Array.isArray(db.notifications)) {
+      db.notifications = [];
+    }
+
+    const nowIso = new Date().toISOString();
+    const remindedUsers: string[] = [];
+    const emailJobs: Array<{ userName: string; userEmail: string; date: string }> = [];
+
+    for (const profile of pendingCheckinProfiles) {
+      const uid = String(profile.id);
+      const userEmail = String(profile.email || "").trim().toLowerCase();
+      const userName = String(profile.name || userEmail.split("@")[0] || "Team Member").trim();
+
+      alreadySentIds.add(uid);
+      db.notifications.push({
+        id: `notif-checkin-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        user_id: uid,
+        title: "⏰ Check-In Reminder (12:01 PM)",
+        body: "You haven't checked in for today yet. Office hours are 10:00 AM – 6:00 PM IST.",
+        message: "You haven't checked in for today yet. Office hours are 10:00 AM – 6:00 PM IST.",
+        type: "attendance_checkin",
+        task_id: null,
+        read: false,
+        read_at: null,
+        created_at: nowIso,
+      });
+
+      emailJobs.push({ userName, userEmail, date: todayDateStr });
+      remindedUsers.push(userName);
+    }
+
+    // Prune older reminder logs (keep last 14 days)
+    const prunedKeys = Object.keys(db.checkin_reminders_sent).sort().slice(-13);
+    const nextMap: Record<string, string[]> = {};
+    for (const k of prunedKeys) {
+      if (k !== todayDateStr) nextMap[k] = db.checkin_reminders_sent[k];
+    }
+    nextMap[todayDateStr] = Array.from(alreadySentIds);
+    db.checkin_reminders_sent = nextMap;
+
+    saveLocalDb(db);
+
+    await Promise.allSettled(
+      emailJobs.map((job) =>
+        sendCheckinReminderEmail({
+          userName: job.userName,
+          userEmail: job.userEmail,
+          date: job.date,
+        })
+      )
+    );
+
+    return { remindedCount: remindedUsers.length, remindedUsers };
+  } finally {
+    isChecking1201PmCheckinReminders = false;
+  }
+}
+
+// Server-side singleton interval (every 60s) to automatically send:
+// 1. 12:01 PM IST check-in reminder emails (Mon–Sat) for active employees who haven't checked in
+// 2. 8:00 PM IST checkout reminder emails
 const globalWithScheduler = globalThis as typeof globalThis & {
   __satmiAttendance8PmInterval?: ReturnType<typeof setInterval>;
 };
 
 if (typeof window === "undefined" && !globalWithScheduler.__satmiAttendance8PmInterval) {
   const timer = setInterval(() => {
-    const { hour } = getISTDateTimeParts();
-    if (hour >= 20) {
+    const { hour, minute, weekday } = getISTDateTimeParts();
+    const totalMinutes = hour * 60 + minute;
+    const shouldCheckCheckin =
+      weekday !== 0 && totalMinutes >= 12 * 60 + 1 && hour < 18;
+    const shouldCheckCheckout = hour >= 20;
+
+    if (shouldCheckCheckin || shouldCheckCheckout) {
       getProfilesAndDb()
-        .then(({ db, profiles }) => checkAndSend8PmReminders(db, profiles, false))
+        .then(async ({ db, profiles }) => {
+          if (shouldCheckCheckin) {
+            await checkAndSend1201PmCheckinReminders(db, profiles, undefined, false);
+          }
+          if (shouldCheckCheckout) {
+            await checkAndSend8PmReminders(db, profiles, false);
+          }
+        })
         .catch((err) => {
-          console.error("Background 8 PM attendance reminder check error:", err);
+          console.error("Background attendance reminder check error:", err);
         });
     }
   }, 60_000);
@@ -435,7 +563,9 @@ export async function GET(req: NextRequest) {
 
     const { db, profiles } = await getProfilesAndDb();
     const records = await syncAttendanceFromSupabase(db);
+    await checkAndSend1201PmCheckinReminders(db, profiles, records, false);
     await checkAndSend8PmReminders(db, profiles, false);
+    const officeHours = isWithinOfficeHoursIST();
     const requestedUserId =
       isAdminCaller && searchParams.get("userId")?.trim()
         ? searchParams.get("userId")!.trim()
@@ -485,6 +615,7 @@ export async function GET(req: NextRequest) {
           ok: true,
           date: targetDate,
           today: todayDateStr,
+          officeHours,
           myTodayRecord,
           sheet: [],
           summary: null,
@@ -502,6 +633,7 @@ export async function GET(req: NextRequest) {
           startDate,
           endDate,
           today: todayDateStr,
+          officeHours,
           myTodayRecord,
           ledger,
         },
@@ -522,6 +654,7 @@ export async function GET(req: NextRequest) {
         ok: true,
         date: targetDate,
         today: todayDateStr,
+        officeHours,
         myTodayRecord,
         sheet,
         summary: {
@@ -553,9 +686,9 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const action = String(body.action || "").trim().toLowerCase();
 
-    if (!["checkin", "checkout", "check_8pm_reminders"].includes(action)) {
+    if (!["checkin", "checkout", "check_8pm_reminders", "check_checkin_reminders"].includes(action)) {
       return NextResponse.json(
-        { error: "Invalid action. Expected checkin, checkout, or check_8pm_reminders." },
+        { error: "Invalid action. Expected checkin, checkout, check_8pm_reminders, or check_checkin_reminders." },
         { status: 400 }
       );
     }
@@ -570,6 +703,26 @@ export async function POST(req: NextRequest) {
         );
       }
       const result = await checkAndSend8PmReminders(db, profiles, Boolean(body.force));
+      return NextResponse.json({
+        ok: true,
+        remindedCount: result.remindedCount,
+        remindedUsers: result.remindedUsers,
+      });
+    }
+
+    if (action === "check_checkin_reminders") {
+      if (!canManageWorkspace(actor.role)) {
+        return NextResponse.json(
+          { error: "Forbidden: Only Administrators can trigger attendance reminders." },
+          { status: 403 }
+        );
+      }
+      const result = await checkAndSend1201PmCheckinReminders(
+        db,
+        profiles,
+        undefined,
+        Boolean(body.force)
+      );
       return NextResponse.json({
         ok: true,
         remindedCount: result.remindedCount,

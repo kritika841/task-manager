@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { Task, TaskStatus, User, RoleTemplate } from "@/lib/types";
 import { getStatusLabelForUser, isAdFlowLinkedTask, useTasks } from "@/lib/store";
-import { dateInTargetTimeZone } from "@/lib/supabase";
+import { dateInTargetTimeZone, isCanonicalAdflowTask } from "@/lib/supabase";
 import {
   ADFLOW_PRODUCTION_STAGES,
   getAdFlowStatusesByColumn,
@@ -288,6 +288,10 @@ export function TaskBoard() {
     const nextStatus = nextStatusMap[task.status];
     const prevStatus = prevStatusMap[task.status];
     const linked = isAdFlowLinkedTask(task);
+    const isAdFlowTask =
+      task.isAdflowTask === false
+        ? linked
+        : Boolean(task.isAdflowTask || linked || isCanonicalAdflowTask(task.title));
     const isBeingDragged = draggedTaskId === task.id;
     const isSelected = selectedTaskIds.includes(task.id);
     const { blocked, blockingTasks } = isTaskBlocked(task);
@@ -524,7 +528,7 @@ export function TaskBoard() {
 
               {cardRevisionTaskId === task.id && (
                 <div className="pt-1.5 border-t border-border/50 space-y-1.5 text-[10px]">
-                  {isManagerOrAdmin && (
+                  {isAdFlowTask && isManagerOrAdmin && (
                     <div className="grid grid-cols-2 gap-1">
                       <button
                         type="button"
@@ -554,7 +558,11 @@ export function TaskBoard() {
                   )}
                   <input
                     type="text"
-                    placeholder={`Note for ${revisionTarget === "creator" ? "Content Creator" : "Video Editor"}...`}
+                    placeholder={
+                      isAdFlowTask
+                        ? `Note for ${revisionTarget === "creator" ? "Content Creator" : "Video Editor"}...`
+                        : "Enter revision note..."
+                    }
                     value={cardRevisionNote}
                     onChange={(e) => setCardRevisionNote(e.target.value)}
                     onKeyDown={(e) => {
@@ -562,11 +570,13 @@ export function TaskBoard() {
                         e.preventDefault();
                         requestRevision(
                           task.id,
-                          revisionTarget === "creator"
-                            ? "Creator Changes Requested"
-                            : "Editor Changes Requested",
+                          isAdFlowTask
+                            ? revisionTarget === "creator"
+                              ? "Creator Changes Requested"
+                              : "Editor Changes Requested"
+                            : "Revision Requested",
                           cardRevisionNote.trim(),
-                          revisionTarget
+                          isAdFlowTask ? revisionTarget : undefined
                         );
                         setCardRevisionTaskId(null);
                         setCardRevisionNote("");
@@ -588,18 +598,22 @@ export function TaskBoard() {
                         const note = cardRevisionNote.trim() || "Changes requested from Task Manager";
                         requestRevision(
                           task.id,
-                          revisionTarget === "creator"
-                            ? "Creator Changes Requested"
-                            : "Editor Changes Requested",
+                          isAdFlowTask
+                            ? revisionTarget === "creator"
+                              ? "Creator Changes Requested"
+                              : "Editor Changes Requested"
+                            : "Revision Requested",
                           note,
-                          revisionTarget
+                          isAdFlowTask ? revisionTarget : undefined
                         );
                         setCardRevisionTaskId(null);
                         setCardRevisionNote("");
                       }}
                       className="px-2 py-0.5 rounded bg-amber-500 text-white font-semibold text-[10px] hover:bg-amber-600 cursor-pointer"
                     >
-                      Send to {revisionTarget === "creator" ? "Creator" : "Editor"}
+                      {isAdFlowTask
+                        ? `Send to ${revisionTarget === "creator" ? "Creator" : "Editor"}`
+                        : "Send Revision"}
                     </button>
                   </div>
                 </div>
@@ -833,41 +847,45 @@ export function TaskBoard() {
                   <option value="in_review">In Review</option>
                   <option value="completed">Done</option>
                 </optgroup>
-                <optgroup label="Backlog · AdFlow Statuses">
-                  {statusesByColumn.backlog.map((s) => (
-                    <option key={s.id} value={`adflow:${s.id}`}>
-                      {s.label}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="To Do · AdFlow Statuses">
-                  {statusesByColumn.todo.map((s) => (
-                    <option key={s.id} value={`adflow:${s.id}`}>
-                      {s.label}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="In Progress · AdFlow Statuses">
-                  {statusesByColumn.in_progress.map((s) => (
-                    <option key={s.id} value={`adflow:${s.id}`}>
-                      {s.label}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="In Review · AdFlow Statuses">
-                  {statusesByColumn.in_review.map((s) => (
-                    <option key={s.id} value={`adflow:${s.id}`}>
-                      {s.label}
-                    </option>
-                  ))}
-                </optgroup>
-                <optgroup label="Done · AdFlow Statuses">
-                  {statusesByColumn.completed.map((s) => (
-                    <option key={s.id} value={`adflow:${s.id}`}>
-                      {s.label}
-                    </option>
-                  ))}
-                </optgroup>
+                {isAdFlowTask && (
+                  <>
+                    <optgroup label="Backlog · AdFlow Statuses">
+                      {statusesByColumn.backlog.map((s) => (
+                        <option key={s.id} value={`adflow:${s.id}`}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="To Do · AdFlow Statuses">
+                      {statusesByColumn.todo.map((s) => (
+                        <option key={s.id} value={`adflow:${s.id}`}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="In Progress · AdFlow Statuses">
+                      {statusesByColumn.in_progress.map((s) => (
+                        <option key={s.id} value={`adflow:${s.id}`}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="In Review · AdFlow Statuses">
+                      {statusesByColumn.in_review.map((s) => (
+                        <option key={s.id} value={`adflow:${s.id}`}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Done · AdFlow Statuses">
+                      {statusesByColumn.completed.map((s) => (
+                        <option key={s.id} value={`adflow:${s.id}`}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </>
+                )}
               </select>
             </div>
 

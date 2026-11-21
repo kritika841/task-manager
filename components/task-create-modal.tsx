@@ -70,6 +70,7 @@ export function TaskCreateModal() {
   const [checklistItems, setChecklistItems] = useState<string[]>([]);
   const [newChecklistInput, setNewChecklistInput] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isAdflowTask, setIsAdflowTask] = useState(false);
   const [previewCreativeIds, setPreviewCreativeIds] = useState<string[]>([]);
 
   useEffect(() => {
@@ -82,6 +83,7 @@ export function TaskCreateModal() {
         setAssigneeId(users[0].id);
       }
       setStatus(createModalStatus || "todo");
+      setIsAdflowTask(false);
     }
   }, [
     isCreateModalOpen,
@@ -151,10 +153,7 @@ export function TaskCreateModal() {
   }, [selectedAssignee]);
 
   const unitsNum = Math.max(1, Number(targetQuantity) || 1);
-  const willGenerateCreativeIds = Boolean(
-    selectedAssignee?.role === "content_creator" ||
-      isCanonicalAdflowTask(title)
-  );
+  const willGenerateCreativeIds = Boolean(isAdflowTask);
 
   useEffect(() => {
     if (!isCreateModalOpen || !assigneeId || !willGenerateCreativeIds) {
@@ -277,6 +276,8 @@ export function TaskCreateModal() {
       parentColumnId: status,
       templateRole,
       customSubtasks,
+      isAdflowTask,
+      generateCreativeId: isAdflowTask,
     });
 
     setIsSubmitting(false);
@@ -291,6 +292,7 @@ export function TaskCreateModal() {
     setSubColumnId(undefined);
     setTemplateRole(undefined);
     setChecklistItems([]);
+    setIsAdflowTask(false);
     setIsCreateModalOpen(false);
   };
 
@@ -458,18 +460,44 @@ export function TaskCreateModal() {
               </div>
             </div>
 
-            {/* Row 2: Task Title */}
-            <div>
-              <label className="block text-sm font-semibold text-foreground mb-1.5">
-                Task Title <span className="text-destructive">*</span>
+            {/* Row 2: Task Title & Explicit AdFlow Task Checkbox */}
+            <div className="space-y-2.5">
+              <div>
+                <label className="block text-sm font-semibold text-foreground mb-1.5">
+                  Task Title <span className="text-destructive">*</span>
+                </label>
+                <Input
+                  required
+                  placeholder="What needs to get done?"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="text-sm h-10 bg-background"
+                />
+              </div>
+
+              <label className="flex items-center justify-between gap-3 rounded-xl border border-border bg-muted/25 px-3.5 py-2.5 cursor-pointer select-none hover:border-primary/40 transition">
+                <div className="flex items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    checked={isAdflowTask}
+                    onChange={(e) => setIsAdflowTask(e.target.checked)}
+                    className="size-4 rounded border-border text-primary focus:ring-primary cursor-pointer"
+                  />
+                  <div>
+                    <span className="text-xs font-semibold text-foreground block">
+                      This is an AdFlow creative task
+                    </span>
+                    <span className="text-[11px] text-muted-foreground block">
+                      Tick this only if this task needs a Creative ID and blank creative in AdFlow.
+                    </span>
+                  </div>
+                </div>
+                {isAdflowTask && (
+                  <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 shrink-0">
+                    AdFlow Sync
+                  </span>
+                )}
               </label>
-              <Input
-                required
-                placeholder="What needs to get done?"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="text-sm h-10 bg-background"
-              />
             </div>
 
             {/* Row 3: Units (with Multi-Task Split notice), Due Date, Due Time, Est. Hours */}
